@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -8,6 +9,13 @@
 #include "orchard_solver/solver_core/DynamicSystem.h"
 
 namespace orchard {
+
+struct BranchNodeState {
+    std::string label_prefix;
+    Vec3 position {};
+    double station {0.0};
+    std::array<int, 6> dofs {-1, -1, -1, -1, -1, -1};
+};
 
 class DOFManager {
 public:
@@ -23,11 +31,14 @@ private:
 
 struct AssembledModel {
     DynamicSystem system;
-    std::unordered_map<std::string, int> branch_dofs;
+    std::unordered_map<std::string, std::vector<BranchNodeState>> branch_nodes;
     std::unordered_map<std::string, int> fruit_dofs;
     int excitation_dof {-1};
     std::vector<std::string> observation_names;
     std::vector<int> observation_dofs;
+
+    [[nodiscard]] const std::vector<BranchNodeState>& requireBranchNodes(const std::string& branch_id) const;
+    [[nodiscard]] int requireBranchDof(const std::string& branch_id, int node_index, const std::string& component) const;
 };
 
 class StructuralAssembler {

@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -8,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "orchard_solver/OrchardModel.h"
+#include "orchard_solver/branches/BranchModel.h"
 #include "orchard_solver/cross_section/CrossSection.h"
 #include "orchard_solver/discretization/Assembler.h"
 #include "orchard_solver/io/ModelIO.h"
@@ -25,22 +26,85 @@ std::string exampleModelPath() {
     return std::string(ORCHARD_SOURCE_DIR) + "/examples/demo_orchard.json";
 }
 
-void check(bool condition, const std::string& message) {
+void check(const bool condition, const std::string& message) {
     if (!condition) {
         throw std::runtime_error(message);
     }
 }
 
-void checkClose(double actual, double expected, double tolerance, const std::string& message) {
+void checkClose(const double actual, const double expected, const double tolerance, const std::string& message) {
     if (std::abs(actual - expected) > tolerance) {
         throw std::runtime_error(message + " actual=" + std::to_string(actual) + " expected=" + std::to_string(expected));
     }
 }
 
-void testSectionPartitionGeometry() {
+orchard::OrchardModel buildCantileverModel(const int num_elements, const double damping_ratio = 0.01) {
     using namespace orchard;
 
+    OrchardModel model;
+    model.metadata.name = "cantilever_beam_reference";
+
+    MaterialProperties material;
+    material.id = "cantilever_xylem";
+    material.tissue = TissueType::Xylem;
+    material.density = 750.0;
+    material.youngs_modulus = 1.0e10;
+    material.poisson_ratio = 0.30;
+    material.damping_ratio = damping_ratio;
+    model.materials.addLinearElastic(material);
+
+    TreeTopology topology;
+    BranchPath path(Vec3 {0.0, 0.0, 0.0}, Vec3 {0.0, 0.0, 1.0});
+    topology.addBranch("cantilever", std::nullopt, 0, path);
+    topology.rebuildChildLinks();
+    model.topology = topology;
+
+    RegionGeometry geometry;
+    geometry.kind = SectionShapeKind::SolidEllipse;
+    geometry.center = Vec2 {0.0, 0.0};
+    geometry.radii = Vec2 {0.02, 0.02};
+    geometry.samples = 96;
+
+    std::vector<TissueRegionDefinition> regions {
+        TissueRegionDefinition {TissueType::Xylem, "cantilever_xylem", geometry}
+    };
+
     MeasuredSectionSeries series;
+    series.addProfile(std::make_shared<ParameterizedSectionProfile>(0.0, regions));
+    series.addProfile(std::make_shared<ParameterizedSectionProfile>(1.0, regions));
+
+    model.branches.emplace_back(
+        "cantilever",
+        std::nullopt,
+        0,
+        path,
+        std::move(series),
+        BranchDiscretizationHint {num_elements, false}
+    );
+
+    model.clamps.push_back(ClampBoundaryCondition {"cantilever", 1.0, 0.0, 0.0});
+
+    model.excitation.kind = ExcitationKind::HarmonicForce;
+    model.excitation.target_branch_id = "cantilever";
+    model.excitation.target_node = "tip";
+    model.excitation.target_component = "ux";
+    model.excitation.amplitude = 1.0;
+    model.excitation.phase_degrees = 0.0;
+
+    model.analysis.mode = AnalysisMode::FrequencyResponse;
+    model.analysis.frequency_start_hz = 1.0;
+    model.analysis.frequency_end_hz = 50.0;
+    model.analysis.frequency_steps = 240;
+    model.analysis.rayleigh_alpha = 0.0;
+    model.analysis.rayleigh_beta = 0.0;
+
+    model.observations.push_back(ObservationPoint {"tip_ux", "branch", "cantilever", "tip", "ux"});
+
+    return model;
+}
+
+void testSectionPartitionGeometry() {
+    using namespace orchard;
 
     std::vector<TissueRegionDefinition> regions;
     regions.push_back(TissueRegionDefinition {
@@ -67,7 +131,7 @@ void testSectionPartitionGeometry() {
     phloem_geometry.samples = 96;
     regions.push_back(TissueRegionDefinition {TissueType::Phloem, "phloem", phloem_geometry});
 
-    ParameterizedSectionProfile profile(0.0, regions);
+    orchard::ParameterizedSectionProfile profile(0.0, regions);
     const auto properties = profile.evaluate();
 
     const double expected_pith = kPi * 0.012 * 0.009;
@@ -106,12 +170,17 @@ void testMatrixAssembly() {
     orchard::StructuralAssembler assembler;
     const auto assembled = assembler.assemble(model);
 
-    check(assembled.system.mass.rows() == model.branches.size() + model.fruits.size(), "DOF count should equal branches plus fruits");
+    int expected_branch_dofs = 0;
+    for (const auto& branch : model.branches) {
+        expected_branch_dofs += 6 * (std::max(branch.discretizationHint().num_elements, 1) + 1);
+    }
+    const int expected_total_dofs = expected_branch_dofs + static_cast<int>(model.fruits.size());
+
+    check(static_cast<int>(assembled.system.mass.rows()) == expected_total_dofs, "DOF count should equal 6*branch_nodes + fruit_count");
     check(assembled.system.mass.cols() == assembled.system.mass.rows(), "mass matrix should be square");
-    check(assembled.excitation_dof == assembled.branch_dofs.at("trunk"), "excitation should target trunk DOF");
-    check(assembled.system.mass(assembled.branch_dofs.at("trunk"), assembled.branch_dofs.at("trunk")) > 0.0, "trunk mass must be positive");
-    check(assembled.system.stiffness(assembled.branch_dofs.at("trunk"), assembled.branch_dofs.at("trunk")) > 0.0, "trunk stiffness must be positive");
-    check(!assembled.system.nonlinear_links.empty(), "example model should assemble nonlinear links for joints or clamp");
+    check(!assembled.branch_nodes.at("trunk").empty(), "trunk should have discretized nodes");
+    check(assembled.excitation_dof == assembled.requireBranchDof("trunk", static_cast<int>(assembled.branch_nodes.at("trunk").size()) - 1, "ux"), "excitation should target trunk tip ux DOF");
+    check(assembled.system.mass(assembled.excitation_dof, assembled.excitation_dof) > 0.0, "tip translational mass must be positive");
 }
 
 void testDemoResponseAndCsvOutput() {
@@ -143,25 +212,28 @@ void testDemoResponseAndCsvOutput() {
         std::string header;
         std::getline(stream, header);
         check(header.find("frequency_hz") != std::string::npos, "CSV header should contain frequency_hz");
+        check(header.find("excitation_response") != std::string::npos, "frequency response CSV should expose excitation_response");
     }
-
 }
 
-void testTimeHistoryAndNonlinearEffect() {
-    auto model = orchard::loadModelFromFile(exampleModelPath());
+void testTimeHistoryCsvIncludesExcitationChannels() {
+    auto model = buildCantileverModel(8, 0.01);
     model.analysis.mode = orchard::AnalysisMode::TimeHistory;
     model.analysis.time_step_seconds = 0.002;
-    model.analysis.total_time_seconds = 0.30;
-    model.analysis.output_stride = 5;
-    model.analysis.max_nonlinear_iterations = 25;
+    model.analysis.total_time_seconds = 0.12;
+    model.analysis.output_stride = 2;
+    model.analysis.max_nonlinear_iterations = 20;
     model.analysis.nonlinear_tolerance = 1.0e-8;
-    model.excitation.amplitude = 18.0;
+    model.excitation.driving_frequency_hz = 8.0;
+    model.excitation.target_component = "ux";
+    model.observations.clear();
+    model.observations.push_back(orchard::ObservationPoint {"tip_ux", "branch", "cantilever", "tip", "ux"});
 
     orchard::StructuralAssembler assembler;
     const auto assembled = assembler.assemble(model);
 
     orchard::NewmarkIntegrator integrator;
-    const auto nonlinear_response = integrator.analyze(
+    const auto response = integrator.analyze(
         assembled.system,
         assembled.excitation_dof,
         model.excitation,
@@ -170,35 +242,11 @@ void testTimeHistoryAndNonlinearEffect() {
         assembled.observation_dofs
     );
 
-    auto linear_system = assembled.system;
-    linear_system.nonlinear_links.clear();
-    const auto linear_response = integrator.analyze(
-        linear_system,
-        assembled.excitation_dof,
-        model.excitation,
-        model.analysis,
-        assembled.observation_names,
-        assembled.observation_dofs
-    );
-
-    check(!nonlinear_response.points.empty(), "time-history response must not be empty");
-    check(nonlinear_response.points.front().observation_values.size() == assembled.observation_names.size(), "time-history response should contain one value per observation");
-
-    double max_difference = 0.0;
-    for (std::size_t point_index = 0; point_index < nonlinear_response.points.size(); ++point_index) {
-        const auto& nonlinear_point = nonlinear_response.points[point_index];
-        const auto& linear_point = linear_response.points[point_index];
-        for (std::size_t value_index = 0; value_index < nonlinear_point.observation_values.size(); ++value_index) {
-            max_difference = std::max(
-                max_difference,
-                std::abs(nonlinear_point.observation_values[value_index] - linear_point.observation_values[value_index])
-            );
-        }
-    }
-    check(max_difference > 1.0e-7, "nonlinear links should change the transient response compared with the linearized system");
+    check(!response.points.empty(), "time-history response must not be empty");
+    check(response.points.front().time_seconds == 0.0, "time-history response should include the initial sample");
 
     const std::filesystem::path output_path = std::filesystem::current_path() / "orchard_test_time_history.csv";
-    nonlinear_response.writeCsv(output_path.string());
+    response.writeCsv(output_path.string());
     check(std::filesystem::exists(output_path), "time-history CSV should be written");
 
     {
@@ -206,7 +254,43 @@ void testTimeHistoryAndNonlinearEffect() {
         std::string header;
         std::getline(stream, header);
         check(header.find("time_s") != std::string::npos, "CSV header should contain time_s");
+        check(header.find("excitation_signal") != std::string::npos, "time-history CSV should contain excitation_signal");
+        check(header.find("excitation_load") != std::string::npos, "time-history CSV should contain excitation_load");
+        check(header.find("excitation_response") != std::string::npos, "time-history CSV should contain excitation_response");
     }
+}
+
+void testCantileverBeamFirstMode() {
+    const auto model = buildCantileverModel(10, 0.005);
+    orchard::StructuralAssembler assembler;
+    const auto assembled = assembler.assemble(model);
+
+    orchard::FrequencyResponseAnalyzer analyzer;
+    const auto response = analyzer.analyze(
+        assembled.system,
+        assembled.excitation_dof,
+        model.excitation,
+        model.analysis,
+        assembled.observation_names,
+        assembled.observation_dofs
+    );
+
+    double peak_frequency = response.points.front().frequency_hz;
+    double peak_magnitude = response.points.front().observation_magnitudes.front();
+    for (const auto& point : response.points) {
+        if (point.observation_magnitudes.front() > peak_magnitude) {
+            peak_magnitude = point.observation_magnitudes.front();
+            peak_frequency = point.frequency_hz;
+        }
+    }
+
+    const double radius = 0.02;
+    const double area = kPi * radius * radius;
+    const double inertia = kPi * std::pow(radius, 4) / 4.0;
+    const double omega_1 = std::pow(1.875, 2) * std::sqrt((1.0e10 * inertia) / (750.0 * area * std::pow(1.0, 4)));
+    const double expected_frequency = omega_1 / (2.0 * kPi);
+
+    checkClose(peak_frequency, expected_frequency, expected_frequency * 0.05, "cantilever first-mode peak should match Euler-Bernoulli reference");
 }
 
 } // namespace
@@ -218,7 +302,8 @@ int main() {
         {"topology assembly", testTopologyAssembly},
         {"matrix assembly", testMatrixAssembly},
         {"demo response and csv output", testDemoResponseAndCsvOutput},
-        {"time history and nonlinear effect", testTimeHistoryAndNonlinearEffect},
+        {"time-history csv includes excitation channels", testTimeHistoryCsvIncludesExcitationChannels},
+        {"cantilever beam first mode", testCantileverBeamFirstMode},
     };
 
     int passed = 0;

@@ -1,5 +1,6 @@
 #include "orchard_solver/geometry_topology/TreeTopology.h"
 
+#include <algorithm>
 #include <functional>
 #include <queue>
 #include <stdexcept>
@@ -21,6 +22,14 @@ const Vec3& BranchPath::end() const noexcept {
 
 double BranchPath::length() const noexcept {
     return length_;
+}
+
+Vec3 BranchPath::pointAt(const double station) const noexcept {
+    return lerp(start_, end_, std::clamp(station, 0.0, 1.0));
+}
+
+Vec3 BranchPath::direction() const {
+    return normalize(end_ - start_);
 }
 
 void TreeTopology::addBranch(

@@ -10,20 +10,33 @@
 namespace orchard {
 
 struct BranchDiscretizationHint {
-    int refinement_level {1};
+    int num_elements {4};
     bool hotspot {false};
 };
 
-struct BranchEffectiveProperties {
+struct BranchAverageProperties {
     double length {0.0};
     double average_area {0.0};
     double average_ix {0.0};
     double average_iy {0.0};
+    double average_polar_moment {0.0};
     double average_mass_per_length {0.0};
-    double average_flexural_rigidity {0.0};
-    double equivalent_mass {0.0};
-    double equivalent_stiffness {0.0};
-    double equivalent_damping {0.0};
+    double average_youngs_modulus {0.0};
+    double average_shear_modulus {0.0};
+    double average_damping_ratio {0.0};
+};
+
+struct BranchSectionState {
+    double station {0.0};
+    double area {0.0};
+    double ix {0.0};
+    double iy {0.0};
+    double polar_moment {0.0};
+    double mass_per_length {0.0};
+    double effective_youngs_modulus {0.0};
+    double effective_shear_modulus {0.0};
+    double effective_poisson_ratio {0.3};
+    double damping_ratio {0.0};
 };
 
 class BranchComponent {
@@ -44,7 +57,8 @@ public:
     [[nodiscard]] const MeasuredSectionSeries& sectionSeries() const noexcept;
     [[nodiscard]] const BranchDiscretizationHint& discretizationHint() const noexcept;
 
-    [[nodiscard]] BranchEffectiveProperties computeEffectiveProperties(const MaterialLibrary& materials) const;
+    [[nodiscard]] BranchAverageProperties reportAverageProperties(const MaterialLibrary& materials) const;
+    [[nodiscard]] BranchSectionState evaluateSectionState(const MaterialLibrary& materials, double station) const;
 
 private:
     std::string id_;

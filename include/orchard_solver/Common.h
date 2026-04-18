@@ -17,11 +17,64 @@ struct Vec3 {
     double z {0.0};
 };
 
+inline Vec3 operator+(const Vec3& left, const Vec3& right) {
+    return Vec3 {left.x + right.x, left.y + right.y, left.z + right.z};
+}
+
+inline Vec3 operator-(const Vec3& left, const Vec3& right) {
+    return Vec3 {left.x - right.x, left.y - right.y, left.z - right.z};
+}
+
+inline Vec3 operator*(const Vec3& value, const double scale) {
+    return Vec3 {value.x * scale, value.y * scale, value.z * scale};
+}
+
+inline Vec3 operator*(const double scale, const Vec3& value) {
+    return value * scale;
+}
+
+inline Vec3 operator/(const Vec3& value, const double scale) {
+    return Vec3 {value.x / scale, value.y / scale, value.z / scale};
+}
+
 inline double distance(const Vec3& a, const Vec3& b) {
     const double dx = a.x - b.x;
     const double dy = a.y - b.y;
     const double dz = a.z - b.z;
     return std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
+}
+
+inline double dot(const Vec3& left, const Vec3& right) {
+    return (left.x * right.x) + (left.y * right.y) + (left.z * right.z);
+}
+
+inline Vec3 cross(const Vec3& left, const Vec3& right) {
+    return Vec3 {
+        (left.y * right.z) - (left.z * right.y),
+        (left.z * right.x) - (left.x * right.z),
+        (left.x * right.y) - (left.y * right.x)
+    };
+}
+
+inline double norm(const Vec3& value) {
+    return std::sqrt(dot(value, value));
+}
+
+inline Vec3 normalize(const Vec3& value) {
+    const double value_norm = norm(value);
+    if (value_norm <= 1.0e-12) {
+        throw std::runtime_error("Cannot normalize a near-zero vector");
+    }
+
+    return value / value_norm;
+}
+
+inline Vec3 lerp(const Vec3& left, const Vec3& right, const double alpha) {
+    return ((1.0 - alpha) * left) + (alpha * right);
+}
+
+inline double lerp(const double left, const double right, const double alpha) {
+    return ((1.0 - alpha) * left) + (alpha * right);
 }
 
 enum class TissueType {

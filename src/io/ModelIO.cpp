@@ -76,6 +76,17 @@ std::optional<std::string> parseOptionalString(const JsonValue::object_t& object
     return std::nullopt;
 }
 
+std::string parseNodeSelector(const JsonValue& value, const std::string& field_name) {
+    if (value.isString()) {
+        return value.asString();
+    }
+    if (value.isNumber()) {
+        return std::to_string(static_cast<int>(value.asNumber()));
+    }
+
+    throw std::runtime_error("JSON field must be a node selector string or integer: " + field_name);
+}
+
 ExcitationKind parseExcitationKind(const std::string& value) {
     if (value == "harmonic_force") {
         return ExcitationKind::HarmonicForce;
@@ -209,6 +220,9 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
         properties.tissue = tissueTypeFromString(requireString(requireMember(material_object, "tissue"), "materials[].tissue"));
         properties.density = requireNumber(requireMember(material_object, "density"), "materials[].density");
         properties.youngs_modulus = requireNumber(requireMember(material_object, "youngs_modulus"), "materials[].youngs_modulus");
+        if (const auto* poisson_ratio = optionalMember(material_object, "poisson_ratio")) {
+            properties.poisson_ratio = requireNumber(*poisson_ratio, "materials[].poisson_ratio");
+        }
         properties.damping_ratio = requireNumber(requireMember(material_object, "damping_ratio"), "materials[].damping_ratio");
         if (const auto* nonlinear_alpha = optionalMember(material_object, "nonlinear_alpha")) {
             properties.nonlinear_alpha = requireNumber(*nonlinear_alpha, "materials[].nonlinear_alpha");
@@ -252,8 +266,8 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
         BranchDiscretizationHint hint;
         if (const auto* discretization = optionalMember(branch_object, "discretization")) {
             const auto& discretization_object = discretization->asObject();
-            if (const auto* refinement_level = optionalMember(discretization_object, "refinement_level")) {
-                hint.refinement_level = requireInt(*refinement_level, "branches[].discretization.refinement_level");
+            if (const auto* num_elements = optionalMember(discretization_object, "num_elements")) {
+                hint.num_elements = requireInt(*num_elements, "branches[].discretization.num_elements");
             }
             if (const auto* hotspot = optionalMember(discretization_object, "hotspot")) {
                 if (!hotspot->isBool()) {
@@ -335,6 +349,12 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
         const auto& excitation_object = excitation_value.asObject();
         model.excitation.kind = parseExcitationKind(requireString(requireMember(excitation_object, "kind"), "excitation.kind"));
         model.excitation.target_branch_id = requireString(requireMember(excitation_object, "target_branch_id"), "excitation.target_branch_id");
+        if (const auto* target_node = optionalMember(excitation_object, "target_node")) {
+            model.excitation.target_node = parseNodeSelector(*target_node, "excitation.target_node");
+        }
+        if (const auto* target_component = optionalMember(excitation_object, "target_component")) {
+            model.excitation.target_component = requireString(*target_component, "excitation.target_component");
+        }
         model.excitation.amplitude = requireNumber(requireMember(excitation_object, "amplitude"), "excitation.amplitude");
         model.excitation.phase_degrees = requireNumber(requireMember(excitation_object, "phase_degrees"), "excitation.phase_degrees");
         if (const auto* driving_frequency_hz = optionalMember(excitation_object, "driving_frequency_hz")) {
@@ -366,6 +386,12 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
         if (const auto* nonlinear_tolerance = optionalMember(analysis_object, "nonlinear_tolerance")) {
             model.analysis.nonlinear_tolerance = requireNumber(*nonlinear_tolerance, "analysis.nonlinear_tolerance");
         }
+        if (const auto* rayleigh_alpha = optionalMember(analysis_object, "rayleigh_alpha")) {
+            model.analysis.rayleigh_alpha = requireNumber(*rayleigh_alpha, "analysis.rayleigh_alpha");
+        }
+        if (const auto* rayleigh_beta = optionalMember(analysis_object, "rayleigh_beta")) {
+            model.analysis.rayleigh_beta = requireNumber(*rayleigh_beta, "analysis.rayleigh_beta");
+        }
         if (const auto* output_csv = optionalMember(analysis_object, "output_csv")) {
             model.analysis.output_csv = requireString(*output_csv, "analysis.output_csv");
         }
@@ -378,6 +404,12 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
             observation.id = requireString(requireMember(observation_object, "id"), "observations[].id");
             observation.target_type = requireString(requireMember(observation_object, "target_type"), "observations[].target_type");
             observation.target_id = requireString(requireMember(observation_object, "target_id"), "observations[].target_id");
+            if (const auto* target_node = optionalMember(observation_object, "target_node")) {
+                observation.target_node = parseNodeSelector(*target_node, "observations[].target_node");
+            }
+            if (const auto* target_component = optionalMember(observation_object, "target_component")) {
+                observation.target_component = requireString(*target_component, "observations[].target_component");
+            }
             model.observations.push_back(std::move(observation));
         }
     }
@@ -403,6 +435,9 @@ void ModelValidator::validate(const OrchardModel& model) const {
         if (branch.sectionSeries().profiles().empty()) {
             throw std::runtime_error("Branch '" + branch.id() + "' has no section stations");
         }
+        if (branch.discretizationHint().num_elements < 1) {
+            throw std::runtime_error("Branch '" + branch.id() + "' must use at least one beam element");
+        }
 
         for (const auto& profile : branch.sectionSeries().profiles()) {
             const auto geometry = profile->evaluate();
@@ -416,6 +451,13 @@ void ModelValidator::validate(const OrchardModel& model) const {
 
     if (!model.topology.contains(model.excitation.target_branch_id)) {
         throw std::runtime_error("Excitation target branch not found: " + model.excitation.target_branch_id);
+    }
+    if (
+        model.excitation.target_component != "ux"
+        && model.excitation.target_component != "uy"
+        && model.excitation.target_component != "uz"
+    ) {
+        throw std::runtime_error("excitation.target_component must be one of ux, uy, uz");
     }
     if (model.analysis.frequency_steps < 1) {
         throw std::runtime_error("analysis.frequency_steps must be at least 1");
@@ -434,6 +476,9 @@ void ModelValidator::validate(const OrchardModel& model) const {
     }
     if (model.analysis.nonlinear_tolerance <= 0.0) {
         throw std::runtime_error("analysis.nonlinear_tolerance must be positive");
+    }
+    if (model.analysis.rayleigh_alpha < 0.0 || model.analysis.rayleigh_beta < 0.0) {
+        throw std::runtime_error("analysis.rayleigh_alpha and analysis.rayleigh_beta must be non-negative");
     }
 
     for (const auto& clamp : model.clamps) {
@@ -455,6 +500,13 @@ void ModelValidator::validate(const OrchardModel& model) const {
         if (observation.target_type == "branch") {
             if (!model.topology.contains(observation.target_id)) {
                 throw std::runtime_error("Observation references unknown branch: " + observation.target_id);
+            }
+            if (
+                observation.target_component != "ux"
+                && observation.target_component != "uy"
+                && observation.target_component != "uz"
+            ) {
+                throw std::runtime_error("Branch observation target_component must be one of ux, uy, uz");
             }
         } else if (observation.target_type == "fruit") {
             bool found = false;

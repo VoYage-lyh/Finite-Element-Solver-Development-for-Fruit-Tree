@@ -13,6 +13,11 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+struct TimeExcitationState {
+    double signal_value {0.0};
+    double equivalent_load {0.0};
+};
+
 double defaultDrivingFrequencyHz(const HarmonicExcitation& excitation, const AnalysisSettings& analysis) {
     if (excitation.driving_frequency_hz > 0.0) {
         return excitation.driving_frequency_hz;
@@ -42,7 +47,7 @@ std::complex<double> buildFrequencyExcitationLoad(
     throw std::runtime_error("Unsupported excitation kind");
 }
 
-double buildTimeExcitationLoad(
+TimeExcitationState buildTimeExcitationState(
     const DynamicSystem& system,
     const int excitation_dof,
     const HarmonicExcitation& excitation,
@@ -56,15 +61,23 @@ double buildTimeExcitationLoad(
     const double velocity = excitation.amplitude * omega * std::cos(angle);
     const double acceleration = -excitation.amplitude * omega * omega * std::sin(angle);
 
+    TimeExcitationState result;
     switch (excitation.kind) {
     case ExcitationKind::HarmonicForce:
-        return displacement;
+        result.signal_value = displacement;
+        result.equivalent_load = displacement;
+        return result;
     case ExcitationKind::HarmonicDisplacement:
-        return (system.stiffness(excitation_dof, excitation_dof) * displacement)
+        result.signal_value = displacement;
+        result.equivalent_load =
+            (system.stiffness(excitation_dof, excitation_dof) * displacement)
             + (system.damping(excitation_dof, excitation_dof) * velocity)
             + (system.mass(excitation_dof, excitation_dof) * acceleration);
+        return result;
     case ExcitationKind::HarmonicAcceleration:
-        return system.mass(excitation_dof, excitation_dof) * acceleration;
+        result.signal_value = acceleration;
+        result.equivalent_load = system.mass(excitation_dof, excitation_dof) * acceleration;
+        return result;
     }
 
     throw std::runtime_error("Unsupported excitation kind");
@@ -78,7 +91,8 @@ std::vector<double> buildLoadVector(
     const double time_seconds
 ) {
     std::vector<double> load(system.mass.rows(), 0.0);
-    load.at(static_cast<std::size_t>(excitation_dof)) = buildTimeExcitationLoad(system, excitation_dof, excitation, analysis, time_seconds);
+    load.at(static_cast<std::size_t>(excitation_dof)) =
+        buildTimeExcitationState(system, excitation_dof, excitation, analysis, time_seconds).equivalent_load;
     return load;
 }
 
@@ -222,6 +236,7 @@ void FrequencyResponseResult::writeCsv(const std::string& file_path) const {
     }
 
     stream << "frequency_hz";
+    stream << ",excitation_response";
     for (const auto& name : observation_names) {
         stream << ',' << name;
     }
@@ -230,6 +245,7 @@ void FrequencyResponseResult::writeCsv(const std::string& file_path) const {
     stream << std::setprecision(10);
     for (const auto& point : points) {
         stream << point.frequency_hz;
+        stream << ',' << point.excitation_response_magnitude;
         for (const auto value : point.observation_magnitudes) {
             stream << ',' << value;
         }
@@ -244,6 +260,7 @@ void TimeHistoryResult::writeCsv(const std::string& file_path) const {
     }
 
     stream << "time_s";
+    stream << ",excitation_signal,excitation_load,excitation_response";
     for (const auto& name : observation_names) {
         stream << ',' << name;
     }
@@ -252,6 +269,9 @@ void TimeHistoryResult::writeCsv(const std::string& file_path) const {
     stream << std::setprecision(10);
     for (const auto& point : points) {
         stream << point.time_seconds;
+        stream << ',' << point.excitation_signal_value;
+        stream << ',' << point.excitation_load_value;
+        stream << ',' << point.excitation_response_value;
         for (const auto value : point.observation_values) {
             stream << ',' << value;
         }
@@ -303,6 +323,7 @@ FrequencyResponseResult FrequencyResponseAnalyzer::analyze(
 
         FrequencyResponsePoint point;
         point.frequency_hz = frequency_hz;
+        point.excitation_response_magnitude = std::abs(response.at(static_cast<std::size_t>(excitation_dof)));
         point.observation_magnitudes.reserve(observation_dofs.size());
         for (const auto observation_dof : observation_dofs) {
             point.observation_magnitudes.push_back(std::abs(response.at(static_cast<std::size_t>(observation_dof))));
@@ -345,7 +366,16 @@ TimeHistoryResult NewmarkIntegrator::analyze(
     TimeHistoryResult result;
     result.observation_names = observation_names;
     result.points.reserve(static_cast<std::size_t>((total_steps / output_stride) + 1));
-    result.points.push_back(TimeHistoryPoint {0.0, std::vector<double>(observation_dofs.size(), 0.0)});
+    {
+        const auto initial_excitation = buildTimeExcitationState(system, excitation_dof, excitation, analysis, 0.0);
+        TimeHistoryPoint initial_point;
+        initial_point.time_seconds = 0.0;
+        initial_point.excitation_signal_value = initial_excitation.signal_value;
+        initial_point.excitation_load_value = initial_excitation.equivalent_load;
+        initial_point.excitation_response_value = 0.0;
+        initial_point.observation_values.assign(observation_dofs.size(), 0.0);
+        result.points.push_back(std::move(initial_point));
+    }
 
     for (int step = 1; step <= total_steps; ++step) {
         const double time_seconds = static_cast<double>(step) * dt;
@@ -416,8 +446,12 @@ TimeHistoryResult NewmarkIntegrator::analyze(
         }
 
         if (step % output_stride == 0 || step == total_steps) {
+            const auto excitation_state = buildTimeExcitationState(system, excitation_dof, excitation, analysis, time_seconds);
             TimeHistoryPoint point;
             point.time_seconds = time_seconds;
+            point.excitation_signal_value = excitation_state.signal_value;
+            point.excitation_load_value = excitation_state.equivalent_load;
+            point.excitation_response_value = displacement.at(static_cast<std::size_t>(excitation_dof));
             point.observation_values.reserve(observation_dofs.size());
             for (const auto observation_dof : observation_dofs) {
                 point.observation_values.push_back(displacement.at(static_cast<std::size_t>(observation_dof)));

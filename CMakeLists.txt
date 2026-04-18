@@ -21,6 +21,7 @@ add_library(
     src/materials/Materials.cpp
     src/branches/BranchModel.cpp
     src/joints_and_bifurcations/Joints.cpp
+    src/discretization/BeamElement.cpp
     src/discretization/Assembler.cpp
     src/solver_core/LinearAlgebra.cpp
     src/solver_core/DynamicSystem.cpp
@@ -66,4 +67,17 @@ if(ORCHARD_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/examples/demo_orchard.json
             ${CMAKE_CURRENT_BINARY_DIR}/demo_frequency_response.csv
     )
+
+    function(add_orchard_verification_test target_name source_file)
+        add_executable(${target_name} ${source_file})
+        target_link_libraries(${target_name} PRIVATE orchard_solver)
+        add_test(NAME ${target_name} COMMAND ${target_name})
+        set_tests_properties(${target_name} PROPERTIES LABELS "verification")
+    endfunction()
+
+    add_orchard_verification_test(verification_cantilever_first_mode tests/verification/case_cantilever_first_mode.cpp)
+    add_orchard_verification_test(verification_cantilever_modes tests/verification/case_cantilever_modes.cpp)
+    add_orchard_verification_test(verification_simple_beam_static tests/verification/case_simple_beam_static.cpp)
+    add_orchard_verification_test(verification_duffing_frequency_response tests/verification/case_duffing_frequency_response.cpp)
+    add_orchard_verification_test(verification_hinged_two_bar tests/verification/case_hinged_two_bar.cpp)
 endif()

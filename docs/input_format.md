@@ -23,6 +23,7 @@ Each material entry supports:
 - `model`: `linear`, `nonlinear`, or `orthotropic_placeholder`
 - `density`
 - `youngs_modulus`
+- `poisson_ratio`
 - `damping_ratio`
 - `nonlinear_alpha` for the placeholder nonlinear elastic model
 
@@ -35,9 +36,11 @@ Each branch entry supports:
 - `level`
 - `start`: `[x, y, z]`
 - `end`: `[x, y, z]`
-- `discretization.refinement_level`
+- `discretization.num_elements`
 - `discretization.hotspot`
 - `stations`
+
+`num_elements` controls how many 2-node Euler-Bernoulli beam elements are used along the branch centerline.
 
 Each station entry supports:
 
@@ -99,7 +102,9 @@ Each clamp entry supports:
 - `support_damping`
 - `cubic_stiffness`
 
-`cubic_stiffness` activates a localized nonlinear clamp support term in time-history analysis.
+The current beam-based assembler treats a clamp as a penalty-enforced root constraint on all 6 DOFs of the branch root node.
+
+`cubic_stiffness` activates a localized nonlinear clamp support term on the root `ux` DOF in time-history analysis.
 
 ## Excitation
 
@@ -107,6 +112,8 @@ The current harmonic excitation entry supports:
 
 - `kind`: `harmonic_force`, `harmonic_displacement`, or `harmonic_acceleration`
 - `target_branch_id`
+- `target_node`: `root`, `tip`, or an integer node index
+- `target_component`: `ux`, `uy`, or `uz`
 - `amplitude`
 - `phase_degrees`
 - `driving_frequency_hz`
@@ -124,11 +131,27 @@ The current analysis entry supports:
 - `output_stride`
 - `max_nonlinear_iterations`
 - `nonlinear_tolerance`
+- `rayleigh_alpha`
+- `rayleigh_beta`
 - `output_csv`
 
-Frequency-response mode uses the linearized assembled operators.
+Frequency-response mode uses the linearized assembled operators of the Euler-Bernoulli beam model.
 
-Time-history mode uses Newmark average-acceleration integration with localized nonlinear joint/clamp links.
+Time-history mode uses Newmark average-acceleration integration with localized nonlinear links.
+
+Frequency-response CSV output starts with:
+
+- `frequency_hz`
+- `excitation_response`
+- one column per observation
+
+Time-history CSV output starts with:
+
+- `time_s`
+- `excitation_signal`
+- `excitation_load`
+- `excitation_response`
+- one column per observation
 
 ## Observations
 
@@ -137,3 +160,18 @@ Each observation entry supports:
 - `id`
 - `target_type`: `branch` or `fruit`
 - `target_id`
+- `target_node`: `root`, `tip`, or an integer node index for branch observations
+- `target_component`: `ux`, `uy`, or `uz` for branch observations
+
+## Visualization Scripts
+
+- `scripts/plot_frequency_response.py`: lightweight frequency-response plotting helper.
+- `scripts/visualize_analysis.py`: orchard geometry plus excitation/measurement visualization helper.
+
+`visualize_analysis.py` reads the model JSON together with the response CSV and highlights:
+
+- branch geometry,
+- fruit locations,
+- the excitation point,
+- measurement points,
+- time/frequency/spectrogram response panels for time-history results.

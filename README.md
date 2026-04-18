@@ -29,6 +29,7 @@ The guiding principle is:
 
 - Tree topology and branch hierarchy modeling.
 - Non-circular, axially varying branch cross-sections.
+- Euler-Bernoulli beam discretization with branch-wise multi-node DOFs.
 - Tissue-partitioned material modeling for xylem, pith, and phloem.
 - Fruit added-mass and attachment effects.
 - Clamp/excitation boundary conditions.
@@ -58,8 +59,9 @@ The guiding principle is:
 
 - CLI app: `apps/orchard_cli.cpp`
 - Demo model: `examples/demo_orchard.json`
-- Output helper: `scripts/plot_frequency_response.py`
-- Tests: section geometry, material loading, topology assembly, matrix assembly, frequency response, nonlinear time history
+- Time-history demo: `examples/demo_orchard_time_history.json`
+- Output helpers: `scripts/plot_frequency_response.py`, `scripts/visualize_analysis.py`
+- Tests: section geometry, material loading, topology assembly, beam-matrix assembly, demo frequency response, cantilever first mode
 
 ## Development phases
 
@@ -104,18 +106,56 @@ This repository now includes a runnable orchard-specific MVP:
 
 Current implemented solver features:
 
+- 3D Euler-Bernoulli beam assembly with 6 DOFs per branch node,
 - frequency-response analysis for scan-friendly linearized studies,
-- Newmark time-history analysis with localized joint/clamp nonlinear links,
-- polynomial joint nonlinearity and gap-ready joint interface,
+- Newmark time-history analysis with localized nonlinear-link support,
+- legacy polynomial joint and gap-law interfaces preserved for follow-up joint refactor work,
 - fruit mass-spring-damper attachment coupling,
-- CSV output for both frequency and time histories.
+- CSV output for both frequency and time histories, including excitation-point channels for visualization.
 
 Current limitation:
 
 - `CMakeLists.txt` is provided, but in the current local environment `cmake` is not available on `PATH`, so validation was performed with `g++` directly.
 - Frequency-response analysis currently uses the zero-amplitude linearized system; localized nonlinearities are fully active in time-history analysis.
+- After the beam-element upgrade, clamp cubic nonlinearity is active, but joint nonlinearity still needs a dedicated 6-DOF beam-joint mapping pass.
+- `scripts/visualize_analysis.py` uses `matplotlib`/`numpy` when available and falls back to standalone SVG generation otherwise. The fallback renderer is static rather than interactive, but it still shows the orchard geometry, excitation point, measurement points, and response panels.
+
+## Visualization
+
+Frequency-response workflow:
+
+```text
+orchard_cli examples/demo_orchard.json build/demo_frequency_response.csv
+python scripts/visualize_analysis.py examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
+```
+
+Time-history workflow with excitation/measurement time-frequency output:
+
+```text
+orchard_cli examples/demo_orchard_time_history.json build/demo_time_history.csv
+python scripts/visualize_analysis.py examples/demo_orchard_time_history.json build/demo_time_history.csv --output-prefix build/demo_time_history
+```
+
+The visualizer produces:
+
+- a geometry figure with branch layout, fruit locations, excitation point, and measurement points,
+- a frequency-response figure for frequency sweeps,
+- or a time-history/time-spectrum/spectrogram figure for transient runs.
+
+Time-history CSV files now include:
+
+- `excitation_signal`
+- `excitation_load`
+- `excitation_response`
+
+## Verification
+
+- Verification cases now live under `tests/verification/`.
+- Run `ctest -L verification` before merging any change that touches `solver_core`, `branches`, or `discretization`.
+- Current verification coverage includes cantilever modal frequencies, simply supported beam static deflection, Duffing hardening response, and a hinged two-bar spring-mass benchmark.
 
 ## Documentation
 
 - Design document: [docs/design.md](docs/design.md)
 - Input format reference: [docs/input_format.md](docs/input_format.md)
+- Verification suite: [docs/verification.md](docs/verification.md)

@@ -29,6 +29,7 @@ struct NonlinearLink {
 
 struct FrequencyResponsePoint {
     double frequency_hz {0.0};
+    double excitation_response_magnitude {0.0};
     std::vector<double> observation_magnitudes;
 };
 
@@ -41,6 +42,9 @@ struct FrequencyResponseResult {
 
 struct TimeHistoryPoint {
     double time_seconds {0.0};
+    double excitation_signal_value {0.0};
+    double excitation_load_value {0.0};
+    double excitation_response_value {0.0};
     std::vector<double> observation_values;
 };
 

@@ -3,5 +3,8 @@
   "frequency_start_hz": 2.0,
   "frequency_end_hz": 30.0,
   "frequency_steps": 40,
-  "notes": "Default fast-scan settings for orchard vibration studies. Override in model files when needed."
+  "time_step_seconds": 0.002,
+  "total_time_seconds": 1.0,
+  "output_stride": 2,
+  "notes": "Default orchard solver settings for both fast frequency scans and visualization-friendly time-history runs. Override in model files when needed."
 }

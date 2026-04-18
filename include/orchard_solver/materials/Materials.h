@@ -15,6 +15,7 @@ struct MaterialProperties {
     TissueType tissue {TissueType::Xylem};
     double density {0.0};
     double youngs_modulus {0.0};
+    double poisson_ratio {0.3};
     double damping_ratio {0.0};
     double nonlinear_alpha {0.0};
     bool orthotropic_enabled {false};

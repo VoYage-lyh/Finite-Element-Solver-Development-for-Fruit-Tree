@@ -1,10 +1,108 @@
 #include "orchard_solver/discretization/Assembler.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
+#include "orchard_solver/discretization/BeamElement.h"
+
 namespace orchard {
+
+namespace {
+
+constexpr std::array<const char*, 6> kComponentLabels = {"ux", "uy", "uz", "rx", "ry", "rz"};
+constexpr double kConstraintPenalty = 1.0e10;
+
+int translationalComponentIndex(const std::string& component) {
+    if (component == "ux") {
+        return 0;
+    }
+    if (component == "uy") {
+        return 1;
+    }
+    if (component == "uz") {
+        return 2;
+    }
+
+    throw std::runtime_error("Unsupported translational component: " + component);
+}
+
+int resolveNodeIndex(const std::vector<BranchNodeState>& nodes, const std::string& target_node) {
+    if (nodes.empty()) {
+        throw std::runtime_error("Branch has no discretized nodes");
+    }
+
+    if (target_node == "root") {
+        return 0;
+    }
+    if (target_node == "tip") {
+        return static_cast<int>(nodes.size()) - 1;
+    }
+
+    const int index = std::stoi(target_node);
+    if (index < 0 || index >= static_cast<int>(nodes.size())) {
+        throw std::runtime_error("Requested node index is out of range: " + target_node);
+    }
+
+    return index;
+}
+
+void scatterElementMatrix(
+    DenseMatrix& global,
+    const Matrix12& local,
+    const std::array<int, 12>& dofs
+) {
+    for (std::size_t row = 0; row < 12; ++row) {
+        for (std::size_t col = 0; col < 12; ++col) {
+            global.add(
+                static_cast<std::size_t>(dofs[row]),
+                static_cast<std::size_t>(dofs[col]),
+                local[row][col]
+            );
+        }
+    }
+}
+
+void addPairPenalty(DenseMatrix& matrix, const int first_dof, const int second_dof, const double penalty) {
+    matrix.add(first_dof, first_dof, penalty);
+    matrix.add(first_dof, second_dof, -penalty);
+    matrix.add(second_dof, first_dof, -penalty);
+    matrix.add(second_dof, second_dof, penalty);
+}
+
+double computeFallbackDampingRatio(const OrchardModel& model) {
+    double weighted_sum = 0.0;
+    double weight = 0.0;
+
+    for (const auto& branch : model.branches) {
+        const auto properties = branch.reportAverageProperties(model.materials);
+        const double branch_mass = properties.average_mass_per_length * std::max(properties.length, 1.0e-6);
+        weighted_sum += branch_mass * properties.average_damping_ratio;
+        weight += branch_mass;
+    }
+
+    return weight > 0.0 ? weighted_sum / weight : 0.0;
+}
+
+void applyRayleighDamping(const OrchardModel& model, DynamicSystem& system) {
+    double alpha = model.analysis.rayleigh_alpha;
+    double beta = model.analysis.rayleigh_beta;
+
+    if (std::abs(alpha) < 1.0e-14 && std::abs(beta) < 1.0e-14) {
+        const double zeta = computeFallbackDampingRatio(model);
+        const double omega_ref = 2.0 * 3.14159265358979323846 * std::max(model.analysis.frequency_start_hz, 0.1);
+        beta = omega_ref > 0.0 ? (2.0 * zeta / omega_ref) : 0.0;
+    }
+
+    for (std::size_t row = 0; row < system.mass.rows(); ++row) {
+        for (std::size_t col = 0; col < system.mass.cols(); ++col) {
+            system.damping.add(row, col, (alpha * system.mass(row, col)) + (beta * system.stiffness(row, col)));
+        }
+    }
+}
+
+} // namespace
 
 int DOFManager::registerLabel(const std::string& label) {
     const auto it = label_to_index_.find(label);
@@ -35,12 +133,47 @@ const std::vector<std::string>& DOFManager::labels() const noexcept {
     return labels_;
 }
 
+const std::vector<BranchNodeState>& AssembledModel::requireBranchNodes(const std::string& branch_id) const {
+    const auto it = branch_nodes.find(branch_id);
+    if (it == branch_nodes.end()) {
+        throw std::runtime_error("Unknown branch node set: " + branch_id);
+    }
+
+    return it->second;
+}
+
+int AssembledModel::requireBranchDof(const std::string& branch_id, const int node_index, const std::string& component) const {
+    const auto& nodes = requireBranchNodes(branch_id);
+    if (node_index < 0 || node_index >= static_cast<int>(nodes.size())) {
+        throw std::runtime_error("Branch node index out of range for branch: " + branch_id);
+    }
+
+    const auto component_index = translationalComponentIndex(component);
+    return nodes[static_cast<std::size_t>(node_index)].dofs[static_cast<std::size_t>(component_index)];
+}
+
 AssembledModel StructuralAssembler::assemble(const OrchardModel& model) const {
     DOFManager dof_manager;
     AssembledModel assembled;
 
     for (const auto& branch : model.branches) {
-        assembled.branch_dofs[branch.id()] = dof_manager.registerLabel("branch:" + branch.id());
+        const int num_elements = std::max(branch.discretizationHint().num_elements, 1);
+        auto& nodes = assembled.branch_nodes[branch.id()];
+        nodes.reserve(static_cast<std::size_t>(num_elements + 1));
+
+        for (int node_index = 0; node_index <= num_elements; ++node_index) {
+            const double station = static_cast<double>(node_index) / static_cast<double>(num_elements);
+            BranchNodeState node;
+            node.label_prefix = "branch:" + branch.id() + ":n" + std::to_string(node_index);
+            node.position = branch.path().pointAt(station);
+            node.station = station;
+
+            for (std::size_t component = 0; component < kComponentLabels.size(); ++component) {
+                node.dofs[component] = dof_manager.registerLabel(node.label_prefix + ":" + kComponentLabels[component]);
+            }
+
+            nodes.push_back(node);
+        }
     }
 
     for (const auto& fruit : model.fruits) {
@@ -53,111 +186,155 @@ AssembledModel StructuralAssembler::assemble(const OrchardModel& model) const {
     assembled.system.stiffness = DenseMatrix(dof_count, dof_count);
     assembled.system.dof_labels = dof_manager.labels();
 
-    std::unordered_map<std::string, BranchEffectiveProperties> branch_effective_properties;
     for (const auto& branch : model.branches) {
-        branch_effective_properties[branch.id()] = branch.computeEffectiveProperties(model.materials);
+        const auto& nodes = assembled.branch_nodes.at(branch.id());
+
+        for (std::size_t element_index = 0; element_index + 1 < nodes.size(); ++element_index) {
+            const auto& first = nodes[element_index];
+            const auto& second = nodes[element_index + 1];
+
+            const auto first_state = branch.evaluateSectionState(model.materials, first.station);
+            const auto second_state = branch.evaluateSectionState(model.materials, second.station);
+
+            const double area = 0.5 * (first_state.area + second_state.area);
+            const double iy = 0.5 * (first_state.ix + second_state.ix);
+            const double iz = 0.5 * (first_state.iy + second_state.iy);
+            const double polar_moment = std::max(0.5 * (first_state.polar_moment + second_state.polar_moment), iy + iz);
+            const double mass_per_length = 0.5 * (first_state.mass_per_length + second_state.mass_per_length);
+            const double length = distance(first.position, second.position);
+
+            BeamElementProperties properties;
+            properties.youngs_modulus = 0.5 * (first_state.effective_youngs_modulus + second_state.effective_youngs_modulus);
+            properties.shear_modulus = 0.5 * (first_state.effective_shear_modulus + second_state.effective_shear_modulus);
+            properties.area = area;
+            properties.iy = iy;
+            properties.iz = iz;
+            properties.torsion_constant = polar_moment; // TODO: replace Ix + Iy approximation with orchard-specific torsion estimate.
+            properties.density = area > 0.0 ? mass_per_length / area : 0.0;
+            properties.length = length;
+
+            const auto local_stiffness = BeamElement::buildLocalStiffnessMatrix(properties);
+            const auto local_mass = BeamElement::buildLocalMassMatrix(properties);
+            const auto transformation = BeamElement::buildTransformationMatrix(first.position, second.position);
+            const auto global_stiffness = BeamElement::transformToGlobal(local_stiffness, transformation);
+            const auto global_mass = BeamElement::transformToGlobal(local_mass, transformation);
+
+            std::array<int, 12> element_dofs {};
+            for (std::size_t component = 0; component < 6; ++component) {
+                element_dofs[component] = first.dofs[component];
+                element_dofs[component + 6] = second.dofs[component];
+            }
+
+            scatterElementMatrix(assembled.system.stiffness, global_stiffness, element_dofs);
+            scatterElementMatrix(assembled.system.mass, global_mass, element_dofs);
+        }
     }
 
     for (const auto& branch : model.branches) {
-        const int dof = assembled.branch_dofs.at(branch.id());
-        const auto& effective = branch_effective_properties.at(branch.id());
-        assembled.system.mass.add(dof, dof, std::max(effective.equivalent_mass, 1.0e-9));
+        if (!branch.parentBranchId().has_value()) {
+            continue;
+        }
 
-        const double base_branch_stiffness = std::max(effective.equivalent_stiffness, 1.0);
-        double branch_stiffness = base_branch_stiffness;
-        double branch_damping = std::max(effective.equivalent_damping, 1.0e-6);
+        const auto& child_nodes = assembled.requireBranchNodes(branch.id());
+        const auto& parent_nodes = assembled.requireBranchNodes(*branch.parentBranchId());
+        const auto& child_root = child_nodes.front();
 
-        if (branch.parentBranchId().has_value()) {
-            const int parent_dof = assembled.branch_dofs.at(*branch.parentBranchId());
-            if (const auto* joint = model.findJointForChild(branch.id())) {
-                const auto parameters = joint->parameters();
-                const double scale = std::max(joint->linearizedScale(), 0.05);
-                branch_stiffness *= scale;
-                branch_damping *= scale;
-
-                if (parameters.kind == JointLawKind::Cubic && std::abs(parameters.cubic_scale) > 0.0) {
-                    assembled.system.nonlinear_links.push_back(NonlinearLink {
-                        "joint:" + joint->id,
-                        dof,
-                        parent_dof,
-                        NonlinearLinkKind::CubicSpring,
-                        branch_stiffness,
-                        base_branch_stiffness * joint->linear_stiffness_scale * parameters.cubic_scale,
-                        0.0,
-                        0.0
-                    });
-                } else if (parameters.kind == JointLawKind::Gap) {
-                    assembled.system.nonlinear_links.push_back(NonlinearLink {
-                        "joint:" + joint->id,
-                        dof,
-                        parent_dof,
-                        NonlinearLinkKind::GapSpring,
-                        branch_stiffness,
-                        0.0,
-                        base_branch_stiffness * joint->linear_stiffness_scale * parameters.open_scale,
-                        parameters.gap_threshold
-                    });
-                }
+        std::size_t nearest_parent_index = 0;
+        double best_distance = distance(child_root.position, parent_nodes.front().position);
+        for (std::size_t parent_index = 1; parent_index < parent_nodes.size(); ++parent_index) {
+            const double candidate = distance(child_root.position, parent_nodes[parent_index].position);
+            if (candidate < best_distance) {
+                best_distance = candidate;
+                nearest_parent_index = parent_index;
             }
+        }
 
-            assembled.system.stiffness.add(dof, dof, branch_stiffness);
-            assembled.system.stiffness.add(dof, parent_dof, -branch_stiffness);
-            assembled.system.stiffness.add(parent_dof, dof, -branch_stiffness);
-            assembled.system.stiffness.add(parent_dof, parent_dof, branch_stiffness);
+        double penalty = kConstraintPenalty;
+        if (const auto* joint = model.findJointForChild(branch.id())) {
+            penalty *= std::max(joint->linear_stiffness_scale, 1.0e-6);
+        }
 
-            assembled.system.damping.add(dof, dof, branch_damping);
-            assembled.system.damping.add(dof, parent_dof, -branch_damping);
-            assembled.system.damping.add(parent_dof, dof, -branch_damping);
-            assembled.system.damping.add(parent_dof, parent_dof, branch_damping);
-        } else {
-            const auto* clamp = model.findClamp(branch.id());
-            const double clamp_stiffness = clamp ? clamp->support_stiffness : 0.0;
-            const double clamp_damping = clamp ? clamp->support_damping : 0.0;
+        for (std::size_t component = 0; component < 6; ++component) {
+            addPairPenalty(
+                assembled.system.stiffness,
+                child_root.dofs[component],
+                parent_nodes[nearest_parent_index].dofs[component],
+                penalty
+            );
+        }
+    }
 
-            assembled.system.stiffness.add(dof, dof, branch_stiffness + clamp_stiffness);
-            assembled.system.damping.add(dof, dof, branch_damping + clamp_damping);
+    for (const auto& clamp : model.clamps) {
+        const auto& root_nodes = assembled.requireBranchNodes(clamp.branch_id);
+        const auto& root = root_nodes.front();
 
-            if (clamp && std::abs(clamp->cubic_stiffness) > 0.0) {
-                assembled.system.nonlinear_links.push_back(NonlinearLink {
-                    "clamp:" + branch.id(),
-                    dof,
-                    -1,
-                    NonlinearLinkKind::CubicSpring,
-                    clamp_stiffness,
-                    clamp->cubic_stiffness,
-                    0.0,
-                    0.0
-                });
-            }
+        for (const auto dof : root.dofs) {
+            assembled.system.stiffness.add(dof, dof, kConstraintPenalty);
+        }
+
+        if (std::abs(clamp.cubic_stiffness) > 0.0) {
+            assembled.system.nonlinear_links.push_back(NonlinearLink {
+                "clamp:" + clamp.branch_id,
+                root.dofs[0],
+                -1,
+                NonlinearLinkKind::CubicSpring,
+                kConstraintPenalty,
+                clamp.cubic_stiffness,
+                0.0,
+                0.0
+            });
         }
     }
 
     for (const auto& fruit : model.fruits) {
         const int fruit_dof = assembled.fruit_dofs.at(fruit.id);
-        const int branch_dof = assembled.branch_dofs.at(fruit.branch_id);
+        const auto& branch_nodes = assembled.requireBranchNodes(fruit.branch_id);
 
+        std::size_t nearest_branch_node = 0;
+        double best_station_distance = std::abs(branch_nodes.front().station - fruit.location_s);
+        for (std::size_t node_index = 1; node_index < branch_nodes.size(); ++node_index) {
+            const double candidate = std::abs(branch_nodes[node_index].station - fruit.location_s);
+            if (candidate < best_station_distance) {
+                best_station_distance = candidate;
+                nearest_branch_node = node_index;
+            }
+        }
+
+        const int branch_dof = branch_nodes[nearest_branch_node].dofs[0];
         assembled.system.mass.add(fruit_dof, fruit_dof, std::max(fruit.mass, 1.0e-9));
 
         const double stiffness = std::max(fruit.stiffness, 1.0e-6);
-        const double damping = std::max(fruit.damping, 1.0e-8);
-
         assembled.system.stiffness.add(fruit_dof, fruit_dof, stiffness);
         assembled.system.stiffness.add(fruit_dof, branch_dof, -stiffness);
         assembled.system.stiffness.add(branch_dof, fruit_dof, -stiffness);
         assembled.system.stiffness.add(branch_dof, branch_dof, stiffness);
 
+        const double damping = std::max(fruit.damping, 0.0);
         assembled.system.damping.add(fruit_dof, fruit_dof, damping);
         assembled.system.damping.add(fruit_dof, branch_dof, -damping);
         assembled.system.damping.add(branch_dof, fruit_dof, -damping);
         assembled.system.damping.add(branch_dof, branch_dof, damping);
     }
 
-    assembled.excitation_dof = assembled.branch_dofs.at(model.excitation.target_branch_id);
+    applyRayleighDamping(model, assembled.system);
+
+    assembled.excitation_dof = assembled.requireBranchDof(
+        model.excitation.target_branch_id,
+        resolveNodeIndex(assembled.requireBranchNodes(model.excitation.target_branch_id), model.excitation.target_node),
+        model.excitation.target_component
+    );
 
     for (const auto& observation : model.observations) {
         if (observation.target_type == "branch") {
+            const auto& nodes = assembled.requireBranchNodes(observation.target_id);
             assembled.observation_names.push_back(observation.id);
-            assembled.observation_dofs.push_back(assembled.branch_dofs.at(observation.target_id));
+            assembled.observation_dofs.push_back(
+                assembled.requireBranchDof(
+                    observation.target_id,
+                    resolveNodeIndex(nodes, observation.target_node),
+                    observation.target_component
+                )
+            );
         } else if (observation.target_type == "fruit") {
             assembled.observation_names.push_back(observation.id);
             assembled.observation_dofs.push_back(assembled.fruit_dofs.at(observation.target_id));

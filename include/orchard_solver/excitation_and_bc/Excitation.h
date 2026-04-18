@@ -25,6 +25,8 @@ struct ClampBoundaryCondition {
 struct HarmonicExcitation {
     ExcitationKind kind {ExcitationKind::HarmonicForce};
     std::string target_branch_id;
+    std::string target_node {"tip"};
+    std::string target_component {"ux"};
     double amplitude {0.0};
     double phase_degrees {0.0};
     double driving_frequency_hz {0.0};
@@ -40,6 +42,8 @@ struct AnalysisSettings {
     int output_stride {1};
     int max_nonlinear_iterations {12};
     double nonlinear_tolerance {1.0e-8};
+    double rayleigh_alpha {0.0};
+    double rayleigh_beta {1.0e-4};
     std::string output_csv {"frequency_response.csv"};
 };
 
