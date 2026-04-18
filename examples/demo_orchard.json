@@ -1,0 +1,573 @@
+{
+  "metadata": {
+    "name": "three_level_demo_tree",
+    "cultivar": "research_orchard_case"
+  },
+  "materials": [
+    {
+      "id": "xylem_default",
+      "tissue": "xylem",
+      "model": "linear",
+      "density": 720.0,
+      "youngs_modulus": 1.45e9,
+      "damping_ratio": 0.035
+    },
+    {
+      "id": "pith_default",
+      "tissue": "pith",
+      "model": "linear",
+      "density": 240.0,
+      "youngs_modulus": 2.60e8,
+      "damping_ratio": 0.060
+    },
+    {
+      "id": "phloem_default",
+      "tissue": "phloem",
+      "model": "linear",
+      "density": 920.0,
+      "youngs_modulus": 6.50e8,
+      "damping_ratio": 0.055
+    }
+  ],
+  "branches": [
+    {
+      "id": "trunk",
+      "parent_branch_id": null,
+      "level": 0,
+      "start": [0.0, 0.0, 0.0],
+      "end": [0.0, 0.0, 1.40],
+      "discretization": {
+        "refinement_level": 2,
+        "hotspot": true
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "profile_type": "parameterized",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "solid_ellipse",
+                "center": [0.004, -0.003],
+                "radii": [0.016, 0.013],
+                "samples": 96
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.049, 0.036],
+                "inner_center": [0.004, -0.003],
+                "inner_radii": [0.016, 0.013],
+                "samples": 96
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.055, 0.041],
+                "inner_center": [0.0, 0.0],
+                "inner_radii": [0.049, 0.036],
+                "samples": 96
+              }
+            }
+          ]
+        },
+        {
+          "s": 1.0,
+          "profile_type": "parameterized",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "solid_ellipse",
+                "center": [0.003, -0.002],
+                "radii": [0.012, 0.010],
+                "samples": 96
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.040, 0.029],
+                "inner_center": [0.003, -0.002],
+                "inner_radii": [0.012, 0.010],
+                "samples": 96
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.045, 0.033],
+                "inner_center": [0.0, 0.0],
+                "inner_radii": [0.040, 0.029],
+                "samples": 96
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "primary_left",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [0.0, 0.0, 1.10],
+      "end": [-0.62, 0.18, 1.68],
+      "discretization": {
+        "refinement_level": 2,
+        "hotspot": true
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "profile_type": "parameterized",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "solid_ellipse",
+                "center": [0.002, -0.001],
+                "radii": [0.009, 0.007],
+                "samples": 72
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.026, 0.018],
+                "inner_center": [0.002, -0.001],
+                "inner_radii": [0.009, 0.007],
+                "samples": 72
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.030, 0.021],
+                "inner_center": [0.0, 0.0],
+                "inner_radii": [0.026, 0.018],
+                "samples": 72
+              }
+            }
+          ]
+        },
+        {
+          "s": 1.0,
+          "profile_type": "parameterized",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "solid_ellipse",
+                "center": [0.001, -0.001],
+                "radii": [0.006, 0.0045],
+                "samples": 72
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.018, 0.012],
+                "inner_center": [0.001, -0.001],
+                "inner_radii": [0.006, 0.0045],
+                "samples": 72
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.021, 0.014],
+                "inner_center": [0.0, 0.0],
+                "inner_radii": [0.018, 0.012],
+                "samples": 72
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "primary_right",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [0.0, 0.0, 1.05],
+      "end": [0.58, -0.12, 1.60],
+      "discretization": {
+        "refinement_level": 1,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "profile_type": "contour",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "polygon",
+                "outer_points": [
+                  [0.009, 0.000],
+                  [0.004, 0.007],
+                  [-0.005, 0.006],
+                  [-0.008, -0.001],
+                  [-0.003, -0.007],
+                  [0.006, -0.006]
+                ]
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "polygon",
+                "outer_points": [
+                  [0.025, 0.001],
+                  [0.017, 0.016],
+                  [0.002, 0.020],
+                  [-0.016, 0.014],
+                  [-0.023, 0.001],
+                  [-0.017, -0.013],
+                  [0.000, -0.019],
+                  [0.019, -0.014]
+                ],
+                "inner_points": [
+                  [0.009, 0.000],
+                  [0.004, 0.007],
+                  [-0.005, 0.006],
+                  [-0.008, -0.001],
+                  [-0.003, -0.007],
+                  [0.006, -0.006]
+                ]
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "polygon",
+                "outer_points": [
+                  [0.029, 0.002],
+                  [0.020, 0.019],
+                  [0.003, 0.024],
+                  [-0.020, 0.017],
+                  [-0.028, 0.002],
+                  [-0.021, -0.016],
+                  [0.001, -0.023],
+                  [0.022, -0.017]
+                ],
+                "inner_points": [
+                  [0.025, 0.001],
+                  [0.017, 0.016],
+                  [0.002, 0.020],
+                  [-0.016, 0.014],
+                  [-0.023, 0.001],
+                  [-0.017, -0.013],
+                  [0.000, -0.019],
+                  [0.019, -0.014]
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "s": 1.0,
+          "profile_type": "contour",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "polygon",
+                "outer_points": [
+                  [0.006, 0.000],
+                  [0.003, 0.005],
+                  [-0.003, 0.004],
+                  [-0.006, 0.000],
+                  [-0.002, -0.005],
+                  [0.004, -0.004]
+                ]
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "polygon",
+                "outer_points": [
+                  [0.017, 0.001],
+                  [0.011, 0.011],
+                  [0.001, 0.014],
+                  [-0.011, 0.010],
+                  [-0.016, 0.001],
+                  [-0.012, -0.010],
+                  [0.000, -0.013],
+                  [0.013, -0.010]
+                ],
+                "inner_points": [
+                  [0.006, 0.000],
+                  [0.003, 0.005],
+                  [-0.003, 0.004],
+                  [-0.006, 0.000],
+                  [-0.002, -0.005],
+                  [0.004, -0.004]
+                ]
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "polygon",
+                "outer_points": [
+                  [0.020, 0.001],
+                  [0.013, 0.013],
+                  [0.002, 0.017],
+                  [-0.013, 0.012],
+                  [-0.019, 0.001],
+                  [-0.014, -0.012],
+                  [0.000, -0.016],
+                  [0.015, -0.012]
+                ],
+                "inner_points": [
+                  [0.017, 0.001],
+                  [0.011, 0.011],
+                  [0.001, 0.014],
+                  [-0.011, 0.010],
+                  [-0.016, 0.001],
+                  [-0.012, -0.010],
+                  [0.000, -0.013],
+                  [0.013, -0.010]
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "secondary_left",
+      "parent_branch_id": "primary_left",
+      "level": 2,
+      "start": [-0.42, 0.12, 1.48],
+      "end": [-0.86, 0.20, 1.84],
+      "discretization": {
+        "refinement_level": 2,
+        "hotspot": true
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "profile_type": "parameterized",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "solid_ellipse",
+                "center": [0.0015, -0.0005],
+                "radii": [0.0045, 0.0035],
+                "samples": 64
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.013, 0.009],
+                "inner_center": [0.0015, -0.0005],
+                "inner_radii": [0.0045, 0.0035],
+                "samples": 64
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.015, 0.0105],
+                "inner_center": [0.0, 0.0],
+                "inner_radii": [0.013, 0.009],
+                "samples": 64
+              }
+            }
+          ]
+        },
+        {
+          "s": 1.0,
+          "profile_type": "parameterized",
+          "regions": [
+            {
+              "tissue": "pith",
+              "material_id": "pith_default",
+              "shape": {
+                "type": "solid_ellipse",
+                "center": [0.0010, -0.0004],
+                "radii": [0.0030, 0.0022],
+                "samples": 64
+              }
+            },
+            {
+              "tissue": "xylem",
+              "material_id": "xylem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.0095, 0.0066],
+                "inner_center": [0.0010, -0.0004],
+                "inner_radii": [0.0030, 0.0022],
+                "samples": 64
+              }
+            },
+            {
+              "tissue": "phloem",
+              "material_id": "phloem_default",
+              "shape": {
+                "type": "elliptic_ring",
+                "outer_center": [0.0, 0.0],
+                "outer_radii": [0.0110, 0.0076],
+                "inner_center": [0.0, 0.0],
+                "inner_radii": [0.0095, 0.0066],
+                "samples": 64
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "joints": [
+    {
+      "id": "joint_trunk_primary_left",
+      "parent_branch_id": "trunk",
+      "child_branch_id": "primary_left",
+      "linear_stiffness_scale": 0.95,
+      "law": {
+        "type": "polynomial",
+        "linear_scale": 1.00,
+        "cubic_scale": 1800000.0
+      }
+    },
+    {
+      "id": "joint_primary_left_secondary_left",
+      "parent_branch_id": "primary_left",
+      "child_branch_id": "secondary_left",
+      "linear_stiffness_scale": 0.82,
+      "law": {
+        "type": "polynomial",
+        "linear_scale": 1.00,
+        "cubic_scale": 2400000.0
+      }
+    }
+  ],
+  "fruits": [
+    {
+      "id": "fruit_left_primary",
+      "branch_id": "primary_left",
+      "location_s": 0.72,
+      "mass": 0.18,
+      "stiffness": 1400.0,
+      "damping": 1.8
+    },
+    {
+      "id": "fruit_left_secondary",
+      "branch_id": "secondary_left",
+      "location_s": 0.88,
+      "mass": 0.12,
+      "stiffness": 950.0,
+      "damping": 1.1
+    }
+  ],
+  "clamps": [
+    {
+      "branch_id": "trunk",
+      "support_stiffness": 40000.0,
+      "support_damping": 35.0,
+      "cubic_stiffness": 1200000000.0
+    }
+  ],
+  "excitation": {
+    "kind": "harmonic_force",
+    "target_branch_id": "trunk",
+    "amplitude": 12.0,
+    "phase_degrees": 0.0,
+    "driving_frequency_hz": 7.5
+  },
+  "analysis": {
+    "mode": "frequency_response",
+    "frequency_start_hz": 2.0,
+    "frequency_end_hz": 28.0,
+    "frequency_steps": 30,
+    "time_step_seconds": 0.002,
+    "total_time_seconds": 0.8,
+    "output_stride": 4,
+    "max_nonlinear_iterations": 20,
+    "nonlinear_tolerance": 1.0e-8,
+    "output_csv": "demo_frequency_response.csv"
+  },
+  "observations": [
+    {
+      "id": "obs_trunk",
+      "target_type": "branch",
+      "target_id": "trunk"
+    },
+    {
+      "id": "obs_primary_left",
+      "target_type": "branch",
+      "target_id": "primary_left"
+    },
+    {
+      "id": "obs_primary_right",
+      "target_type": "branch",
+      "target_id": "primary_right"
+    },
+    {
+      "id": "obs_secondary_left",
+      "target_type": "branch",
+      "target_id": "secondary_left"
+    },
+    {
+      "id": "obs_fruit_primary",
+      "target_type": "fruit",
+      "target_id": "fruit_left_primary"
+    },
+    {
+      "id": "obs_fruit_secondary",
+      "target_type": "fruit",
+      "target_id": "fruit_left_secondary"
+    }
+  ]
+}
