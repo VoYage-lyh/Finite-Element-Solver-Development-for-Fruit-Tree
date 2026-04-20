@@ -1,0 +1,36 @@
+# OrchardVibrationSolver Python dependency matrix
+# This file is a project dependency reference, not a one-shot pip recipe.
+# The project now uses Miniconda as the primary environment manager.
+# Recommended usage:
+#   1. Create the conda environments listed in config/conda_environment_commands.txt
+#   2. Use this file as the consolidated package/version reference
+#
+# Environment grouping
+#   - orchard-dev: native Windows development, tests, plotting, benchmark scripts
+#   - orchard-fenicsx: WSL2/Linux only, FEniCSx/PETSc/SLEPc backend work
+#   - orchard-ml: PyTorch inverse/surrogate work
+
+# Core development / tests / repo scripts
+pytest>=8.0
+pytest-cov>=5.0
+ruff>=0.6
+mypy>=1.10
+
+# Core numerical / visualization stack
+numpy>=1.26
+scipy>=1.11
+pandas>=2.2
+matplotlib>=3.8
+pyyaml>=6.0
+jupyterlab>=4.2
+
+# Data / ML utilities
+h5py>=3.10
+torch>=2.2
+
+# FEniCSx backend stack
+# Recommended installation method: conda-forge in WSL2/Linux, not pip on native Windows.
+mpi4py>=3.1
+petsc4py
+slepc4py
+dolfinx

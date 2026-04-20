@@ -1,0 +1,75 @@
+OrchardVibrationSolver conda environment commands
+===============================================
+
+Principle
+---------
+1. Keep C++/CLI development usable on native Windows.
+2. Keep FEniCSx in a separate environment, because DOLFINx/PETSc/SLEPc is not a low-risk native Windows path.
+3. Keep PyTorch surrogate / inverse work separable from the FEniCSx stack to reduce solver conflicts.
+
+
+Environment A: native Windows development / tests / plotting
+-----------------------------------------------------------
+Purpose:
+- Run the current C++ backend and Python helper scripts on Windows
+- Run Python smoke tests
+- Generate plots and benchmark summaries
+
+Command:
+conda create -n orchard-dev -c conda-forge python=3.11 pytest pytest-cov ruff mypy numpy scipy pandas matplotlib pyyaml h5py jupyterlab
+
+Activation:
+conda activate orchard-dev
+
+Optional:
+- If you want PyTorch in this environment too:
+  conda install -n orchard-dev -c pytorch -c conda-forge pytorch
+
+
+Environment B: FEniCSx / PETSc / SLEPc backend
+----------------------------------------------
+Important:
+- Recommended target platform: WSL2 Ubuntu or native Linux
+- Do not treat native Windows as the primary installation target for this environment
+
+Purpose:
+- orchard_fem modal / frequency / time solver migration
+- PETSc / SLEPc eigen and linear solve backend
+- Future DOLFINx integration
+
+Command:
+conda create -n orchard-fenicsx -c conda-forge python=3.11 dolfinx petsc4py slepc4py mpi4py numpy scipy pandas matplotlib pyyaml h5py pytest pytest-cov ruff mypy jupyterlab
+
+Activation:
+conda activate orchard-fenicsx
+
+Optional:
+- If you also want PyTorch here and the solver resolves cleanly:
+  conda install -n orchard-fenicsx -c pytorch -c conda-forge pytorch
+
+
+Environment C: PyTorch inverse / surrogate
+------------------------------------------
+Purpose:
+- orchard_pinn inverse MVP
+- local nonlinear surrogate
+- response surrogate and dataset work
+
+Command:
+conda create -n orchard-ml -c pytorch -c conda-forge python=3.11 pytorch numpy scipy pandas matplotlib h5py pyyaml pytest pytest-cov jupyterlab
+
+Activation:
+conda activate orchard-ml
+
+
+Minimal recommended rollout order
+---------------------------------
+1. Create orchard-dev first
+2. Create orchard-fenicsx inside WSL2/Linux
+3. Create orchard-ml when you start PINN / surrogate work
+
+
+Post-install checks
+-------------------
+After activating any environment, run:
+python scripts/check_python_env.py

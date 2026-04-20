@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orchard-vibration-solver"
+version = "0.1.0"
+description = "Dedicated orchard vibration framework with C++ core, Python orchestration, and planned FEniCSx/PINN extensions."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+  "mypy>=1.10",
+]
+viz = [
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "pandas>=2.2",
+]
+ml = [
+  "torch>=2.2",
+  "h5py>=3.10",
+]
+
+[tool.setuptools.packages.find]
+include = ["orchard_fem*", "orchard_pinn*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

@@ -1,0 +1,114 @@
+OrchardVibrationSolver external environment checks
+==================================================
+
+These checks are for tools and host/runtime conditions outside Python packages.
+Run them manually and confirm the reported versions before moving deeper into the refactor.
+
+
+1. Host OS
+----------
+Windows host:
+ver
+
+PowerShell version:
+$PSVersionTable.PSVersion
+
+
+2. WSL2 / Linux runtime for FEniCSx
+-----------------------------------
+WSL version on Windows host:
+wsl --version
+
+Linux distribution list:
+wsl -l -v
+
+Inside WSL/Linux shell:
+uname -a
+lsb_release -a
+
+Reason:
+- orchard-fenicsx should be treated as a Linux/WSL environment, not as a native Windows target
+
+
+3. Conda / Miniconda
+--------------------
+conda --version
+conda info
+
+
+4. Source control
+-----------------
+git --version
+
+
+5. C++ toolchain
+----------------
+Current repo needs a C++20 compiler.
+
+G++ version:
+g++ --version
+
+GCC version:
+gcc --version
+
+If MSVC is also installed:
+cl
+
+
+6. CMake / build generator
+--------------------------
+CMake version:
+cmake --version
+
+Optional Ninja version:
+ninja --version
+
+Reason:
+- The repo already contains CMake build files
+- Current local environment was missing cmake in PATH
+
+
+7. MPI runtime
+--------------
+MPI launcher version:
+mpiexec --version
+
+Reason:
+- petsc4py / slepc4py / mpi4py depend on an MPI runtime
+
+
+8. PETSc / SLEPc / DOLFINx runtime checks
+-----------------------------------------
+Run these inside the orchard-fenicsx environment.
+
+PETSc:
+python -c "from petsc4py import PETSc; print(PETSc.Sys.getVersion())"
+
+SLEPc:
+python -c "from slepc4py import SLEPc; print(SLEPc.getVersion())"
+
+DOLFINx:
+python -c "import dolfinx; print(dolfinx.__version__)"
+
+MPI4PY:
+python -c "from mpi4py import MPI; print(MPI.Get_library_version())"
+
+
+9. PyTorch runtime checks
+-------------------------
+Run these inside orchard-ml or any environment where torch is installed.
+
+Torch version:
+python -c "import torch; print(torch.__version__)"
+
+CUDA visibility:
+python -c "import torch; print(torch.cuda.is_available())"
+
+CUDA device name:
+python -c "import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu-only')"
+
+
+10. Current repo-local environment audit
+----------------------------------------
+Run from the repository root:
+python scripts/check_python_env.py

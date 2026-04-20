@@ -1,0 +1,23 @@
+name: orchard-fenicsx-pinn
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - dolfinx
+  - petsc4py
+  - slepc4py
+  - mpi4py
+  - numpy
+  - scipy
+  - pandas
+  - h5py
+  - pyyaml
+  - matplotlib
+  - jupyter
+  - pytest
+  - pytest-cov
+  - ruff
+  - mypy
+  - pytorch
+# Optional and not installed by default:
+#   - deepxde

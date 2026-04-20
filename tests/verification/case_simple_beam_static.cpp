@@ -10,7 +10,7 @@ int main() {
     constexpr double density = 800.0;
     constexpr double radius = 0.02;
     constexpr double area = 3.14159265358979323846 * radius * radius;
-    constexpr double inertia = 3.14159265358979323846 * std::pow(radius, 4) / 4.0;
+    constexpr double inertia = 3.14159265358979323846 * radius * radius * radius * radius / 4.0;
     constexpr double force = 100.0;
 
     const int num_elements = 20;
