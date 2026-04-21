@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from math import sqrt
+from math import atan2, sqrt
 from typing import Deque, Dict, Iterable, Optional
 
 
@@ -59,6 +59,11 @@ class BranchPath:
     def direction(self) -> Vec3:
         return normalize(self.end - self.start)
 
+    def inclination_angle_rad(self) -> float:
+        direction = self.direction()
+        horizontal_magnitude = sqrt((direction.x * direction.x) + (direction.y * direction.y))
+        return atan2(abs(direction.z), horizontal_magnitude)
+
 
 @dataclass(frozen=True)
 class ObservationPoint:
@@ -66,7 +71,15 @@ class ObservationPoint:
     target_type: str
     target_id: str
     target_node: str = "tip"
-    target_component: str = "ux"
+    target_components: list[str] = field(default_factory=lambda: ["ux"])
+
+    def __post_init__(self) -> None:
+        normalized = [str(component) for component in self.target_components] or ["ux"]
+        object.__setattr__(self, "target_components", normalized)
+
+    @property
+    def target_component(self) -> str:
+        return self.target_components[0]
 
 
 @dataclass

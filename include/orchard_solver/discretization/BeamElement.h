@@ -22,6 +22,7 @@ struct BeamElementProperties {
 class BeamElement {
 public:
     [[nodiscard]] static Matrix12 buildLocalStiffnessMatrix(const BeamElementProperties& properties);
+    [[nodiscard]] static Matrix12 buildLocalGeometricStiffnessMatrix(double axial_force, double length);
     [[nodiscard]] static Matrix12 buildLocalMassMatrix(const BeamElementProperties& properties);
     [[nodiscard]] static Matrix12 buildTransformationMatrix(
         const Vec3& start,

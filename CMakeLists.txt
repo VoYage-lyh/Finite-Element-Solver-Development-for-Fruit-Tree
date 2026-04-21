@@ -25,6 +25,7 @@ add_library(
     src/discretization/Assembler.cpp
     src/solver_core/LinearAlgebra.cpp
     src/solver_core/DynamicSystem.cpp
+    src/solver_core/StaticPreload.cpp
     src/io/SimpleJson.cpp
     src/io/ModelIO.cpp
 )
@@ -76,6 +77,7 @@ if(ORCHARD_BUILD_TESTS)
     endfunction()
 
     add_orchard_verification_test(verification_cantilever_first_mode tests/verification/case_cantilever_first_mode.cpp)
+    add_orchard_verification_test(verification_cantilever_gravity_prestress tests/verification/case_cantilever_gravity_prestress.cpp)
     add_orchard_verification_test(verification_cantilever_modes tests/verification/case_cantilever_modes.cpp)
     add_orchard_verification_test(verification_simple_beam_static tests/verification/case_simple_beam_static.cpp)
     add_orchard_verification_test(verification_duffing_frequency_response tests/verification/case_duffing_frequency_response.cpp)

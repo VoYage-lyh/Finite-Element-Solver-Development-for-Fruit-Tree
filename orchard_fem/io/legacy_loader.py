@@ -24,6 +24,22 @@ from orchard_fem.topology.tree import BranchPath, ObservationPoint
 from orchard_fem.cross_section.tissue import TissueType
 
 
+def _parse_observation_target_components(observation: dict) -> list[str]:
+    if "target_components" in observation:
+        value = observation["target_components"]
+        if not isinstance(value, list):
+            raise ValueError("observations[].target_components must be a list of strings")
+        components = [str(component) for component in value]
+        if not components:
+            raise ValueError("observations[].target_components must not be empty")
+        return components
+
+    if "target_component" in observation:
+        return [str(observation["target_component"])]
+
+    return ["ux"]
+
+
 def load_orchard_model(file_path: str) -> OrchardModel:
     payload = load_legacy_model(file_path)
     topology = build_topology_from_legacy_model(payload)
@@ -47,6 +63,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         )
         for material in payload.get("materials", [])
     ]
+    available_material_ids = {material.material_id for material in materials}
 
     branches = [
         BranchDefinition(
@@ -57,7 +74,10 @@ def load_orchard_model(file_path: str) -> OrchardModel:
                 start=parse_vec3(branch["start"]),
                 end=parse_vec3(branch["end"]),
             ),
-            section_series=parse_section_series(branch["stations"]),
+            section_series=parse_section_series(
+                branch["stations"],
+                available_material_ids=available_material_ids,
+            ),
             discretization=BranchDiscretizationHint(
                 num_elements=int(branch.get("discretization", {}).get("num_elements", 4)),
                 hotspot=bool(branch.get("discretization", {}).get("hotspot", False)),
@@ -120,6 +140,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
     )
 
     analysis_payload = payload["analysis"]
+    gravity_direction = parse_vec3(analysis_payload.get("gravity_direction", [0.0, 0.0, -1.0]))
     analysis = AnalysisSettings(
         mode=AnalysisMode(analysis_payload.get("mode", "frequency_response")),
         frequency_start_hz=float(analysis_payload["frequency_start_hz"]),
@@ -132,6 +153,10 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         nonlinear_tolerance=float(analysis_payload.get("nonlinear_tolerance", 1.0e-8)),
         rayleigh_alpha=float(analysis_payload.get("rayleigh_alpha", 0.0)),
         rayleigh_beta=float(analysis_payload.get("rayleigh_beta", 1.0e-4)),
+        auto_nonlinear_levels=[int(level) for level in analysis_payload.get("auto_nonlinear_levels", [])],
+        auto_nonlinear_cubic_scale=float(analysis_payload.get("auto_nonlinear_cubic_scale", 0.0)),
+        include_gravity_prestress=bool(analysis_payload.get("include_gravity_prestress", False)),
+        gravity_direction=(gravity_direction.x, gravity_direction.y, gravity_direction.z),
         output_csv=str(analysis_payload.get("output_csv", "frequency_response.csv")),
     )
 
@@ -141,7 +166,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
             target_type=str(observation["target_type"]),
             target_id=str(observation["target_id"]),
             target_node=str(observation.get("target_node", "tip")),
-            target_component=str(observation.get("target_component", "ux")),
+            target_components=_parse_observation_target_components(observation),
         )
         for observation in payload.get("observations", [])
     ]

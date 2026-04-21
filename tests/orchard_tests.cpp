@@ -98,7 +98,7 @@ orchard::OrchardModel buildCantileverModel(const int num_elements, const double 
     model.analysis.rayleigh_alpha = 0.0;
     model.analysis.rayleigh_beta = 0.0;
 
-    model.observations.push_back(ObservationPoint {"tip_ux", "branch", "cantilever", "tip", "ux"});
+    model.observations.push_back(ObservationPoint {"tip_ux", "branch", "cantilever", "tip", {"ux"}});
 
     return model;
 }
@@ -227,7 +227,7 @@ void testTimeHistoryCsvIncludesExcitationChannels() {
     model.excitation.driving_frequency_hz = 8.0;
     model.excitation.target_component = "ux";
     model.observations.clear();
-    model.observations.push_back(orchard::ObservationPoint {"tip_ux", "branch", "cantilever", "tip", "ux"});
+    model.observations.push_back(orchard::ObservationPoint {"tip_ux", "branch", "cantilever", "tip", {"ux"}});
 
     orchard::StructuralAssembler assembler;
     const auto assembled = assembler.assemble(model);
@@ -258,6 +258,280 @@ void testTimeHistoryCsvIncludesExcitationChannels() {
         check(header.find("excitation_load") != std::string::npos, "time-history CSV should contain excitation_load");
         check(header.find("excitation_response") != std::string::npos, "time-history CSV should contain excitation_response");
     }
+}
+
+void testCircularShorthandLoading() {
+    const std::filesystem::path json_path = std::filesystem::current_path() / "orchard_test_circular_shorthand.json";
+    {
+        std::ofstream stream(json_path);
+        stream << R"json(
+{
+  "metadata": {
+    "name": "circular_shorthand_cpp"
+  },
+  "materials": [
+    {
+      "id": "xylem_default",
+      "tissue": "xylem",
+      "model": "linear",
+      "density": 700.0,
+      "youngs_modulus": 9000000000.0,
+      "poisson_ratio": 0.3,
+      "damping_ratio": 0.02
+    },
+    {
+      "id": "pith_default",
+      "tissue": "pith",
+      "model": "linear",
+      "density": 180.0,
+      "youngs_modulus": 400000000.0,
+      "poisson_ratio": 0.25,
+      "damping_ratio": 0.04
+    },
+    {
+      "id": "phloem_default",
+      "tissue": "phloem",
+      "model": "linear",
+      "density": 950.0,
+      "youngs_modulus": 150000000.0,
+      "poisson_ratio": 0.35,
+      "damping_ratio": 0.08
+    }
+  ],
+  "branches": [
+    {
+      "id": "trunk",
+      "parent_branch_id": null,
+      "level": 0,
+      "start": [0.0, 0.0, 0.0],
+      "end": [0.0, 0.0, 1.0],
+      "stations": [
+        {"s": 0.0, "shorthand": "circular", "outer_radius": 0.025},
+        {"s": 1.0, "shorthand": "circular", "outer_radius": 0.02}
+      ],
+      "discretization": {"num_elements": 2, "hotspot": false}
+    }
+  ],
+  "fruits": [],
+  "clamps": [
+    {
+      "branch_id": "trunk",
+      "support_stiffness": 1.0,
+      "support_damping": 0.0,
+      "cubic_stiffness": 0.0
+    }
+  ],
+  "excitation": {
+    "kind": "harmonic_force",
+    "target_branch_id": "trunk",
+    "target_node": "tip",
+    "target_component": "ux",
+    "amplitude": 1.0,
+    "phase_degrees": 0.0,
+    "driving_frequency_hz": 5.0
+  },
+  "analysis": {
+    "mode": "frequency_response",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 10.0,
+    "frequency_steps": 5,
+    "output_csv": "unused.csv"
+  },
+  "observations": [
+    {
+      "id": "obs_trunk",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "tip",
+      "target_component": "ux"
+    }
+  ]
+}
+)json";
+    }
+
+    const auto model = orchard::loadModelFromFile(json_path.string());
+    check(!model.branches.empty(), "circular shorthand model should load one branch");
+    const auto& profiles = model.branches.front().sectionSeries().profiles();
+    check(profiles.size() == 2U, "circular shorthand branch should expose two profiles");
+
+    const auto properties = profiles.front()->evaluate();
+    const double expected_area = kPi * 0.025 * 0.025;
+    checkClose(
+        properties.total_area,
+        expected_area,
+        expected_area * 0.01,
+        "circular shorthand profile area should match the reference circle"
+    );
+
+    std::filesystem::remove(json_path);
+}
+
+void testAutoNonlinearLevelInjection() {
+    const std::filesystem::path json_path = std::filesystem::current_path() / "orchard_test_auto_nonlinear.json";
+    {
+        std::ofstream stream(json_path);
+        stream << R"json(
+{
+  "metadata": {
+    "name": "auto_nonlinear_cpp"
+  },
+  "materials": [
+    {
+      "id": "xylem_default",
+      "tissue": "xylem",
+      "model": "linear",
+      "density": 720.0,
+      "youngs_modulus": 1450000000.0,
+      "poisson_ratio": 0.31,
+      "damping_ratio": 0.035
+    },
+    {
+      "id": "pith_default",
+      "tissue": "pith",
+      "model": "linear",
+      "density": 240.0,
+      "youngs_modulus": 260000000.0,
+      "poisson_ratio": 0.33,
+      "damping_ratio": 0.06
+    },
+    {
+      "id": "phloem_default",
+      "tissue": "phloem",
+      "model": "linear",
+      "density": 920.0,
+      "youngs_modulus": 650000000.0,
+      "poisson_ratio": 0.34,
+      "damping_ratio": 0.055
+    }
+  ],
+  "branches": [
+    {
+      "id": "trunk",
+      "parent_branch_id": null,
+      "level": 0,
+      "start": [0.0, 0.0, 0.0],
+      "end": [0.0, 0.0, 1.2],
+      "stations": [
+        {"s": 0.0, "shorthand": "circular", "outer_radius": 0.05},
+        {"s": 1.0, "shorthand": "circular", "outer_radius": 0.04}
+      ],
+      "discretization": {"num_elements": 3, "hotspot": false}
+    },
+    {
+      "id": "primary",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [0.0, 0.0, 1.0],
+      "end": [0.55, 0.0, 1.45],
+      "stations": [
+        {"s": 0.0, "shorthand": "circular", "outer_radius": 0.03},
+        {"s": 1.0, "shorthand": "circular", "outer_radius": 0.02}
+      ],
+      "discretization": {"num_elements": 2, "hotspot": false}
+    },
+    {
+      "id": "secondary",
+      "parent_branch_id": "primary",
+      "level": 2,
+      "start": [0.55, 0.0, 1.45],
+      "end": [0.85, 0.22, 1.75],
+      "stations": [
+        {"s": 0.0, "shorthand": "circular", "outer_radius": 0.018},
+        {"s": 1.0, "shorthand": "circular", "outer_radius": 0.014}
+      ],
+      "discretization": {"num_elements": 2, "hotspot": false}
+    },
+    {
+      "id": "tertiary",
+      "parent_branch_id": "secondary",
+      "level": 3,
+      "start": [0.85, 0.22, 1.75],
+      "end": [1.05, 0.35, 1.98],
+      "stations": [
+        {"s": 0.0, "shorthand": "circular", "outer_radius": 0.012},
+        {"s": 1.0, "shorthand": "circular", "outer_radius": 0.01}
+      ],
+      "discretization": {"num_elements": 2, "hotspot": false}
+    }
+  ],
+  "fruits": [],
+  "clamps": [
+    {
+      "branch_id": "trunk",
+      "support_stiffness": 1.0,
+      "support_damping": 0.0,
+      "cubic_stiffness": 0.0
+    }
+  ],
+  "excitation": {
+    "kind": "harmonic_force",
+    "target_branch_id": "primary",
+    "target_node": "tip",
+    "target_component": "ux",
+    "amplitude": 1.0,
+    "phase_degrees": 0.0,
+    "driving_frequency_hz": 6.0
+  },
+  "analysis": {
+    "mode": "time_history",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 12.0,
+    "frequency_steps": 8,
+    "time_step_seconds": 0.002,
+    "total_time_seconds": 0.05,
+    "output_stride": 1,
+    "max_nonlinear_iterations": 12,
+    "nonlinear_tolerance": 1.0e-8,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 1.0e-4,
+    "auto_nonlinear_levels": [2, 3],
+    "auto_nonlinear_cubic_scale": 2200000.0,
+    "output_csv": "unused.csv"
+  },
+  "observations": [
+    {
+      "id": "obs_secondary",
+      "target_type": "branch",
+      "target_id": "secondary",
+      "target_node": "tip",
+      "target_component": "ux"
+    }
+  ]
+}
+)json";
+    }
+
+    const auto model = orchard::loadModelFromFile(json_path.string());
+    check(model.analysis.auto_nonlinear_levels.size() == 2U, "auto nonlinear levels should load");
+    check(model.analysis.auto_nonlinear_levels[0] == 2, "first auto nonlinear level should be 2");
+    checkClose(
+        model.analysis.auto_nonlinear_cubic_scale,
+        2200000.0,
+        1.0e-9,
+        "auto nonlinear cubic scale should load"
+    );
+
+    orchard::StructuralAssembler assembler;
+    const auto assembled = assembler.assemble(model);
+
+    check(assembled.system.nonlinear_links.size() == 2U, "secondary and tertiary branches should auto-inject cubic links");
+
+    const auto has_secondary = std::find_if(
+        assembled.system.nonlinear_links.begin(),
+        assembled.system.nonlinear_links.end(),
+        [](const orchard::NonlinearLink& link) { return link.label == "auto_joint:secondary"; }
+    ) != assembled.system.nonlinear_links.end();
+    const auto has_tertiary = std::find_if(
+        assembled.system.nonlinear_links.begin(),
+        assembled.system.nonlinear_links.end(),
+        [](const orchard::NonlinearLink& link) { return link.label == "auto_joint:tertiary"; }
+    ) != assembled.system.nonlinear_links.end();
+
+    check(has_secondary, "secondary branch should receive an auto nonlinear link");
+    check(has_tertiary, "tertiary branch should receive an auto nonlinear link");
+
+    std::filesystem::remove(json_path);
 }
 
 void testCantileverBeamFirstMode() {
@@ -303,6 +577,8 @@ int main() {
         {"matrix assembly", testMatrixAssembly},
         {"demo response and csv output", testDemoResponseAndCsvOutput},
         {"time-history csv includes excitation channels", testTimeHistoryCsvIncludesExcitationChannels},
+        {"circular shorthand loading", testCircularShorthandLoading},
+        {"auto nonlinear level injection", testAutoNonlinearLevelInjection},
         {"cantilever beam first mode", testCantileverBeamFirstMode},
     };
 

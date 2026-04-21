@@ -71,6 +71,12 @@ def parse_args() -> argparse.Namespace:
         help="Measurement column to highlight in the time-history figure.",
     )
     parser.add_argument(
+        "--trajectory-node",
+        action="append",
+        default=None,
+        help="Observation id to use for trajectory plots. Repeat to request multiple nodes.",
+    )
+    parser.add_argument(
         "--show",
         action="store_true",
         help="Display interactive figures after saving them.",
@@ -126,6 +132,19 @@ def build_fruit_lookup(model: dict) -> Dict[str, dict]:
     return {fruit["id"]: fruit for fruit in model.get("fruits", [])}
 
 
+def observation_components(observation: dict) -> list[str]:
+    if "target_components" in observation:
+        value = observation["target_components"]
+        if not isinstance(value, list):
+            raise RuntimeError("observations[].target_components must be a list")
+        components = [str(component) for component in value]
+        if not components:
+            raise RuntimeError("observations[].target_components must not be empty")
+        return components
+
+    return [str(observation.get("target_component", "ux"))]
+
+
 def resolve_observation_point(model: dict, observation: dict) -> Tuple[list[float], str]:
     branch_lookup = build_branch_lookup(model)
     fruit_lookup = build_fruit_lookup(model)
@@ -134,7 +153,7 @@ def resolve_observation_point(model: dict, observation: dict) -> Tuple[list[floa
         branch = branch_lookup[observation["target_id"]]
         station = resolve_branch_station(branch, observation.get("target_node", "tip"))
         position = resolve_branch_point(branch, station)
-        label = "{0} ({1})".format(observation["id"], observation.get("target_component", "ux"))
+        label = "{0} ({1})".format(observation["id"], "/".join(observation_components(observation)))
         return position, label
 
     if observation["target_type"] == "fruit":
@@ -191,6 +210,10 @@ def geometry_figure_path(prefix: Path) -> Path:
 
 def time_frequency_figure_path(prefix: Path) -> Path:
     return Path(f"{prefix}_time_frequency.png")
+
+
+def trajectory_figure_path(prefix: Path, node_id: str) -> Path:
+    return Path(f"{prefix}_trajectory_{node_id}.png")
 
 
 def _save_figure(fig, output_path: Path, show: bool) -> None:
@@ -348,6 +371,97 @@ def draw_spectrogram(ax, signal_values, sample_rate: float, title: str, cmap: st
     ax.set_ylabel("Frequency (Hz)")
 
 
+def split_observation_component_header(header: str) -> Tuple[str, str] | None:
+    for component in ("ux", "uy", "uz"):
+        suffix = f"_{component}"
+        if header.endswith(suffix) and len(header) > len(suffix):
+            return header[: -len(suffix)], component
+    return None
+
+
+def available_trajectory_nodes(headers: list[str]) -> list[str]:
+    components_by_node: dict[str, set[str]] = {}
+    for header in headers:
+        parsed = split_observation_component_header(header)
+        if parsed is None:
+            continue
+        node_id, component = parsed
+        components_by_node.setdefault(node_id, set()).add(component)
+    return sorted(node_id for node_id, components in components_by_node.items() if len(components) >= 2)
+
+
+def trajectory_columns_for_node(headers: list[str], node_id: str) -> dict[str, str]:
+    columns: dict[str, str] = {}
+    for header in headers:
+        parsed = split_observation_component_header(header)
+        if parsed is None:
+            continue
+        header_node_id, component = parsed
+        if header_node_id == node_id:
+            columns[component] = header
+    return columns
+
+
+def plot_trajectory(
+    headers: list[str],
+    rows: list[list[float]],
+    output_path: Path,
+    node_id: str,
+    show: bool,
+) -> None:
+    require_plotting_dependencies(show)
+
+    series = build_series_map(headers, rows)
+    if "time_s" not in series:
+        raise RuntimeError("Trajectory plots require a time-history CSV with a time_s column")
+
+    trajectory_columns = trajectory_columns_for_node(headers, node_id)
+    ordered_components = [component for component in ("ux", "uy", "uz") if component in trajectory_columns]
+    if len(ordered_components) < 2:
+        raise RuntimeError(f"Could not find at least two trajectory components for node {node_id}")
+
+    time_values = np.asarray(series["time_s"], dtype=float)
+    figure = plt.figure(figsize=(8.5, 7.0))
+
+    if len(ordered_components) >= 3:
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+        ax = figure.add_subplot(111, projection="3d")
+        x_values = np.asarray(series[trajectory_columns["ux"]], dtype=float)
+        y_values = np.asarray(series[trajectory_columns["uy"]], dtype=float)
+        z_values = np.asarray(series[trajectory_columns["uz"]], dtype=float)
+        ax.plot(x_values, y_values, z_values, color="#7f7f7f", linewidth=1.2, alpha=0.45)
+        scatter = ax.scatter(x_values, y_values, z_values, c=time_values, cmap="viridis", s=14.0)
+        ax.scatter([x_values[0]], [y_values[0]], [z_values[0]], color="#2ca02c", s=40.0, label="start")
+        ax.scatter([x_values[-1]], [y_values[-1]], [z_values[-1]], color="#d62728", s=40.0, label="end")
+        ax.set_xlabel("ux")
+        ax.set_ylabel("uy")
+        ax.set_zlabel("uz")
+        ax.legend(loc="best")
+        title = f"Trajectory: {node_id} (ux-uy-uz)"
+    else:
+        ax = figure.add_subplot(111)
+        component_x, component_y = ordered_components[:2]
+        x_values = np.asarray(series[trajectory_columns[component_x]], dtype=float)
+        y_values = np.asarray(series[trajectory_columns[component_y]], dtype=float)
+        ax.plot(x_values, y_values, color="#7f7f7f", linewidth=1.2, alpha=0.45)
+        scatter = ax.scatter(x_values, y_values, c=time_values, cmap="viridis", s=16.0)
+        ax.scatter([x_values[0]], [y_values[0]], color="#2ca02c", s=40.0, label="start")
+        ax.scatter([x_values[-1]], [y_values[-1]], color="#d62728", s=40.0, label="end")
+        ax.set_xlabel(component_x)
+        ax.set_ylabel(component_y)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best")
+        title = f"Trajectory: {node_id} ({component_x}-{component_y})"
+
+    ax.set_title(title)
+    colorbar = figure.colorbar(scatter, ax=ax, shrink=0.85)
+    colorbar.set_label("Time (s)")
+    figure.tight_layout()
+    _save_figure(figure, output_path, show)
+
+
 def plot_time_frequency(
     headers: list[str],
     rows: list[list[float]],
@@ -465,6 +579,11 @@ def main() -> int:
         analysis_path = time_frequency_figure_path(output_prefix)
         plot_time_frequency(headers, rows, analysis_path, args.measurement_column, args.show)
         print("Saved time-frequency figure to {0}".format(analysis_path))
+        trajectory_nodes = args.trajectory_node if args.trajectory_node is not None else available_trajectory_nodes(headers)
+        for node_id in trajectory_nodes:
+            trajectory_path = trajectory_figure_path(output_prefix, node_id)
+            plot_trajectory(headers, rows, trajectory_path, node_id, args.show)
+            print("Saved trajectory figure to {0}".format(trajectory_path))
     elif first_column == "frequency_hz":
         analysis_path = frequency_figure_path(output_prefix)
         plot_frequency_response(headers, rows, analysis_path, args.show)

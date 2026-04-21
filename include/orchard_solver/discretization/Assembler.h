@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "orchard_solver/discretization/BeamElement.h"
 #include "orchard_solver/OrchardModel.h"
 #include "orchard_solver/solver_core/DynamicSystem.h"
 
@@ -15,6 +16,15 @@ struct BranchNodeState {
     Vec3 position {};
     double station {0.0};
     std::array<int, 6> dofs {-1, -1, -1, -1, -1, -1};
+};
+
+struct BranchElementState {
+    std::string branch_id;
+    int element_index {0};
+    std::array<int, 12> dofs {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    Matrix12 transformation {};
+    double length {0.0};
+    double axial_rigidity {0.0};
 };
 
 class DOFManager {
@@ -32,6 +42,7 @@ private:
 struct AssembledModel {
     DynamicSystem system;
     std::unordered_map<std::string, std::vector<BranchNodeState>> branch_nodes;
+    std::unordered_map<std::string, std::vector<BranchElementState>> branch_elements;
     std::unordered_map<std::string, int> fruit_dofs;
     int excitation_dof {-1};
     std::vector<std::string> observation_names;

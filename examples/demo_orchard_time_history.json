@@ -461,6 +461,10 @@
     "nonlinear_tolerance": 1.0e-8,
     "rayleigh_alpha": 0.0,
     "rayleigh_beta": 1.0e-4,
+    "auto_nonlinear_levels": [2, 3],
+    "auto_nonlinear_cubic_scale": 2200000.0,
+    "include_gravity_prestress": true,
+    "gravity_direction": [0.0, 0.0, -1.0],
     "output_csv": "demo_time_history.csv"
   },
   "observations": [
@@ -469,14 +473,14 @@
       "target_type": "branch",
       "target_id": "trunk",
       "target_node": "tip",
-      "target_component": "ux"
+      "target_components": ["ux", "uy"]
     },
     {
       "id": "obs_primary_left",
       "target_type": "branch",
       "target_id": "primary_left",
       "target_node": "tip",
-      "target_component": "ux"
+      "target_components": ["ux", "uy"]
     },
     {
       "id": "obs_primary_right",

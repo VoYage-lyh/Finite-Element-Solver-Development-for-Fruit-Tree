@@ -61,6 +61,7 @@ public:
     DenseMatrix damping;
     DenseMatrix stiffness;
     std::vector<std::string> dof_labels;
+    std::vector<double> gravity_load;
     std::vector<NonlinearLink> nonlinear_links;
 };
 

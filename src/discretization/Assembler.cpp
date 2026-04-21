@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "orchard_solver/discretization/BeamElement.h"
+#include "orchard_solver/solver_core/StaticPreload.h"
 
 namespace orchard {
 
@@ -13,6 +14,7 @@ namespace {
 
 constexpr std::array<const char*, 6> kComponentLabels = {"ux", "uy", "uz", "rx", "ry", "rz"};
 constexpr double kConstraintPenalty = 1.0e10;
+constexpr double kGravityAcceleration = 9.81;
 
 int translationalComponentIndex(const std::string& component) {
     if (component == "ux") {
@@ -185,9 +187,16 @@ AssembledModel StructuralAssembler::assemble(const OrchardModel& model) const {
     assembled.system.damping = DenseMatrix(dof_count, dof_count);
     assembled.system.stiffness = DenseMatrix(dof_count, dof_count);
     assembled.system.dof_labels = dof_manager.labels();
+    assembled.system.gravity_load.assign(dof_count, 0.0);
+
+    const bool apply_gravity_prestress = model.analysis.include_gravity_prestress;
+    const Vec3 gravity_direction = apply_gravity_prestress
+        ? normalize(model.analysis.gravity_direction)
+        : Vec3 {0.0, 0.0, -1.0};
 
     for (const auto& branch : model.branches) {
         const auto& nodes = assembled.branch_nodes.at(branch.id());
+        auto& elements = assembled.branch_elements[branch.id()];
 
         for (std::size_t element_index = 0; element_index + 1 < nodes.size(); ++element_index) {
             const auto& first = nodes[element_index];
@@ -227,6 +236,24 @@ AssembledModel StructuralAssembler::assemble(const OrchardModel& model) const {
 
             scatterElementMatrix(assembled.system.stiffness, global_stiffness, element_dofs);
             scatterElementMatrix(assembled.system.mass, global_mass, element_dofs);
+            elements.push_back(BranchElementState {
+                branch.id(),
+                static_cast<int>(element_index),
+                element_dofs,
+                transformation,
+                length,
+                properties.youngs_modulus * properties.area
+            });
+
+            if (apply_gravity_prestress) {
+                const double nodal_scale = 0.5 * mass_per_length * kGravityAcceleration * length;
+                const Vec3 nodal_force = gravity_direction * nodal_scale;
+                for (const auto& node : {first, second}) {
+                    assembled.system.gravity_load[static_cast<std::size_t>(node.dofs[0])] += nodal_force.x;
+                    assembled.system.gravity_load[static_cast<std::size_t>(node.dofs[1])] += nodal_force.y;
+                    assembled.system.gravity_load[static_cast<std::size_t>(node.dofs[2])] += nodal_force.z;
+                }
+            }
         }
     }
 
@@ -261,6 +288,49 @@ AssembledModel StructuralAssembler::assemble(const OrchardModel& model) const {
                 parent_nodes[nearest_parent_index].dofs[component],
                 penalty
             );
+        }
+    }
+
+    if (!model.analysis.auto_nonlinear_levels.empty()) {
+        for (const auto& branch : model.branches) {
+            if (!branch.parentBranchId().has_value()) {
+                continue;
+            }
+            if (std::find(
+                    model.analysis.auto_nonlinear_levels.begin(),
+                    model.analysis.auto_nonlinear_levels.end(),
+                    branch.level()
+                ) == model.analysis.auto_nonlinear_levels.end()) {
+                continue;
+            }
+            if (model.findJointForChild(branch.id()) != nullptr) {
+                continue;
+            }
+
+            const auto& child_nodes = assembled.requireBranchNodes(branch.id());
+            const auto& parent_nodes = assembled.requireBranchNodes(*branch.parentBranchId());
+            const auto& child_root = child_nodes.front();
+
+            std::size_t nearest_parent_index = 0;
+            double best_distance = distance(child_root.position, parent_nodes.front().position);
+            for (std::size_t parent_index = 1; parent_index < parent_nodes.size(); ++parent_index) {
+                const double candidate = distance(child_root.position, parent_nodes[parent_index].position);
+                if (candidate < best_distance) {
+                    best_distance = candidate;
+                    nearest_parent_index = parent_index;
+                }
+            }
+
+            assembled.system.nonlinear_links.push_back(NonlinearLink {
+                "auto_joint:" + branch.id(),
+                child_root.dofs[0],
+                parent_nodes[nearest_parent_index].dofs[0],
+                NonlinearLinkKind::CubicSpring,
+                0.0,
+                model.analysis.auto_nonlinear_cubic_scale,
+                0.0,
+                0.0
+            });
         }
     }
 
@@ -316,6 +386,25 @@ AssembledModel StructuralAssembler::assemble(const OrchardModel& model) const {
         assembled.system.damping.add(branch_dof, branch_dof, damping);
     }
 
+    if (apply_gravity_prestress) {
+        const auto axial_forces = computeGravityAxialForces(assembled, assembled.system.gravity_load);
+        for (const auto& branch : model.branches) {
+            const auto& elements = assembled.branch_elements.at(branch.id());
+            const auto& forces = axial_forces.at(branch.id());
+            for (std::size_t index = 0; index < elements.size(); ++index) {
+                const auto local_geometric = BeamElement::buildLocalGeometricStiffnessMatrix(
+                    forces[index],
+                    elements[index].length
+                );
+                const auto global_geometric = BeamElement::transformToGlobal(
+                    local_geometric,
+                    elements[index].transformation
+                );
+                scatterElementMatrix(assembled.system.stiffness, global_geometric, elements[index].dofs);
+            }
+        }
+    }
+
     applyRayleighDamping(model, assembled.system);
 
     assembled.excitation_dof = assembled.requireBranchDof(
@@ -327,14 +416,28 @@ AssembledModel StructuralAssembler::assemble(const OrchardModel& model) const {
     for (const auto& observation : model.observations) {
         if (observation.target_type == "branch") {
             const auto& nodes = assembled.requireBranchNodes(observation.target_id);
-            assembled.observation_names.push_back(observation.id);
-            assembled.observation_dofs.push_back(
-                assembled.requireBranchDof(
-                    observation.target_id,
-                    resolveNodeIndex(nodes, observation.target_node),
-                    observation.target_component
-                )
-            );
+            const int node_index = resolveNodeIndex(nodes, observation.target_node);
+            if (observation.target_components.size() <= 1U) {
+                assembled.observation_names.push_back(observation.id);
+                assembled.observation_dofs.push_back(
+                    assembled.requireBranchDof(
+                        observation.target_id,
+                        node_index,
+                        observation.target_components.front()
+                    )
+                );
+            } else {
+                for (const auto& component : observation.target_components) {
+                    assembled.observation_names.push_back(observation.id + "_" + component);
+                    assembled.observation_dofs.push_back(
+                        assembled.requireBranchDof(
+                            observation.target_id,
+                            node_index,
+                            component
+                        )
+                    );
+                }
+            }
         } else if (observation.target_type == "fruit") {
             assembled.observation_names.push_back(observation.id);
             assembled.observation_dofs.push_back(assembled.fruit_dofs.at(observation.target_id));

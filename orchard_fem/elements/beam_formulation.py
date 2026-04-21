@@ -134,6 +134,26 @@ def build_local_mass_matrix(properties: BeamElementProperties) -> Matrix:
     return matrix
 
 
+def build_local_geometric_stiffness_matrix(axial_force: float, length: float) -> Matrix:
+    if length <= 0.0:
+        raise ValueError("Beam element length must be positive")
+
+    matrix = zero_matrix12()
+    scale = axial_force / (30.0 * length)
+    base = [
+        [36.0 * scale, 3.0 * length * scale, -36.0 * scale, 3.0 * length * scale],
+        [3.0 * length * scale, 4.0 * length * length * scale, -3.0 * length * scale, -1.0 * length * length * scale],
+        [-36.0 * scale, -3.0 * length * scale, 36.0 * scale, -3.0 * length * scale],
+        [3.0 * length * scale, -1.0 * length * length * scale, -3.0 * length * scale, 4.0 * length * length * scale],
+    ]
+    _add_submatrix(matrix, [1, 5, 7, 11], base)
+
+    sign = [1.0, -1.0, 1.0, -1.0]
+    bending_y = [[sign[row] * base[row][col] * sign[col] for col in range(4)] for row in range(4)]
+    _add_submatrix(matrix, [2, 4, 8, 10], bending_y)
+    return matrix
+
+
 def build_transformation_matrix(
     start: Vec3,
     end: Vec3,

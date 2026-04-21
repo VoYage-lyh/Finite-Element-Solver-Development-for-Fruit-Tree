@@ -6,5 +6,9 @@
   "time_step_seconds": 0.002,
   "total_time_seconds": 1.0,
   "output_stride": 2,
+  "auto_nonlinear_levels": [],
+  "auto_nonlinear_cubic_scale": 0.0,
+  "include_gravity_prestress": false,
+  "gravity_direction": [0.0, 0.0, -1.0],
   "notes": "Default orchard solver settings for both fast frequency scans and visualization-friendly time-history runs. Override in model files when needed."
 }

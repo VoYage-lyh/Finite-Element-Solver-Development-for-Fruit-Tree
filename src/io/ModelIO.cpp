@@ -8,6 +8,10 @@ namespace orchard {
 
 namespace {
 
+constexpr double kDefaultPithRadiusFraction = 0.15;
+constexpr double kDefaultPhloemThicknessFraction = 0.08;
+constexpr int kDefaultCircularSamples = 96;
+
 const JsonValue& requireMember(const JsonValue::object_t& object, const std::string_view key) {
     const auto it = object.find(std::string(key));
     if (it == object.end()) {
@@ -85,6 +89,42 @@ std::string parseNodeSelector(const JsonValue& value, const std::string& field_n
     }
 
     throw std::runtime_error("JSON field must be a node selector string or integer: " + field_name);
+}
+
+std::vector<std::string> parseObservationTargetComponents(const JsonValue::object_t& object) {
+    if (const auto* target_components = optionalMember(object, "target_components")) {
+        if (!target_components->isArray()) {
+            throw std::runtime_error("observations[].target_components must be an array of strings");
+        }
+
+        std::vector<std::string> components;
+        for (const auto& component_value : target_components->asArray()) {
+            components.push_back(requireString(component_value, "observations[].target_components[]"));
+        }
+        if (components.empty()) {
+            throw std::runtime_error("observations[].target_components must not be empty");
+        }
+        return components;
+    }
+
+    if (const auto* target_component = optionalMember(object, "target_component")) {
+        return {requireString(*target_component, "observations[].target_component")};
+    }
+
+    return {"ux"};
+}
+
+std::vector<int> parseIntegerArray(const JsonValue& value, const std::string& field_name) {
+    if (!value.isArray()) {
+        throw std::runtime_error("JSON field must be an array of numbers: " + field_name);
+    }
+
+    std::vector<int> values;
+    values.reserve(value.asArray().size());
+    for (const auto& item : value.asArray()) {
+        values.push_back(requireInt(item, field_name + "[]"));
+    }
+    return values;
 }
 
 ExcitationKind parseExcitationKind(const std::string& value) {
@@ -172,9 +212,75 @@ std::vector<TissueRegionDefinition> parseRegions(const JsonValue& value) {
     return regions;
 }
 
-std::shared_ptr<CrossSectionProfile> parseStationProfile(const JsonValue& value) {
+std::vector<TissueRegionDefinition> buildDefaultCircularRegions(const double outer_radius) {
+    if (outer_radius <= 0.0) {
+        throw std::runtime_error("station.outer_radius must be positive for circular shorthand");
+    }
+
+    const double pith_radius = outer_radius * kDefaultPithRadiusFraction;
+    const double xylem_outer_radius = outer_radius * (1.0 - kDefaultPhloemThicknessFraction);
+    if (xylem_outer_radius <= pith_radius) {
+        throw std::runtime_error("Circular shorthand leaves no room for the xylem ring");
+    }
+
+    RegionGeometry pith_geometry;
+    pith_geometry.kind = SectionShapeKind::SolidEllipse;
+    pith_geometry.center = Vec2 {0.0, 0.0};
+    pith_geometry.radii = Vec2 {pith_radius, pith_radius};
+    pith_geometry.samples = kDefaultCircularSamples;
+
+    RegionGeometry xylem_geometry;
+    xylem_geometry.kind = SectionShapeKind::EllipticRing;
+    xylem_geometry.outer_center = Vec2 {0.0, 0.0};
+    xylem_geometry.outer_radii = Vec2 {xylem_outer_radius, xylem_outer_radius};
+    xylem_geometry.inner_center = Vec2 {0.0, 0.0};
+    xylem_geometry.inner_radii = Vec2 {pith_radius, pith_radius};
+    xylem_geometry.samples = kDefaultCircularSamples;
+
+    RegionGeometry phloem_geometry;
+    phloem_geometry.kind = SectionShapeKind::EllipticRing;
+    phloem_geometry.outer_center = Vec2 {0.0, 0.0};
+    phloem_geometry.outer_radii = Vec2 {outer_radius, outer_radius};
+    phloem_geometry.inner_center = Vec2 {0.0, 0.0};
+    phloem_geometry.inner_radii = Vec2 {xylem_outer_radius, xylem_outer_radius};
+    phloem_geometry.samples = kDefaultCircularSamples;
+
+    return {
+        TissueRegionDefinition {TissueType::Pith, "pith_default", pith_geometry},
+        TissueRegionDefinition {TissueType::Xylem, "xylem_default", xylem_geometry},
+        TissueRegionDefinition {TissueType::Phloem, "phloem_default", phloem_geometry},
+    };
+}
+
+void requireCircularShorthandMaterials(const MaterialLibrary& materials) {
+    for (const auto& material_id : {"xylem_default", "pith_default", "phloem_default"}) {
+        if (!materials.contains(material_id)) {
+            throw std::runtime_error(
+                "Circular shorthand requires material to be defined: " + std::string(material_id)
+            );
+        }
+    }
+}
+
+std::shared_ptr<CrossSectionProfile> parseStationProfile(
+    const JsonValue& value,
+    const MaterialLibrary& materials
+) {
     const auto& object = value.asObject();
     const double station = requireNumber(requireMember(object, "s"), "station.s");
+
+    if (const auto* shorthand_value = optionalMember(object, "shorthand")) {
+        const std::string shorthand = requireString(*shorthand_value, "station.shorthand");
+        if (shorthand != "circular") {
+            throw std::runtime_error("Unsupported station shorthand: " + shorthand);
+        }
+        requireCircularShorthandMaterials(materials);
+        const auto regions = buildDefaultCircularRegions(
+            requireNumber(requireMember(object, "outer_radius"), "station.outer_radius")
+        );
+        return std::make_shared<ParameterizedSectionProfile>(station, regions);
+    }
+
     const std::string profile_type = optionalMember(object, "profile_type")
         ? requireString(*optionalMember(object, "profile_type"), "station.profile_type")
         : "parameterized";
@@ -260,7 +366,7 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
         const auto& stations_value = requireMember(branch_object, "stations");
         const auto& stations_array = stations_value.asArray();
         for (const auto& station_value : stations_array) {
-            series.addProfile(parseStationProfile(station_value));
+            series.addProfile(parseStationProfile(station_value, model.materials));
         }
 
         BranchDiscretizationHint hint;
@@ -392,6 +498,27 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
         if (const auto* rayleigh_beta = optionalMember(analysis_object, "rayleigh_beta")) {
             model.analysis.rayleigh_beta = requireNumber(*rayleigh_beta, "analysis.rayleigh_beta");
         }
+        if (const auto* auto_nonlinear_levels = optionalMember(analysis_object, "auto_nonlinear_levels")) {
+            model.analysis.auto_nonlinear_levels = parseIntegerArray(
+                *auto_nonlinear_levels,
+                "analysis.auto_nonlinear_levels"
+            );
+        }
+        if (const auto* auto_nonlinear_cubic_scale = optionalMember(analysis_object, "auto_nonlinear_cubic_scale")) {
+            model.analysis.auto_nonlinear_cubic_scale = requireNumber(
+                *auto_nonlinear_cubic_scale,
+                "analysis.auto_nonlinear_cubic_scale"
+            );
+        }
+        if (const auto* include_gravity_prestress = optionalMember(analysis_object, "include_gravity_prestress")) {
+            if (!include_gravity_prestress->isBool()) {
+                throw std::runtime_error("analysis.include_gravity_prestress must be boolean");
+            }
+            model.analysis.include_gravity_prestress = include_gravity_prestress->asBool();
+        }
+        if (const auto* gravity_direction = optionalMember(analysis_object, "gravity_direction")) {
+            model.analysis.gravity_direction = parseVec3(*gravity_direction, "analysis.gravity_direction");
+        }
         if (const auto* output_csv = optionalMember(analysis_object, "output_csv")) {
             model.analysis.output_csv = requireString(*output_csv, "analysis.output_csv");
         }
@@ -407,9 +534,7 @@ OrchardModel TreeModelBuilder::build(const JsonValue& root) const {
             if (const auto* target_node = optionalMember(observation_object, "target_node")) {
                 observation.target_node = parseNodeSelector(*target_node, "observations[].target_node");
             }
-            if (const auto* target_component = optionalMember(observation_object, "target_component")) {
-                observation.target_component = requireString(*target_component, "observations[].target_component");
-            }
+            observation.target_components = parseObservationTargetComponents(observation_object);
             model.observations.push_back(std::move(observation));
         }
     }
@@ -501,12 +626,14 @@ void ModelValidator::validate(const OrchardModel& model) const {
             if (!model.topology.contains(observation.target_id)) {
                 throw std::runtime_error("Observation references unknown branch: " + observation.target_id);
             }
-            if (
-                observation.target_component != "ux"
-                && observation.target_component != "uy"
-                && observation.target_component != "uz"
-            ) {
-                throw std::runtime_error("Branch observation target_component must be one of ux, uy, uz");
+            for (const auto& component : observation.target_components) {
+                if (
+                    component != "ux"
+                    && component != "uy"
+                    && component != "uz"
+                ) {
+                    throw std::runtime_error("Branch observation target_components must contain only ux, uy, uz");
+                }
             }
         } else if (observation.target_type == "fruit") {
             bool found = false;

@@ -32,6 +32,12 @@ Vec3 BranchPath::direction() const {
     return normalize(end_ - start_);
 }
 
+double BranchPath::inclinationAngleRad() const {
+    const Vec3 axis = direction();
+    const double horizontal = std::sqrt((axis.x * axis.x) + (axis.y * axis.y));
+    return std::atan2(std::abs(axis.z), horizontal);
+}
+
 void TreeTopology::addBranch(
     const std::string& branch_id,
     std::optional<std::string> parent_branch_id,

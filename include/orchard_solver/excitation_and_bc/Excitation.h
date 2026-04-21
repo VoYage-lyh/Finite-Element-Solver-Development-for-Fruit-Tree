@@ -1,6 +1,9 @@
 #pragma once
 
 #include <string>
+#include <vector>
+
+#include "orchard_solver/Common.h"
 
 namespace orchard {
 
@@ -44,6 +47,10 @@ struct AnalysisSettings {
     double nonlinear_tolerance {1.0e-8};
     double rayleigh_alpha {0.0};
     double rayleigh_beta {1.0e-4};
+    std::vector<int> auto_nonlinear_levels;
+    double auto_nonlinear_cubic_scale {0.0};
+    bool include_gravity_prestress {false};
+    Vec3 gravity_direction {0.0, 0.0, -1.0};
     std::string output_csv {"frequency_response.csv"};
 };
 

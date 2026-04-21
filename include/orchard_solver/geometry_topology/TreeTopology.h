@@ -19,6 +19,7 @@ public:
     [[nodiscard]] double length() const noexcept;
     [[nodiscard]] Vec3 pointAt(double station) const noexcept;
     [[nodiscard]] Vec3 direction() const;
+    [[nodiscard]] double inclinationAngleRad() const;
 
 private:
     Vec3 start_ {};
@@ -31,7 +32,7 @@ struct ObservationPoint {
     std::string target_type;
     std::string target_id;
     std::string target_node {"tip"};
-    std::string target_component {"ux"};
+    std::vector<std::string> target_components {"ux"};
 };
 
 struct TopologyNode {

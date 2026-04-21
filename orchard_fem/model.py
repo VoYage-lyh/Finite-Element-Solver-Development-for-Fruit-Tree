@@ -9,6 +9,12 @@ from orchard_fem.cross_section.profile import (
     MeasuredSectionSeries,
     ParameterizedSectionProfile,
 )
+from orchard_fem.cross_section.defaults import (
+    DEFAULT_PHLOEM_MATERIAL_ID,
+    DEFAULT_PITH_MATERIAL_ID,
+    DEFAULT_XYLEM_MATERIAL_ID,
+    make_circular_section,
+)
 from orchard_fem.cross_section.tissue import RegionGeometry, SectionShapeKind, TissueRegion, TissueType
 from orchard_fem.topology.tree import BranchPath, ObservationPoint, TreeTopology, Vec3
 
@@ -130,6 +136,10 @@ class AnalysisSettings:
     nonlinear_tolerance: float = 1.0e-8
     rayleigh_alpha: float = 0.0
     rayleigh_beta: float = 1.0e-4
+    auto_nonlinear_levels: list[int] = field(default_factory=list)
+    auto_nonlinear_cubic_scale: float = 0.0
+    include_gravity_prestress: bool = False
+    gravity_direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
     output_csv: str = "frequency_response.csv"
 
 
@@ -203,10 +213,39 @@ def parse_regions(payload: list[dict]) -> list[TissueRegion]:
     ]
 
 
-def parse_section_series(payload: list[dict]) -> MeasuredSectionSeries:
+def parse_section_series(
+    payload: list[dict],
+    available_material_ids: set[str] | None = None,
+) -> MeasuredSectionSeries:
     series = MeasuredSectionSeries()
     for station in payload:
         station_value = float(station["s"])
+        shorthand = station.get("shorthand")
+        if shorthand is not None:
+            if str(shorthand) != "circular":
+                raise ValueError(f"Unsupported station shorthand: {shorthand}")
+
+            required_material_ids = {
+                DEFAULT_XYLEM_MATERIAL_ID,
+                DEFAULT_PITH_MATERIAL_ID,
+                DEFAULT_PHLOEM_MATERIAL_ID,
+            }
+            if available_material_ids is not None:
+                missing = sorted(required_material_ids - available_material_ids)
+                if missing:
+                    raise ValueError(
+                        "Circular shorthand requires materials to be defined: "
+                        + ", ".join(missing)
+                    )
+
+            series.add_profile(
+                make_circular_section(
+                    station=station_value,
+                    outer_radius=float(station["outer_radius"]),
+                )
+            )
+            continue
+
         regions = parse_regions(station["regions"])
         profile_type = str(station.get("profile_type", "parameterized"))
         profile: CrossSectionProfile

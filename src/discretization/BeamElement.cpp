@@ -112,6 +112,34 @@ Matrix12 BeamElement::buildLocalStiffnessMatrix(const BeamElementProperties& pro
     return matrix;
 }
 
+Matrix12 BeamElement::buildLocalGeometricStiffnessMatrix(const double axial_force, const double length) {
+    if (length <= 0.0) {
+        throw std::runtime_error("Beam element length must be positive");
+    }
+
+    Matrix12 matrix = zeroMatrix12();
+    const double scale = axial_force / (30.0 * length);
+    const double l2 = length * length;
+    const std::array<std::array<double, 4>, 4> base {{
+        {{36.0 * scale, 3.0 * length * scale, -36.0 * scale, 3.0 * length * scale}},
+        {{3.0 * length * scale, 4.0 * l2 * scale, -3.0 * length * scale, -1.0 * l2 * scale}},
+        {{-36.0 * scale, -3.0 * length * scale, 36.0 * scale, -3.0 * length * scale}},
+        {{3.0 * length * scale, -1.0 * l2 * scale, -3.0 * length * scale, 4.0 * l2 * scale}}
+    }};
+    addSubmatrix(matrix, {1, 5, 7, 11}, base);
+
+    const std::array<double, 4> sign = {1.0, -1.0, 1.0, -1.0};
+    std::array<std::array<double, 4>, 4> bending_y {};
+    for (std::size_t row = 0; row < 4; ++row) {
+        for (std::size_t col = 0; col < 4; ++col) {
+            bending_y[row][col] = sign[row] * base[row][col] * sign[col];
+        }
+    }
+    addSubmatrix(matrix, {2, 4, 8, 10}, bending_y);
+
+    return matrix;
+}
+
 Matrix12 BeamElement::buildLocalMassMatrix(const BeamElementProperties& properties) {
     if (properties.length <= 0.0) {
         throw std::runtime_error("Beam element length must be positive");

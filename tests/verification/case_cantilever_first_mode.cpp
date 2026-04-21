@@ -53,7 +53,7 @@ orchard::OrchardModel buildCantileverModel(const int num_elements) {
     model.analysis.frequency_steps = 240;
     model.analysis.rayleigh_alpha = 0.0;
     model.analysis.rayleigh_beta = 0.0;
-    model.observations.push_back(orchard::ObservationPoint {"tip_uy", "branch", "cantilever", "tip", "uy"});
+    model.observations.push_back(orchard::ObservationPoint {"tip_uy", "branch", "cantilever", "tip", {"uy"}});
     return model;
 }
 

@@ -6,7 +6,10 @@ from math import fabs
 
 from orchard_fem.elements.beam_formulation import (
     BeamElementProperties,
+    build_local_geometric_stiffness_matrix,
     build_global_element_matrices,
+    build_transformation_matrix,
+    transform_to_global,
 )
 from orchard_fem.materials.base import (
     BranchSectionState,
@@ -14,7 +17,7 @@ from orchard_fem.materials.base import (
     evaluate_branch_section_state,
 )
 from orchard_fem.model import OrchardModel
-from orchard_fem.topology.tree import distance
+from orchard_fem.topology.tree import Vec3, distance, normalize
 
 
 Matrix = list[list[float]]
@@ -32,12 +35,24 @@ class BranchNodeState:
 
 
 @dataclass(frozen=True)
+class BranchElementState:
+    branch_id: str
+    element_index: int
+    dofs: tuple[int, ...]
+    transformation_matrix: Matrix
+    length: float
+    axial_rigidity: float
+
+
+@dataclass(frozen=True)
 class LinearDynamicAssemblyResult:
     stiffness_matrix: Matrix
     mass_matrix: Matrix
     damping_matrix: Matrix
+    gravity_load: list[float]
     dof_labels: list[str]
     branch_nodes: dict[str, list[BranchNodeState]]
+    branch_elements: dict[str, list[BranchElementState]]
     fruit_dofs: dict[str, int]
     nonlinear_links: list["NonlinearLinkDefinition"]
     excitation_dof: int
@@ -188,6 +203,7 @@ class OrchardSystemAssembler:
     def assemble(self, model: OrchardModel) -> LinearDynamicAssemblyResult:
         dof_manager = _DOFManager()
         branch_nodes: dict[str, list[BranchNodeState]] = {}
+        branch_elements: dict[str, list[BranchElementState]] = {}
         fruit_dofs: dict[str, int] = {}
         nonlinear_links: list[NonlinearLinkDefinition] = []
 
@@ -217,10 +233,19 @@ class OrchardSystemAssembler:
         stiffness = _zero_matrix(dof_manager.size())
         mass = _zero_matrix(dof_manager.size())
         damping = _zero_matrix(dof_manager.size())
+        gravity_load = [0.0 for _ in range(dof_manager.size())]
         material_lookup = build_material_lookup(model.materials)
+        gravity_scale = 9.81
+        apply_gravity_prestress = model.analysis.include_gravity_prestress
+        gravity_direction = (
+            normalize(Vec3(*model.analysis.gravity_direction))
+            if apply_gravity_prestress
+            else Vec3(0.0, 0.0, -1.0)
+        )
 
         for branch in model.branches:
             nodes = branch_nodes[branch.branch_id]
+            branch_elements[branch.branch_id] = []
             for element_index in range(len(nodes) - 1):
                 first = nodes[element_index]
                 second = nodes[element_index + 1]
@@ -257,7 +282,7 @@ class OrchardSystemAssembler:
                     density=mass_per_length / area if area > 0.0 else 0.0,
                     length=element_length,
                 )
-
+                transformation = build_transformation_matrix(first.position, second.position)
                 global_stiffness, global_mass = build_global_element_matrices(
                     properties=properties,
                     start=first.position,
@@ -266,6 +291,28 @@ class OrchardSystemAssembler:
                 element_dofs = list(first.dofs) + list(second.dofs)
                 _scatter(stiffness, global_stiffness, element_dofs)
                 _scatter(mass, global_mass, element_dofs)
+                branch_elements[branch.branch_id].append(
+                    BranchElementState(
+                        branch_id=branch.branch_id,
+                        element_index=element_index,
+                        dofs=tuple(element_dofs),
+                        transformation_matrix=transformation,
+                        length=element_length,
+                        axial_rigidity=properties.youngs_modulus * properties.area,
+                    )
+                )
+
+                if apply_gravity_prestress:
+                    nodal_scale = 0.5 * mass_per_length * gravity_scale * element_length
+                    nodal_force = Vec3(
+                        gravity_direction.x * nodal_scale,
+                        gravity_direction.y * nodal_scale,
+                        gravity_direction.z * nodal_scale,
+                    )
+                    for node in (first, second):
+                        gravity_load[node.dofs[0]] += nodal_force.x
+                        gravity_load[node.dofs[1]] += nodal_force.y
+                        gravity_load[node.dofs[2]] += nodal_force.z
 
         for branch in model.branches:
             if branch.parent_branch_id is None:
@@ -293,6 +340,34 @@ class OrchardSystemAssembler:
                     child_root.dofs[component_index],
                     nearest_parent.dofs[component_index],
                     penalty,
+                )
+
+        auto_nonlinear_levels = set(model.analysis.auto_nonlinear_levels)
+        explicit_joint_children = {joint.child_branch_id for joint in model.joints}
+        if auto_nonlinear_levels:
+            for branch in model.branches:
+                if branch.parent_branch_id is None:
+                    continue
+                if branch.level not in auto_nonlinear_levels:
+                    continue
+                if branch.branch_id in explicit_joint_children:
+                    continue
+
+                child_nodes = branch_nodes[branch.branch_id]
+                parent_nodes = branch_nodes[branch.parent_branch_id]
+                child_root = child_nodes[0]
+                nearest_parent = min(
+                    parent_nodes,
+                    key=lambda node: distance(child_root.position, node.position),
+                )
+                nonlinear_links.append(
+                    NonlinearLinkDefinition(
+                        label=f"auto_joint:{branch.branch_id}",
+                        first_dof=child_root.dofs[0],
+                        second_dof=nearest_parent.dofs[0],
+                        kind=NonlinearLinkKind.CUBIC_SPRING,
+                        cubic_stiffness=model.analysis.auto_nonlinear_cubic_scale,
+                    )
                 )
 
         for clamp in model.clamps:
@@ -332,6 +407,35 @@ class OrchardSystemAssembler:
             damping[branch_dof][fruit_dof] -= damping_value
             damping[branch_dof][branch_dof] += damping_value
 
+        if apply_gravity_prestress:
+            from orchard_fem.solvers.static_preload import compute_gravity_axial_forces
+
+            axial_forces = compute_gravity_axial_forces(
+                LinearDynamicAssemblyResult(
+                    stiffness_matrix=stiffness,
+                    mass_matrix=mass,
+                    damping_matrix=damping,
+                    gravity_load=gravity_load,
+                    dof_labels=dof_manager.labels,
+                    branch_nodes=branch_nodes,
+                    branch_elements=branch_elements,
+                    fruit_dofs=fruit_dofs,
+                    nonlinear_links=[],
+                    excitation_dof=-1,
+                    observation_names=[],
+                    observation_dofs=[],
+                ),
+                gravity_load,
+            )
+            for branch in model.branches:
+                for element, axial_force in zip(branch_elements[branch.branch_id], axial_forces[branch.branch_id]):
+                    local_geometric = build_local_geometric_stiffness_matrix(axial_force, element.length)
+                    global_geometric = transform_to_global(
+                        local_geometric,
+                        element.transformation_matrix,
+                    )
+                    _scatter(stiffness, global_geometric, list(element.dofs))
+
         _apply_rayleigh_damping(model, mass, stiffness, damping, material_lookup)
 
         excitation_nodes = branch_nodes[model.excitation.target_branch_id]
@@ -346,14 +450,26 @@ class OrchardSystemAssembler:
         for observation in model.observations:
             if observation.target_type == "branch":
                 nodes = branch_nodes[observation.target_id]
-                observation_names.append(observation.observation_id)
-                observation_dofs.append(
-                    _branch_dof(
-                        nodes,
-                        _resolve_node_index(nodes, observation.target_node),
-                        observation.target_component,
+                node_index = _resolve_node_index(nodes, observation.target_node)
+                if len(observation.target_components) == 1:
+                    observation_names.append(observation.observation_id)
+                    observation_dofs.append(
+                        _branch_dof(
+                            nodes,
+                            node_index,
+                            observation.target_components[0],
+                        )
                     )
-                )
+                else:
+                    for component in observation.target_components:
+                        observation_names.append(f"{observation.observation_id}_{component}")
+                        observation_dofs.append(
+                            _branch_dof(
+                                nodes,
+                                node_index,
+                                component,
+                            )
+                        )
             elif observation.target_type == "fruit":
                 observation_names.append(observation.observation_id)
                 observation_dofs.append(fruit_dofs[observation.target_id])
@@ -370,8 +486,10 @@ class OrchardSystemAssembler:
             stiffness_matrix=stiffness,
             mass_matrix=mass,
             damping_matrix=damping,
+            gravity_load=gravity_load,
             dof_labels=dof_manager.labels,
             branch_nodes=branch_nodes,
+            branch_elements=branch_elements,
             fruit_dofs=fruit_dofs,
             nonlinear_links=nonlinear_links,
             excitation_dof=excitation_dof,
