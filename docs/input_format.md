@@ -165,8 +165,8 @@ Each observation entry supports:
 
 ## Visualization Scripts
 
-- `scripts/plot_frequency_response.py`: lightweight frequency-response plotting helper.
-- `scripts/visualize_analysis.py`: orchard geometry plus excitation/measurement visualization helper.
+- `scripts/plot_frequency_response.py`: `matplotlib`-based frequency-response plotting helper.
+- `scripts/visualize_analysis.py`: `numpy`/`matplotlib` orchard geometry plus excitation/measurement visualization helper.
 
 `visualize_analysis.py` reads the model JSON together with the response CSV and highlights:
 

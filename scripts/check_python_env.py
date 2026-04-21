@@ -11,6 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 CONDA_ENV_PATH = REPO_ROOT / "config" / "fenicsx_pinn_environment.yml"
+PREFERRED_PYPROJECT_GROUPS = ("project", "dev", "viz", "ml", "ubuntu-test")
 
 PACKAGE_IMPORT_ALIASES = {
     "pytest-cov": "pytest_cov",
@@ -18,9 +19,17 @@ PACKAGE_IMPORT_ALIASES = {
     "pytorch": "torch",
 }
 
-TOOL_COMMANDS = {
+REQUIRED_TOOL_COMMANDS = {
     "cmake": "cmake",
+    "ctest": "ctest",
     "g++": "g++",
+    "gcc": "gcc",
+    "git": "git",
+}
+
+OPTIONAL_TOOL_COMMANDS = {
+    "ninja": "ninja",
+    "mpiexec": "mpiexec",
 }
 
 
@@ -78,6 +87,18 @@ def parse_conda_dependencies(path: Path) -> list[str]:
     return packages
 
 
+def ordered_pyproject_groups(groups: dict[str, list[str]]) -> list[str]:
+    ordered: list[str] = []
+    for name in PREFERRED_PYPROJECT_GROUPS:
+        if name in groups:
+            ordered.append(name)
+
+    for name in sorted(groups):
+        if name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
 def print_group_status(title: str, packages: list[str]) -> list[str]:
     print(title)
     missing: list[str] = []
@@ -92,10 +113,10 @@ def print_group_status(title: str, packages: list[str]) -> list[str]:
     return missing
 
 
-def print_tool_status() -> list[str]:
-    print("External tools")
+def print_tool_status(title: str, commands: dict[str, str]) -> list[str]:
+    print(title)
     missing: list[str] = []
-    for name, command in TOOL_COMMANDS.items():
+    for name, command in commands.items():
         available = shutil.which(command) is not None
         print(f"  {name}: {'yes' if available else 'no'}")
         if not available:
@@ -111,7 +132,7 @@ def main() -> int:
     conda_packages = parse_conda_dependencies(CONDA_ENV_PATH)
 
     all_missing: dict[str, list[str]] = {}
-    for group_name in ("project", "dev", "viz", "ml"):
+    for group_name in ordered_pyproject_groups(pyproject_groups):
         missing = print_group_status(f"pyproject::{group_name}", pyproject_groups.get(group_name, []))
         if missing:
             all_missing[f"pyproject::{group_name}"] = missing
@@ -122,9 +143,12 @@ def main() -> int:
         all_missing["conda::fenicsx_pinn_environment"] = conda_missing
     print()
 
-    tool_missing = print_tool_status()
+    tool_missing = print_tool_status("External tools (required)", REQUIRED_TOOL_COMMANDS)
     if tool_missing:
         all_missing["tools"] = tool_missing
+    print()
+
+    print_tool_status("External tools (optional / backend-specific)", OPTIONAL_TOOL_COMMANDS)
     print()
 
     print("Missing summary")

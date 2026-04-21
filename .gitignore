@@ -1,4 +1,16 @@
 build/
+.codex
 *.exe
 *.obj
+*.dll
+*.so
+*.dylib
+*.o
 *.csv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/

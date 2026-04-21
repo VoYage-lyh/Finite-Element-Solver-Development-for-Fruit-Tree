@@ -1,6 +1,34 @@
 import csv
+import os
 import sys
+import tempfile
 from pathlib import Path
+
+PLOT_INSTALL_HINT = (
+    "plot_frequency_response.py requires matplotlib. Install the repository test extras with "
+    "`python -m pip install -e \".[ubuntu-test]\"` or create the conda environment from "
+    "`config/fenicsx_pinn_environment.yml`."
+)
+
+
+class MissingDependencyError(RuntimeError):
+    pass
+
+
+def require_matplotlib():
+    cache_root = Path(tempfile.gettempdir()) / "orchard-mpl-cache"
+    matplotlib_cache = cache_root / "matplotlib"
+    xdg_cache = cache_root / "xdg"
+    matplotlib_cache.mkdir(parents=True, exist_ok=True)
+    xdg_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_cache))
+    os.environ.setdefault("XDG_CACHE_HOME", str(xdg_cache))
+
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError as exc:
+        raise MissingDependencyError(f"{PLOT_INSTALL_HINT} Missing module: {exc.name}.") from exc
+    return plt
 
 
 def main() -> int:
@@ -13,7 +41,7 @@ def main() -> int:
         print(f"CSV file not found: {csv_path}")
         return 1
 
-    with csv_path.open("r", newline="") as handle:
+    with csv_path.open("r", newline="", encoding="utf-8") as handle:
         reader = csv.reader(handle)
         rows = list(reader)
 
@@ -25,11 +53,7 @@ def main() -> int:
     print(f"Loaded {len(rows) - 1} response samples from {csv_path}")
     print("Columns:", ", ".join(headers))
 
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("matplotlib is not installed; showing header preview only.")
-        return 0
+    plt = require_matplotlib()
 
     frequency = [float(row[0]) for row in rows[1:]]
     for column_index, name in enumerate(headers[1:], start=1):
@@ -47,4 +71,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except MissingDependencyError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1)

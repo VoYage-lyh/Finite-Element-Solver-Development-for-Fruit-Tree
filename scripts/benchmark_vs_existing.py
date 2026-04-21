@@ -11,8 +11,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+IS_WINDOWS = sys.platform.startswith("win")
+
 from orchard_fem.io.legacy_loader import load_orchard_model
-from orchard_fem.solvers.modal import DenseModalSolver, ModalAnalysisRequest, SLEPcModalSolver, slepc_available
+from orchard_fem.solvers.modal import ModalAnalysisRequest, SLEPcModalSolver
 from orchard_fem.solvers.modal_assembler import OrchardModalAssembler
 
 
@@ -51,20 +53,35 @@ def parse_args() -> argparse.Namespace:
 
 def default_cli_path() -> Path | None:
     candidates = [
-        Path("build/orchard_cli.exe"),
         Path("build/orchard_cli"),
+        Path("build/Debug/orchard_cli"),
+        Path("build/Release/orchard_cli"),
+        Path("build/orchard_cli.exe"),
+        Path("build/Debug/orchard_cli.exe"),
+        Path("build/Release/orchard_cli.exe"),
     ]
+    if IS_WINDOWS:
+        candidates = sorted(candidates, key=lambda candidate: 0 if candidate.suffix == ".exe" else 1)
+
     for candidate in candidates:
-        if candidate.exists():
-            return candidate
+        resolved = (REPO_ROOT / candidate).resolve()
+        if resolved.exists():
+            return resolved
 
     executable = shutil.which("orchard_cli")
     return Path(executable) if executable is not None else None
 
 
 def run_cpp_baseline(cli_path: Path, model_json: Path, baseline_csv: Path) -> None:
+    baseline_csv.parent.mkdir(parents=True, exist_ok=True)
     command = [str(cli_path), str(model_json), str(baseline_csv)]
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
     if completed.returncode != 0:
         raise RuntimeError(
             "C++ baseline run failed.\nSTDOUT:\n{0}\nSTDERR:\n{1}".format(
@@ -131,7 +148,8 @@ def compare_csv(baseline_csv: Path, candidate_csv: Path) -> None:
 def write_python_modal_summary(model_json: Path, output_csv: Path, num_modes: int) -> None:
     model = load_orchard_model(str(model_json))
     assembled = OrchardModalAssembler().assemble(model)
-    solver = SLEPcModalSolver() if slepc_available() else DenseModalSolver()
+
+    solver = SLEPcModalSolver()
     modes = solver.solve(
         ModalAnalysisRequest(
             num_modes=num_modes,
@@ -145,7 +163,7 @@ def write_python_modal_summary(model_json: Path, output_csv: Path, num_modes: in
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["mode_index", "frequency_hz", "eigenvalue", "modal_mass", "backend"])
-        backend_name = "slepc" if slepc_available() else "dense_python"
+        backend_name = "slepc"
         for mode in modes:
             writer.writerow(
                 [
@@ -162,22 +180,30 @@ def write_python_modal_summary(model_json: Path, output_csv: Path, num_modes: in
 
 def main() -> int:
     args = parse_args()
-    cli_path = args.cli if args.cli is not None else default_cli_path()
+    model_json = args.model_json.resolve()
+    baseline_csv = args.baseline_csv.resolve()
+    candidate_csv = args.candidate_csv.resolve() if args.candidate_csv is not None else None
+    python_modal_summary = (
+        args.python_modal_summary.resolve()
+        if args.python_modal_summary is not None
+        else None
+    )
+    cli_path = args.cli.resolve() if args.cli is not None else default_cli_path()
     if cli_path is None or not cli_path.exists():
         raise FileNotFoundError(
             "Could not locate orchard_cli. Build the C++ executable first or pass --cli."
         )
 
-    run_cpp_baseline(cli_path, args.model_json, args.baseline_csv)
-    print("Baseline CSV written to {0}".format(args.baseline_csv))
+    run_cpp_baseline(cli_path, model_json, baseline_csv)
+    print("Baseline CSV written to {0}".format(baseline_csv))
 
-    if args.candidate_csv is None:
+    if candidate_csv is None:
         print("No candidate CSV provided. Baseline generation completed.")
     else:
-        compare_csv(args.baseline_csv, args.candidate_csv)
+        compare_csv(baseline_csv, candidate_csv)
 
-    if args.python_modal_summary is not None:
-        write_python_modal_summary(args.model_json, args.python_modal_summary, args.num_modes)
+    if python_modal_summary is not None:
+        write_python_modal_summary(model_json, python_modal_summary, args.num_modes)
     return 0
 
 

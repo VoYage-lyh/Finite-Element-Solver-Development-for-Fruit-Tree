@@ -1,8 +1,8 @@
-"""Python coordination layer for OrchardVibrationSolver.
+"""FEniCSx/PETSc/SLEPc-facing coordination layer for OrchardVibrationSolver.
 
-This package is introduced to host the FEniCSx/PETSc-facing workflow without
-displacing the existing C++ project core. The current C++ solver remains the
-reference backend while Python modules are added incrementally.
+The orchard domain model stays project-specific, while numerical solver
+responsibilities migrate away from handwritten dense routines toward the
+PETSc/SLEPc backend used in the FEniCSx stack.
 """
 
 from orchard_fem.io.legacy_loader import load_orchard_model

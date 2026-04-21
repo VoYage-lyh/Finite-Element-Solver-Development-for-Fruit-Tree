@@ -109,16 +109,16 @@ Current implemented solver features:
 - 3D Euler-Bernoulli beam assembly with 6 DOFs per branch node,
 - frequency-response analysis for scan-friendly linearized studies,
 - Newmark time-history analysis with localized nonlinear-link support,
+- Python-side SLEPc modal analysis and PETSc frequency-response workflow for the FEniCSx migration path,
 - legacy polynomial joint and gap-law interfaces preserved for follow-up joint refactor work,
 - fruit mass-spring-damper attachment coupling,
 - CSV output for both frequency and time histories, including excitation-point channels for visualization.
 
 Current limitation:
 
-- `CMakeLists.txt` is provided, but in the current local environment `cmake` is not available on `PATH`, so validation was performed with `g++` directly.
 - Frequency-response analysis currently uses the zero-amplitude linearized system; localized nonlinearities are fully active in time-history analysis.
-- After the beam-element upgrade, clamp cubic nonlinearity is active, but joint nonlinearity still needs a dedicated 6-DOF beam-joint mapping pass.
-- `scripts/visualize_analysis.py` uses `matplotlib`/`numpy` when available and falls back to standalone SVG generation otherwise. The fallback renderer is static rather than interactive, but it still shows the orchard geometry, excitation point, measurement points, and response panels.
+- Python time-history now has a PETSc/Newmark path for the current clamp-cubic transient workflow; joint-law nonlinearity is still pending the dedicated 6-DOF beam-joint mapping pass.
+- `scripts/visualize_analysis.py` is a strict `matplotlib`/`numpy` workflow. If those packages are missing, it now fails fast and points to the required install command instead of switching to a hand-written renderer.
 
 ## Visualization
 
@@ -153,6 +153,10 @@ Time-history CSV files now include:
 - Verification cases now live under `tests/verification/`.
 - Run `ctest -L verification` before merging any change that touches `solver_core`, `branches`, or `discretization`.
 - Current verification coverage includes cantilever modal frequencies, simply supported beam static deflection, Duffing hardening response, and a hinged two-bar spring-mass benchmark.
+
+## Ubuntu 24 setup
+
+- For Ubuntu 24.04 local build/test dependencies and validation commands, use `config/ubuntu24_test_dependencies.txt`.
 
 ## Documentation
 

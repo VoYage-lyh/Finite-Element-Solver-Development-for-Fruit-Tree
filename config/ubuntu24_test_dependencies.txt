@@ -1,0 +1,78 @@
+OrchardVibrationSolver Ubuntu 24.04 test dependency guide
+=========================================================
+
+This file is the Ubuntu-first dependency checklist for local build and test work.
+It separates the always-needed toolchain from optional research backends.
+
+1. Required system packages
+---------------------------
+sudo apt update
+sudo apt install -y build-essential gcc g++ cmake ninja-build pkg-config git python3 python3-pip python3-venv
+
+2. Python environment for the current repository tests
+------------------------------------------------------
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[ubuntu-test]"
+
+What this installs:
+- pytest
+- pytest-cov
+- ruff
+- mypy
+- numpy
+- scipy
+- pandas
+- matplotlib
+- pyyaml
+- jupyterlab
+
+3. Optional ML packages
+-----------------------
+python -m pip install -e ".[ml]"
+
+Adds:
+- torch
+- h5py
+
+4. Optional FEniCSx / PETSc / SLEPc backend
+------------------------------------------
+Recommended on Ubuntu: use conda or micromamba instead of pip.
+
+Additional Ubuntu packages:
+sudo apt install -y openmpi-bin libopenmpi-dev
+
+Environment creation:
+conda env create -f config/fenicsx_pinn_environment.yml
+conda activate orchard-fenicsx-pinn
+
+Key packages in that environment:
+- dolfinx
+- petsc4py
+- slepc4py
+- mpi4py
+- numpy
+- scipy
+- pandas
+- matplotlib
+- pyyaml
+- h5py
+- pytest
+- pytest-cov
+- ruff
+- mypy
+- pytorch
+
+5. Validation commands
+----------------------
+python scripts/check_python_env.py
+cmake -S . -B build
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+pytest -q
+
+6. Optional smoke runs
+----------------------
+./build/orchard_cli examples/demo_orchard.json build/demo_frequency_response.csv
+python scripts/visualize_analysis.py examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
