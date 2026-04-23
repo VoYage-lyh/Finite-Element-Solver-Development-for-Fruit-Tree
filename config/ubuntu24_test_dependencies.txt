@@ -1,13 +1,13 @@
 OrchardVibrationSolver Ubuntu 24.04 test dependency guide
 =========================================================
 
-This file is the Ubuntu-first dependency checklist for local build and test work.
-It separates the always-needed toolchain from optional research backends.
+This file is the Ubuntu-first dependency checklist for the Python-first workflow.
+It separates the always-needed Python path from optional legacy C++ tooling.
 
 1. Required system packages
 ---------------------------
 sudo apt update
-sudo apt install -y build-essential gcc g++ cmake ninja-build pkg-config git python3 python3-pip python3-venv
+sudo apt install -y git python3 python3-pip python3-venv
 
 2. Python environment for the current repository tests
 ------------------------------------------------------
@@ -36,8 +36,8 @@ Adds:
 - torch
 - h5py
 
-4. Optional FEniCSx / PETSc / SLEPc backend
-------------------------------------------
+4. Recommended FEniCSx / PETSc / SLEPc backend
+---------------------------------------------
 Recommended on Ubuntu: use conda or micromamba instead of pip.
 
 Additional Ubuntu packages:
@@ -45,7 +45,7 @@ sudo apt install -y openmpi-bin libopenmpi-dev
 
 Environment creation:
 conda env create -f config/fenicsx_pinn_environment.yml
-conda activate orchard-fenicsx-pinn
+conda activate orchard-fenicsx
 
 Key packages in that environment:
 - dolfinx
@@ -64,15 +64,29 @@ Key packages in that environment:
 - mypy
 - pytorch
 
-5. Validation commands
-----------------------
-python scripts/check_python_env.py
-cmake -S . -B build
-cmake --build build -j
-ctest --test-dir build --output-on-failure
-pytest -q
+5. Python-first validation commands
+-----------------------------------
+python -m orchard_fem doctor
+python -m orchard_fem verify --skip-demo-suite
+python -m orchard_fem full-validate --skip-fenicsx-tests --skip-python-demo-suite
+
+Inside the PETSc/SLEPc environment:
+conda run -n orchard-fenicsx python -m orchard_fem verify --skip-integration
 
 6. Optional smoke runs
 ----------------------
-./build/orchard_cli examples/demo_orchard.json build/demo_frequency_response.csv
-python scripts/visualize_analysis.py examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
+python -m orchard_fem run examples/demo_orchard.json --output-csv build/demo_frequency_response.csv
+python -m orchard_fem visualize examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
+
+7. Optional legacy C++ tooling
+------------------------------
+Only install these if you intentionally want to inspect or preserve the old reference implementation:
+sudo apt install -y build-essential gcc g++ cmake ninja-build pkg-config
+
+Legacy-only commands:
+cmake -S . -B build
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+
+Historical note:
+- see `docs/legacy_reference.md` before using the archived C++ path

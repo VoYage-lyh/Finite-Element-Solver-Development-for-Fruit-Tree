@@ -12,15 +12,62 @@ The intent is not to prove that the orchard solver is a full general-purpose FEM
 
 ## How to run
 
-When CMake/CTest is available:
+The primary Python verification entry point is:
 
 ```bash
-ctest -L verification
+conda run -n orchard-fenicsx python -m pytest -q \
+  tests/verification/test_python_beam_benchmarks.py \
+  tests/verification/test_python_dynamic_benchmarks.py \
+  tests/integration/test_gravity_prestress.py::test_gravity_prestress_adds_load_and_reduces_first_mode
 ```
 
-In the current local environment, `cmake` is not available on `PATH`, so these verification cases are also compiled and run directly with `g++` during local development.
+For the standard repository health check, use:
+
+```bash
+python -m orchard_fem full-validate
+```
+
+That command is Python-first: it runs the Python integration tests, the PETSc/SLEPc gravity-prestress regression, and regenerates the standard Python demo artifacts.
+
+For direct day-to-day Python workflows, the package CLI is now the primary entry point:
+
+```bash
+python -m orchard_fem --help
+python -m orchard_fem doctor
+python -m orchard_fem demo-suite --output-dir build/validation/python
+python -m orchard_fem verify
+```
+
+Historical C++ notes and old comparison utilities are now collected in:
+
+```bash
+docs/legacy_reference.md
+```
 
 ## Case Inventory
+
+### Python Analytical Benchmarks
+
+- File: `tests/verification/test_python_beam_benchmarks.py`
+- Coverage:
+  - cantilever first bending mode against the Euler-Bernoulli analytical reference,
+  - cantilever modal convergence under mesh refinement,
+  - simply supported beam midspan deflection under a concentrated load.
+- Purpose: keep the default verification path on the Python PETSc/SLEPc backend instead of relying on the legacy C++ executables.
+
+### Python Dynamic Benchmarks
+
+- File: `tests/verification/test_python_dynamic_benchmarks.py`
+- Coverage:
+  - Duffing hardening peak shift against the backbone estimate,
+  - hinged two-bar first mode against the rigid-link spring-mass asymptote.
+- Purpose: move the nonlinear-transient and reduced-joint regression guardrails onto the Python PETSc/SLEPc workflow.
+
+### Legacy C++ Cases
+
+The remaining `.cpp` cases below are historical reference material.
+They are no longer the default verification surface for the repository.
+They also are not treated as the correctness oracle for Python-first development.
 
 ### 1. Cantilever First Mode
 
@@ -107,6 +154,7 @@ In the current local environment, `cmake` is not available on `PATH`, so these v
 
 ## Maintenance Guidance
 
-- If `solver_core`, `branches`, `discretization`, or `joints_and_bifurcations` changes, rerun `ctest -L verification`.
+- If Python solver assembly, dynamics, or verification utilities change, rerun `python -m orchard_fem verify`.
+- If you intentionally inspect the archived C++ path, use [legacy_reference.md](legacy_reference.md) as the starting point instead of mixing those commands into the default workflow.
 - If a verification case starts failing after a modeling upgrade, prefer updating the model assumptions and documented reference together rather than silently loosening tolerances.
 - Any new reduction or nonlinear-frequency capability should add its own verification case here instead of only adding smoke tests.

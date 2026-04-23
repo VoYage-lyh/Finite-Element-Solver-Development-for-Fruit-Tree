@@ -77,14 +77,30 @@ class SLEPcModalSolver:
         solver.setOperators(stiffness, mass)
         solver.setProblemType(SLEPc.EPS.ProblemType.GHEP)
         solver.setType(SLEPc.EPS.Type.KRYLOVSCHUR)
-        solver.setDimensions(request.num_modes, PETSc.DECIDE)
-        solver.setWhichEigenpairs(SLEPc.EPS.Which.SMALLEST_REAL)
+        ncv = min(len(system.dof_labels), max((2 * request.num_modes) + 8, 20))
+        solver.setDimensions(request.num_modes, ncv)
+
+        # For structural modal analysis we want the eigenpairs closest to zero.
+        # Shift-and-invert is much more reliable than plain SMALLEST_REAL on
+        # penalty-constrained generalized systems.
+        solver.setTarget(0.0)
+        solver.setWhichEigenpairs(SLEPc.EPS.Which.TARGET_MAGNITUDE)
+        spectral_transform = solver.getST()
+        spectral_transform.setType(SLEPc.ST.Type.SINVERT)
+        ksp = spectral_transform.getKSP()
+        ksp.setType(PETSc.KSP.Type.PREONLY)
+        ksp.getPC().setType(PETSc.PC.Type.LU)
+
+        solver.setTolerances(1.0e-10, max(500, 25 * request.num_modes))
+        solver.setFromOptions()
         solver.solve()
 
         converged = solver.getConverged()
         if converged < request.num_modes:
             raise RuntimeError(
-                f"SLEPc converged only {converged} eigenpairs, requested {request.num_modes}"
+                "SLEPc converged only "
+                f"{converged} eigenpairs, requested {request.num_modes} "
+                f"(reason={solver.getConvergedReason()}, iterations={solver.getIterationNumber()})"
             )
 
         results: list[ModeResult] = []

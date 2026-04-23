@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import cos, pi, sin
 
 from orchard_fem.io.csv_writer import FrequencyResponseRow, write_frequency_response_csv
-from orchard_fem.io.legacy_loader import load_orchard_model
+from orchard_fem.io.model_loader import load_orchard_model
 from orchard_fem.model import ExcitationKind
 from orchard_fem.solvers._petsc import create_aij_matrix, require_petsc, solve_linear_system
 from orchard_fem.solvers.modal_assembler import OrchardSystemAssembler

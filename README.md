@@ -22,7 +22,7 @@ The guiding principle is:
 - Orchard specificity over generic FEM breadth.
 - Fast repeated simulation over uniform maximum fidelity.
 - Explicit error assessment alongside each major simplification.
-- Modular C++20 core with Python-based preprocessing and workflow scripts.
+- Python-first PETSc/SLEPc workflow with clean hooks for the FEniCSx stack.
 - Clean interfaces for future reduction, enrichment, and backend upgrades.
 
 ## Planned capabilities
@@ -42,25 +42,28 @@ The guiding principle is:
 
 ```text
 .
-|-- apps/
-|-- CMakeLists.txt
+|-- orchard_fem/
+|   |-- commands/
+|   `-- workflows/
+|-- orchard_pinn/
 |-- README.md
 |-- config/
 |-- docs/
-|   `-- design.md
 |-- examples/
-|-- include/
 |-- scripts/
-|-- src/
-`-- tests/
+|-- tests/
+|-- legacy reference: apps/
+|-- legacy reference: include/
+|-- legacy reference: src/
+`-- legacy reference: CMakeLists.txt
 ```
 
 ## MVP contents
 
-- CLI app: `apps/orchard_cli.cpp`
+- Python CLI: `python -m orchard_fem` or `orchard-fem`
 - Demo model: `examples/demo_orchard.json`
 - Time-history demo: `examples/demo_orchard_time_history.json`
-- Output helpers: `scripts/plot_frequency_response.py`, `scripts/visualize_analysis.py`
+- Output helpers: `python -m orchard_fem plot-frequency-response`, `python -m orchard_fem visualize`
 - Tests: section geometry, material loading, topology assembly, beam-matrix assembly, demo frequency response, cantilever first mode
 
 ## Development phases
@@ -99,9 +102,9 @@ The first runnable milestone will support:
 
 This repository now includes a runnable orchard-specific MVP:
 
-1. project skeleton and CMake layout,
+1. project skeleton and Python package layout,
 2. orchard topology, cross-section, materials, fruits, joints, excitation, and solver modules,
-3. demo JSON model and CLI frequency-response run,
+3. demo JSON model and Python CLI frequency-response run,
 4. baseline automated tests.
 
 Current implemented solver features:
@@ -125,15 +128,15 @@ Current limitation:
 Frequency-response workflow:
 
 ```text
-orchard_cli examples/demo_orchard.json build/demo_frequency_response.csv
-python scripts/visualize_analysis.py examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
+python -m orchard_fem run examples/demo_orchard.json --output-csv build/demo_frequency_response.csv
+python -m orchard_fem visualize examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
 ```
 
 Time-history workflow with excitation/measurement time-frequency output:
 
 ```text
-orchard_cli examples/demo_orchard_time_history.json build/demo_time_history.csv
-python scripts/visualize_analysis.py examples/demo_orchard_time_history.json build/demo_time_history.csv --output-prefix build/demo_time_history
+python -m orchard_fem run examples/demo_orchard_time_history.json --output-csv build/demo_time_history.csv
+python -m orchard_fem visualize examples/demo_orchard_time_history.json build/demo_time_history.csv --output-prefix build/demo_time_history
 ```
 
 The visualizer produces:
@@ -151,15 +154,84 @@ Time-history CSV files now include:
 ## Verification
 
 - Verification cases now live under `tests/verification/`.
-- Run `ctest -L verification` before merging any change that touches `solver_core`, `branches`, or `discretization`.
+- The Python-first analytical beam benchmarks live in `tests/verification/test_python_beam_benchmarks.py`.
+- The Python-first dynamic regression benchmarks live in `tests/verification/test_python_dynamic_benchmarks.py`.
+- In `orchard-fenicsx`, prefer `python -m pytest -q tests/verification/test_python_beam_benchmarks.py tests/verification/test_python_dynamic_benchmarks.py tests/integration/test_gravity_prestress.py::test_gravity_prestress_adds_load_and_reduces_first_mode`.
+- Archived C++ verification executables now live behind the historical note in `docs/legacy_reference.md`.
 - Current verification coverage includes cantilever modal frequencies, simply supported beam static deflection, Duffing hardening response, and a hinged two-bar spring-mass benchmark.
 
 ## Ubuntu 24 setup
 
 - For Ubuntu 24.04 local build/test dependencies and validation commands, use `config/ubuntu24_test_dependencies.txt`.
 
+## Full validation
+
+The standard development workflow is now Python-first. For day-to-day validation, prefer:
+
+```bash
+python -m orchard_fem full-validate
+```
+
+It runs:
+
+- the Python integration tests in `orchard-dev`,
+- the PETSc/SLEPc gravity-prestress regression in `orchard-fenicsx`,
+- and a Python PETSc/SLEPc demo suite that regenerates the standard frequency-response, time-history, and modal-summary artifacts.
+
+The high-level Python application flow now has two explicit layers:
+
+- `orchard_fem/commands/` as the modular CLI command layer,
+- `orchard_fem/application.py` as the top-level orchestration facade used by the CLI,
+- `orchard_fem/workflows/` as the shared run / demo / validation workflow layer,
+- `orchard_fem/visualization/` as the package-native visualization subsystem,
+- `orchard_fem/automation/`, `orchard_fem/postprocess/`, and `orchard_fem/legacy/` as package-native support layers for repository automation, plotting, and archived C++ diagnostics.
+
+For day-to-day solver work, the primary entry point is now:
+
+```bash
+python -m orchard_fem --help
+```
+
+Or, after `pip install -e .`:
+
+```bash
+orchard-fem --help
+```
+
+The new Python-first validation command is:
+
+```bash
+python -m orchard_fem verify
+```
+
+The new Python-first environment audit command is:
+
+```bash
+python -m orchard_fem doctor
+```
+
+Useful overrides:
+
+```bash
+SKIP_FENICSX_TESTS=1 SKIP_PYTHON_DEMO_SUITE=1 python -m orchard_fem full-validate
+```
+
+```bash
+BUILD_DIR=/tmp/orchard-build VALIDATION_DIR=/tmp/orchard-validation python -m orchard_fem full-validate
+```
+
+The repository still keeps `scripts/run_full_validation.sh`, but it is now only a thin wrapper around the package CLI.
+
+If you intentionally need historical context from the old C++ path, keep it out of the main workflow and treat it as archival material:
+
+```bash
+python -m orchard_fem legacy-compare --help
+```
+
 ## Documentation
 
 - Design document: [docs/design.md](docs/design.md)
+- Active architecture note: [docs/python_first_architecture.md](docs/python_first_architecture.md)
+- Legacy reference note: [docs/legacy_reference.md](docs/legacy_reference.md)
 - Input format reference: [docs/input_format.md](docs/input_format.md)
 - Verification suite: [docs/verification.md](docs/verification.md)

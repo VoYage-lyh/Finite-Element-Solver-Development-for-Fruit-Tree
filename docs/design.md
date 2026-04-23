@@ -139,6 +139,12 @@ solver_core
 model_reduction / validation / outputs
 ```
 
+> Historical note
+>
+> This design draft reflects the earlier C++-centric repository layout.
+> The active development surface is now the Python-first stack described in
+> [python_first_architecture.md](python_first_architecture.md).
+
 ### 5.2 Module Map
 
 - `geometry_topology/`: tree graph, branch hierarchy, centerlines, observation and clamp points.

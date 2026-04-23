@@ -1,4 +1,4 @@
-name: orchard-fenicsx-pinn
+name: orchard-fenicsx
 channels:
   - conda-forge
 dependencies:

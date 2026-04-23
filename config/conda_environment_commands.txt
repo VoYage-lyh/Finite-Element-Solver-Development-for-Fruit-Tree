@@ -3,16 +3,16 @@ OrchardVibrationSolver conda environment commands
 
 Principle
 ---------
-1. Keep C++/CLI development usable on native Windows.
-2. Keep FEniCSx in a separate environment, because DOLFINx/PETSc/SLEPc is not a low-risk native Windows path.
-3. Keep PyTorch surrogate / inverse work separable from the FEniCSx stack to reduce solver conflicts.
+1. Keep `orchard_fem` development Python-first.
+2. Keep the PETSc/SLEPc/FEniCSx stack in its own environment.
+3. Keep PyTorch surrogate / inverse work separable from the solver stack to reduce dependency conflicts.
 
 
-Environment A: native Windows development / tests / plotting
+Environment A: general Python development / tests / plotting
 -----------------------------------------------------------
 Purpose:
-- Run the current C++ backend and Python helper scripts on Windows
-- Run Python smoke tests
+- Run the primary `orchard_fem` workflow
+- Run Python integration tests
 - Generate plots and benchmark summaries
 
 Command:
@@ -29,16 +29,16 @@ Optional:
 Environment B: FEniCSx / PETSc / SLEPc backend
 ----------------------------------------------
 Important:
-- Recommended target platform: WSL2 Ubuntu or native Linux
-- Do not treat native Windows as the primary installation target for this environment
+- Recommended target platform: Ubuntu, WSL2 Ubuntu, or native Linux
+- Treat this as the main high-fidelity solver / verification environment
 
 Purpose:
-- orchard_fem modal / frequency / time solver migration
+- orchard_fem modal / frequency / time solver
 - PETSc / SLEPc eigen and linear solve backend
-- Future DOLFINx integration
+- future DOLFINx integration
 
 Command:
-conda create -n orchard-fenicsx -c conda-forge python=3.11 dolfinx petsc4py slepc4py mpi4py numpy scipy pandas matplotlib pyyaml h5py pytest pytest-cov ruff mypy jupyterlab
+conda env create -f config/fenicsx_pinn_environment.yml
 
 Activation:
 conda activate orchard-fenicsx
@@ -65,11 +65,12 @@ conda activate orchard-ml
 Minimal recommended rollout order
 ---------------------------------
 1. Create orchard-dev first
-2. Create orchard-fenicsx inside WSL2/Linux
+2. Create orchard-fenicsx inside Ubuntu / WSL2 Ubuntu
 3. Create orchard-ml when you start PINN / surrogate work
 
 
 Post-install checks
 -------------------
 After activating any environment, run:
-python scripts/check_python_env.py
+python -m orchard_fem doctor
+python -m orchard_fem --help

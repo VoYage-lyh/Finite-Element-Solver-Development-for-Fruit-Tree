@@ -1,5 +1,12 @@
 # OrchardVibrationSolver FEniCSx + PINN Refactor Design
 
+> Historical note
+>
+> This document records an earlier migration plan that kept C++ as a first-class project core.
+> The active repository direction has since changed to a Python-first workflow centered on
+> `orchard_fem`, `python -m orchard_fem verify`, and Python-side verification benchmarks.
+> Read [python_first_architecture.md](python_first_architecture.md) first for the current plan.
+
 ## 1. Scope and Non-Negotiables
 
 This document defines the Phase P0 refactor plan for evolving the current OrchardVibrationSolver repository into a dedicated orchard-vibration framework with:

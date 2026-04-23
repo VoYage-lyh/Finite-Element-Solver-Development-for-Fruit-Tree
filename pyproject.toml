@@ -5,10 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orchard-vibration-solver"
 version = "0.1.0"
-description = "Dedicated orchard vibration framework with C++ core, Python orchestration, and planned FEniCSx/PINN extensions."
+description = "Python-first orchard vibration framework built around PETSc/SLEPc and FEniCSx-facing workflows."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.scripts]
+orchard-fem = "orchard_fem.cli:main"
 
 [project.optional-dependencies]
 dev = [

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from orchard_fem.io.legacy_loader import load_orchard_model
+from orchard_fem.io.model_loader import load_orchard_model
 from orchard_fem.solvers.modal_assembler import NonlinearLinkKind, OrchardSystemAssembler
 from orchard_fem.topology.tree import distance
 

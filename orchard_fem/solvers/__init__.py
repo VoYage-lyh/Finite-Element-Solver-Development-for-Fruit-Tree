@@ -18,6 +18,7 @@ from orchard_fem.solvers.time_history import (
     TimeHistoryPoint,
     TimeHistoryRequest,
     TimeHistoryResult,
+    solve_time_history_system,
 )
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     "TimeHistoryPoint",
     "TimeHistoryRequest",
     "TimeHistoryResult",
+    "solve_time_history_system",
 ]
