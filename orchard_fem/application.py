@@ -5,13 +5,13 @@ from typing import Sequence
 
 from orchard_fem.automation import FullValidationConfig, FullValidationOutputs, run_full_validation
 from orchard_fem.environment import run_environment_audit
-from orchard_fem.legacy import LegacyCompareRequest, run_legacy_compare
 from orchard_fem.postprocess import plot_frequency_response_csv
-from orchard_fem.validation import ValidationOutputs
 from orchard_fem.visualization import VisualizationOutputs, visualize_analysis
 from orchard_fem.workflows import (
     AnalysisRunOutputs,
     DemoSuiteOutputs,
+    DEFAULT_VALIDATION_OUTPUT_DIR,
+    ValidationOutputs,
     default_modal_output,
     resolve_output_path,
     run_configured_analysis,
@@ -22,7 +22,7 @@ from orchard_fem.workflows import (
 
 
 class OrchardApplication:
-    """High-level Python-first orchestration facade for solver workflows."""
+    """High-level Orchard FEM orchestration facade for solver workflows."""
 
     def run_analysis(
         self,
@@ -80,7 +80,7 @@ class OrchardApplication:
         include_integration: bool = True,
         include_verification: bool = True,
         include_demo_suite: bool = True,
-        output_dir: Path = Path("build/validation/python"),
+        output_dir: Path = DEFAULT_VALIDATION_OUTPUT_DIR,
         pytest_args: Sequence[str] | None = None,
     ) -> ValidationOutputs:
         return run_validation_suite(
@@ -96,9 +96,6 @@ class OrchardApplication:
 
     def plot_frequency_response(self, response_csv: Path, show: bool = True) -> None:
         plot_frequency_response_csv(response_csv, show=show)
-
-    def legacy_compare(self, request: LegacyCompareRequest) -> None:
-        run_legacy_compare(request)
 
     def full_validate(self, config: FullValidationConfig) -> FullValidationOutputs:
         return run_full_validation(config)

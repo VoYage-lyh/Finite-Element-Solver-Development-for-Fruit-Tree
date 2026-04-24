@@ -7,10 +7,15 @@ from orchard_fem.workflows.analysis import (
     write_modal_summary,
 )
 from orchard_fem.workflows.demo import DemoSuiteOutputs, run_standard_demo_suite
-from orchard_fem.workflows.validation import ValidationOutputs, run_validation_suite
+from orchard_fem.workflows.validation import (
+    DEFAULT_VALIDATION_OUTPUT_DIR,
+    ValidationOutputs,
+    run_validation_suite,
+)
 
 __all__ = [
     "AnalysisRunOutputs",
+    "DEFAULT_VALIDATION_OUTPUT_DIR",
     "DemoSuiteOutputs",
     "ValidationOutputs",
     "default_modal_output",

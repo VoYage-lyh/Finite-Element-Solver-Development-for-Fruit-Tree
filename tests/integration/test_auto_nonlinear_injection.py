@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from orchard_fem.io.model_loader import load_orchard_model
-from orchard_fem.solvers.modal_assembler import NonlinearLinkKind, OrchardSystemAssembler
-from orchard_fem.topology.tree import distance
+from orchard_fem.discretization import NonlinearLinkKind, OrchardSystemAssembler
+from orchard_fem.io import load_orchard_model
+from orchard_fem.topology import distance
 
 
 def _auto_nonlinear_payload() -> dict:

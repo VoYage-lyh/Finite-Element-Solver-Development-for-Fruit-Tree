@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from orchard_fem.solvers.frequency_response import (
+from orchard_fem.dynamics import (
     FrequencyResponseRequest,
     PETScFrequencyResponseSolver,
+    PETScTimeHistorySolver,
+    TimeHistoryRequest,
 )
-from orchard_fem.solvers.time_history import PETScTimeHistorySolver, TimeHistoryRequest
 from orchard_fem.workflows.analysis import write_modal_summary
 
 

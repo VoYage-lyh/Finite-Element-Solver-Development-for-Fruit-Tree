@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-04-24
+
+### Changed
+
+- Reworked the repository into an Orchard FEM-only main branch with the archived C++ implementation removed from the active workflow.
+- Simplified the active package surface to domain, topology, discretization, solver core, dynamics, workflows, visualization, automation, and loaders.
+- Removed remaining compatibility and archival comparison code from the runtime path.
+- Reorganized repository documentation around a cleaner GitHub-style structure with a focused `README.md`, `CONTRIBUTING.md`, and a `docs/` index.
+
+### Added
+
+- `CONTRIBUTING.md`
+- `docs/README.md`
+- `docs/getting_started.md`
+- `docs/development.md`
+
 ## 2026-04-19
 
 ### Added

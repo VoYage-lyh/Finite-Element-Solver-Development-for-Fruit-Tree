@@ -1,8 +1,8 @@
-OrchardVibrationSolver external environment checks
-==================================================
+Orchard FEM external environment checks
+=======================================
 
 These checks are for tools and host/runtime conditions outside Python packages.
-Run them manually and confirm the reported versions before moving deeper into the Python-first workflow.
+Run them manually and confirm the reported versions before moving deeper into the active Orchard FEM workflow.
 
 
 1. Host OS
@@ -87,9 +87,9 @@ Run from the repository root:
 python -m orchard_fem doctor
 
 
-9. Optional legacy C++ checks
------------------------------
-Only run these if you intentionally need the historical C++ reference implementation.
+9. Optional historical C++ checks
+---------------------------------
+Only run these from an older checkout if you intentionally need the archived C++ reference implementation.
 See `docs/legacy_reference.md` first.
 
 G++ version:

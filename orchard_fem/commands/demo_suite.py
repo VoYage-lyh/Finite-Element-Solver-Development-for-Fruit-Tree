@@ -14,7 +14,7 @@ def _handle_demo_suite(args: argparse.Namespace, application: OrchardApplication
         time_model=args.time_model,
         num_modes=args.num_modes,
     )
-    print("Python demo suite completed.")
+    print("Orchard FEM demo suite completed.")
     print(f"  frequency_response: {outputs.frequency_response_csv}")
     print(f"  time_history: {outputs.time_history_csv}")
     print(f"  modal_summary: {outputs.modal_summary_csv}")
@@ -27,7 +27,7 @@ def register_demo_suite_command(
 ) -> None:
     parser = subparsers.add_parser(
         "demo-suite",
-        help="Run the standard Python demo suite and regenerate validation CSV artifacts.",
+        help="Run the standard Orchard FEM demo suite and regenerate validation CSV artifacts.",
     )
     parser.add_argument(
         "--output-dir",

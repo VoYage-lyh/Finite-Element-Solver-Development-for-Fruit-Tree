@@ -3,7 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from orchard_fem.cross_section.profile import MeasuredSectionSeries
-from orchard_fem.model import BranchDefinition, MaterialModelKind, MaterialProperties
+from orchard_fem.domain import BranchDefinition, MaterialModelKind, MaterialProperties
+
+
+@dataclass(frozen=True)
+class BranchAverageProperties:
+    length: float
+    average_area: float
+    average_ix: float
+    average_iy: float
+    average_polar_moment: float
+    average_mass_per_length: float
+    average_youngs_modulus: float
+    average_shear_modulus: float
+    average_damping_ratio: float
 
 
 @dataclass(frozen=True)
@@ -22,6 +35,41 @@ class BranchSectionState:
 
 def build_material_lookup(materials: list[MaterialProperties]) -> dict[str, MaterialProperties]:
     return {material.material_id: material for material in materials}
+
+
+class MaterialLibrary:
+    def __init__(self, materials: list[MaterialProperties] | None = None) -> None:
+        self._materials = build_material_lookup(materials or [])
+
+    def add_linear_elastic(self, properties: MaterialProperties) -> None:
+        self._materials[properties.material_id] = properties
+
+    def add_nonlinear_elastic(self, properties: MaterialProperties) -> None:
+        self._materials[properties.material_id] = properties
+
+    def add_orthotropic_placeholder(self, properties: MaterialProperties) -> None:
+        self._materials[properties.material_id] = properties
+
+    def contains(self, material_id: str) -> bool:
+        return material_id in self._materials
+
+    def require(self, material_id: str) -> MaterialProperties:
+        try:
+            return self._materials[material_id]
+        except KeyError as exc:
+            raise KeyError(f"Unknown material id: {material_id}") from exc
+
+    def ids(self) -> list[str]:
+        return list(self._materials)
+
+
+class SpatialMaterialField:
+    def __init__(self, materials: MaterialLibrary) -> None:
+        self._materials = materials
+
+    def resolve(self, material_id: str, station: float) -> MaterialProperties:
+        del station
+        return self._materials.require(material_id)
 
 
 def _tangent_modulus(material: MaterialProperties, generalized_strain: float = 0.0) -> float:
@@ -132,3 +180,25 @@ def evaluate_branch_section_state(
             )
 
     return states[-1]
+
+
+def report_branch_average_properties(
+    branch: BranchDefinition,
+    material_lookup: dict[str, MaterialProperties],
+) -> BranchAverageProperties:
+    states = _evaluate_profile_states(branch.section_series, material_lookup)
+    if not states:
+        raise ValueError(f"Branch {branch.branch_id} has no section stations")
+
+    count = float(len(states))
+    return BranchAverageProperties(
+        length=branch.path.length(),
+        average_area=sum(state.area for state in states) / count,
+        average_ix=sum(state.ix for state in states) / count,
+        average_iy=sum(state.iy for state in states) / count,
+        average_polar_moment=sum(state.polar_moment for state in states) / count,
+        average_mass_per_length=sum(state.mass_per_length for state in states) / count,
+        average_youngs_modulus=sum(state.effective_youngs_modulus for state in states) / count,
+        average_shear_modulus=sum(state.effective_shear_modulus for state in states) / count,
+        average_damping_ratio=sum(state.damping_ratio for state in states) / count,
+    )

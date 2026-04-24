@@ -4,13 +4,18 @@ from math import pi, sqrt
 
 import pytest
 
-from orchard_fem.model import AnalysisMode, AnalysisSettings, ExcitationKind, HarmonicExcitation
-from orchard_fem.solvers.modal_assembler import (
+from orchard_fem.discretization import (
     LinearDynamicAssemblyResult,
     NonlinearLinkDefinition,
     NonlinearLinkKind,
 )
-from orchard_fem.solvers.time_history import solve_time_history_system
+from orchard_fem.domain import (
+    AnalysisMode,
+    AnalysisSettings,
+    ExcitationKind,
+    HarmonicExcitation,
+)
+from orchard_fem.dynamics.time_history import solve_time_history_system
 from orchard_fem.verification import build_hinged_two_bar_system, solve_generalized_frequencies
 
 

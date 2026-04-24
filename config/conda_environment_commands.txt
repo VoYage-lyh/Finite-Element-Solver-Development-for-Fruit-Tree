@@ -1,9 +1,9 @@
-OrchardVibrationSolver conda environment commands
-===============================================
+Orchard FEM conda environment commands
+======================================
 
 Principle
 ---------
-1. Keep `orchard_fem` development Python-first.
+1. Keep `orchard_fem` development centered on the active Orchard FEM package.
 2. Keep the PETSc/SLEPc/FEniCSx stack in its own environment.
 3. Keep PyTorch surrogate / inverse work separable from the solver stack to reduce dependency conflicts.
 

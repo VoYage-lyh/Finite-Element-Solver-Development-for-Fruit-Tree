@@ -2,20 +2,21 @@ import csv
 import importlib.util
 import json
 import math
-import warnings
 from pathlib import Path
 
 import pytest
 
+from orchard_fem.discretization import OrchardModalAssembler
 from orchard_fem.cross_section.integrator import SectionIntegrator
 from orchard_fem.cross_section.tissue import RegionGeometry, SectionShapeKind, TissueRegion, TissueType
-from orchard_fem.io.json_schema import build_topology_from_legacy_model, load_legacy_model
-from orchard_fem.io.model_loader import load_orchard_model
-from orchard_fem.io.model_payload import build_topology_from_model_payload, load_model_payload
-from orchard_fem.solvers.frequency_response import FrequencyResponseRequest, PETScFrequencyResponseSolver
-from orchard_fem.solvers.modal import ModalAnalysisRequest, SLEPcModalSolver
-from orchard_fem.solvers.modal_assembler import OrchardModalAssembler
-from orchard_fem.solvers.time_history import PETScTimeHistorySolver, TimeHistoryRequest
+from orchard_fem.io import (
+    build_topology_from_model_payload,
+    load_model_payload,
+    load_orchard_model,
+)
+from orchard_fem.dynamics.frequency_response import FrequencyResponseRequest, PETScFrequencyResponseSolver
+from orchard_fem.dynamics.time_history import PETScTimeHistorySolver, TimeHistoryRequest
+from orchard_fem.solver_core import ModalAnalysisRequest, SLEPcModalSolver
 
 
 def test_python_topology_loader_can_read_demo_model() -> None:
@@ -24,19 +25,6 @@ def test_python_topology_loader_can_read_demo_model() -> None:
     valid, message = topology.validate()
     assert valid, message
     assert "trunk" in topology.roots()
-
-
-def test_legacy_io_wrappers_still_work_with_deprecation_warning() -> None:
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", DeprecationWarning)
-        payload = load_legacy_model("examples/demo_orchard.json")
-        topology = build_topology_from_legacy_model(payload)
-
-    valid, message = topology.validate()
-    assert valid, message
-    assert payload["metadata"]["name"] == "three_level_demo_tree"
-    assert len(caught) == 2
-    assert all(item.category is DeprecationWarning for item in caught)
 
 
 def test_typed_model_loader_can_read_demo_model() -> None:

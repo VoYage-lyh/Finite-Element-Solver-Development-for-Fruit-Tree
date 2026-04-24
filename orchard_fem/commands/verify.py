@@ -33,12 +33,12 @@ def register_verify_command(
 ) -> None:
     parser = subparsers.add_parser(
         "verify",
-        help="Run the Python-first validation workflow in the current environment.",
+        help="Run the Orchard FEM validation workflow in the current environment.",
     )
     parser.add_argument(
         "--skip-integration",
         action="store_true",
-        help="Skip the general Python integration tests.",
+        help="Skip the general Orchard FEM integration tests.",
     )
     parser.add_argument(
         "--skip-verification",

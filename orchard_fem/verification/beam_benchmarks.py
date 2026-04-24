@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from orchard_fem.elements.beam_formulation import (
+from orchard_fem.discretization import (
     BeamElementProperties,
     build_local_mass_matrix,
     build_local_stiffness_matrix,
 )
-from orchard_fem.solvers._petsc import create_aij_matrix, require_petsc, require_slepc, solve_linear_system
-from orchard_fem.solvers.modal import ModalAnalysisRequest, SLEPcModalSolver
+from orchard_fem.numerics import (
+    create_aij_matrix,
+    require_petsc,
+    require_slepc,
+    solve_linear_system,
+)
+from orchard_fem.solver_core import ModalAnalysisRequest, SLEPcModalSolver
 
 
 @dataclass(frozen=True)

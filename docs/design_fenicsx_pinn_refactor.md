@@ -3,13 +3,13 @@
 > Historical note
 >
 > This document records an earlier migration plan that kept C++ as a first-class project core.
-> The active repository direction has since changed to a Python-first workflow centered on
-> `orchard_fem`, `python -m orchard_fem verify`, and Python-side verification benchmarks.
-> Read [python_first_architecture.md](python_first_architecture.md) first for the current plan.
+> The active repository direction has since changed to the Orchard FEM workflow centered on
+> `orchard_fem`, `python -m orchard_fem verify`, and package-native verification benchmarks.
+> Read [orchard_fem_architecture.md](orchard_fem_architecture.md) first for the current plan.
 
 ## 1. Scope and Non-Negotiables
 
-This document defines the Phase P0 refactor plan for evolving the current OrchardVibrationSolver repository into a dedicated orchard-vibration framework with:
+This document defines a historical Phase P0 refactor plan for evolving the earlier repository into a dedicated orchard-vibration framework with:
 
 - a FEniCSx / PETSc / SLEPc based auxiliary FEM backbone,
 - a stable C++ orchard-specific domain and reference-solver layer,
@@ -18,7 +18,7 @@ This document defines the Phase P0 refactor plan for evolving the current Orchar
 
 This is not a plan to build a general-purpose FEM package. The orchard-specific modeling layer remains the project center of gravity.
 
-The user has explicitly required that C++ remain a first-class part of the project. That constraint is adopted here as an architectural rule:
+The following C++-centric constraint belonged to that earlier plan and is no longer the active project rule:
 
 - C++ remains the stable domain kernel and reference implementation.
 - Python/FEniCSx is introduced as a collaborative backend and research orchestration layer, not as a wholesale replacement of the C++ codebase.
@@ -41,7 +41,7 @@ The following repository invariants are treated as fixed:
 
 ### 2.1 Current top-level structure
 
-The repository is currently organized as a single C++ library plus CLI and Python scripts:
+At the time this document was written, the repository was organized as a single C++ library plus CLI and Python scripts:
 
 - `include/orchard_solver/`
 - `src/`
@@ -134,8 +134,8 @@ There are also domain-level limitations that should be kept visible during migra
 
 The repository already contains useful regression assets:
 
-- unit-style smoke tests in `tests/orchard_tests.cpp`
-- verification cases in `tests/verification/`
+- Python integration tests in `tests/integration/`
+- Python verification cases in `tests/verification/`
   - cantilever first mode
   - cantilever multi-mode convergence
   - simply supported beam static deflection
@@ -214,25 +214,26 @@ This does **not** imply that C++ domain objects are discarded. The intended rela
 - C++: stable domain kernel and baseline/reference backend
 - Python: orchestration, alternative backend, ML workflows, and comparison tooling
 
-### 3.4 Modules to keep as first-class C++ implementation
+### 3.4 Historical modules that the earlier plan wanted to keep as first-class C++ implementation
 
-The current C++ implementation should be preserved as a first-class backend during migration:
+The earlier migration plan expected the following C++ implementation to remain active during migration:
 
 - `src/discretization/BeamElement.cpp`
 - `src/discretization/Assembler.cpp`
 - `src/solver_core/DynamicSystem.cpp`
 - `src/solver_core/LinearAlgebra.cpp`
-- `apps/orchard_cli.cpp`
+- historical `apps/orchard_cli.cpp` CLI entry
 - current verification tests
 
-This C++ path is not just temporary scaffolding. It serves four continuing roles:
+That historical C++ path was treated as more than temporary scaffolding and was assigned four roles:
 
 - orchard-domain source of truth during the refactor,
 - reference backend for result comparison,
 - production-capable fallback when Python/FEniCSx environments are unavailable,
 - regression guardrail for migration tolerances.
 
-The repository should not delete or demote this backend during P1-P2.
+That recommendation no longer applies to the active main branch.
+The current Orchard FEM direction has removed these active C++ sources and uses this section only as historical context.
 
 ## 4. Recommended Target Structure in This Repository
 
@@ -681,7 +682,7 @@ These are the first files that should change after P0 review approval:
 - `orchard_fem/solvers/modal.py`
 - `orchard_fem/solvers/frequency_response.py`
 - `orchard_fem/solvers/time_history.py`
-- `scripts/benchmark_vs_existing.py`
+- historical `scripts/benchmark_vs_existing.py` helper
 - `tests/integration/`
 
 Current C++ solver files should not be deleted in P1. They remain supported while the Python backend proves parity.

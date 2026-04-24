@@ -2,7 +2,7 @@
 
 This document records the historical C++ parts of the repository.
 
-They remain available only as archival material during the Python-first migration.
+They now remain available only as archival markers and documentation alongside the active Orchard FEM package.
 They are not the default development path, not the default validation path, and not the authoritative correctness oracle for new work.
 
 ## Archived directories
@@ -11,7 +11,17 @@ They are not the default development path, not the default validation path, and 
 - `include/`
 - `src/`
 - `CMakeLists.txt`
+
+The detailed migration ledger now lives in [cpp_migration_inventory.md](cpp_migration_inventory.md).
+
+The following historical files have already been removed from the main branch and now live only in git history:
+
+- `apps/orchard_cli.cpp`
+- `include/orchard_solver/**/*.h`
+- `src/**/*.cpp`
+- `tests/orchard_tests.cpp`
 - `tests/verification/*.cpp`
+- `tests/verification/common.h`
 
 ## What they are still useful for
 
@@ -25,36 +35,26 @@ They are not the default development path, not the default validation path, and 
 - day-to-day solver runs,
 - dependency checks,
 - default validation,
-- acceptance criteria for Python-side modeling changes.
+- acceptance criteria for active Orchard FEM modeling changes.
 
-The active project surface is `orchard_fem` plus the Python verification and CLI workflow.
+The active project surface is `orchard_fem` plus the package verification and CLI workflow.
 
 ## If you intentionally inspect the archived C++ path
 
 Only do this when you explicitly need historical context.
 
-Typical legacy-only commands:
+The current branch keeps only archive markers, so trying to enable legacy C++ in CMake now fails on purpose and points you back to history.
+If you need the old build, switch to an older git revision first.
+
+Typical legacy-only commands from such a historical checkout:
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DORCHARD_ENABLE_LEGACY_CPP=ON
 cmake --build build -j
-ctest --test-dir build --output-on-failure
-ctest -L verification
 ```
 
 ## Historical comparison helper
 
-The repository still includes:
-
-```bash
-python -m orchard_fem legacy-compare --help
-```
-
-Treat that script as an archival diagnostic helper only.
-It can show how a historical C++ output differs from the Python path, but it does not define correctness for the current project direction.
-
-The old script wrapper is still present too:
-
-```bash
-python scripts/benchmark_vs_existing.py --help
-```
+The main branch no longer includes the old comparison helper.
+If you need to reproduce that historical workflow, use an older git revision that still contains the removed `legacy-compare` command and `scripts/benchmark_vs_existing.py`.
+That comparison path is no longer part of the active Orchard FEM project surface.

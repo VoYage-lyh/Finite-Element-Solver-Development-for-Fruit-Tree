@@ -77,12 +77,12 @@ def run_validation_suite(
         pytest_targets.extend(VERIFICATION_TEST_TARGETS)
 
     if pytest_targets:
-        print_validation_step("Run Python verification tests")
+        print_validation_step("Run Orchard FEM verification tests")
         run_pytest_targets(pytest_targets, extra_args=pytest_args)
 
     demo_suite_outputs = None
     if include_demo_suite:
-        print_validation_step("Run Python PETSc/SLEPc demo suite")
+        print_validation_step("Run Orchard FEM PETSc/SLEPc demo suite")
         demo_suite_outputs = run_standard_demo_suite(output_dir=output_dir)
 
     return ValidationOutputs(

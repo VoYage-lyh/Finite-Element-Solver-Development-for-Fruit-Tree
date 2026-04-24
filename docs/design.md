@@ -142,8 +142,8 @@ model_reduction / validation / outputs
 > Historical note
 >
 > This design draft reflects the earlier C++-centric repository layout.
-> The active development surface is now the Python-first stack described in
-> [python_first_architecture.md](python_first_architecture.md).
+> The active development surface is now the Orchard FEM stack described in
+> [orchard_fem_architecture.md](orchard_fem_architecture.md).
 
 ### 5.2 Module Map
 
@@ -457,6 +457,11 @@ The project does not pursue maximum fidelity everywhere. It seeks acceptable err
 - Prepare optional backend integration with Eigen/PETSc.
 
 ## 12. Planned Repository Structure
+
+Historical note:
+This section captures an earlier planned repository structure.
+The current main branch no longer ships the active C++ `apps/`, `include/orchard_solver/`, or `src/` implementation trees.
+Use [orchard_fem_architecture.md](orchard_fem_architecture.md) for the active Orchard FEM structure.
 
 ```text
 .

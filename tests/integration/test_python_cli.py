@@ -128,7 +128,6 @@ def test_python_module_entrypoint_shows_help() -> None:
     assert "plot-frequency-response" in result.stdout
     assert "doctor" in result.stdout
     assert "full-validate" in result.stdout
-    assert "legacy-compare" in result.stdout
     assert "verify" in result.stdout
 
 
@@ -148,7 +147,6 @@ def test_cli_parser_registers_expected_subcommands() -> None:
     assert "verify" in help_text
     assert "doctor" in help_text
     assert "full-validate" in help_text
-    assert "legacy-compare" in help_text
 
 
 def test_python_doctor_subcommand_shows_help() -> None:
@@ -223,18 +221,6 @@ def test_python_plot_frequency_response_subcommand_shows_help() -> None:
     assert "--no-show" in result.stdout
 
 
-def test_python_legacy_compare_subcommand_shows_help() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "orchard_fem", "legacy-compare", "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert "--candidate-csv" in result.stdout
-    assert "--python-modal-summary" in result.stdout
-
-
 def test_run_full_validation_wrapper_forwards_help() -> None:
     result = subprocess.run(
         ["bash", "scripts/run_full_validation.sh", "--help"],
@@ -255,18 +241,6 @@ def test_plot_frequency_response_wrapper_forwards_help() -> None:
     )
     assert result.returncode == 0
     assert "frequency-response CSV" in result.stdout
-
-
-def test_benchmark_vs_existing_wrapper_forwards_help() -> None:
-    result = subprocess.run(
-        [sys.executable, "scripts/benchmark_vs_existing.py", "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert "archival only" in result.stdout
-    assert "--candidate-csv" in result.stdout
 
 
 def test_cli_run_writes_frequency_response_csv(tmp_path) -> None:

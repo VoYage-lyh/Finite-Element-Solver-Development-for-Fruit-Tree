@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from orchard_fem.elements.beam_formulation import build_local_geometric_stiffness_matrix
-from orchard_fem.io.model_loader import load_orchard_model
-from orchard_fem.solvers.modal import ModalAnalysisRequest, SLEPcModalSolver
-from orchard_fem.solvers.modal_assembler import OrchardSystemAssembler
-from orchard_fem.topology.tree import BranchPath, Vec3
+from orchard_fem.discretization import OrchardSystemAssembler
+from orchard_fem.discretization import build_local_geometric_stiffness_matrix
+from orchard_fem.io import load_orchard_model
+from orchard_fem.solver_core import ModalAnalysisRequest, SLEPcModalSolver
+from orchard_fem.topology import BranchPath, Vec3
 
 
 def _vertical_cantilever_payload(include_gravity_prestress: bool) -> dict:

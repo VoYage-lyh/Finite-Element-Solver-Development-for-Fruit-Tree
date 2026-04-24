@@ -31,7 +31,7 @@ def register_full_validate_command(
     defaults = FullValidationConfig.from_environment(DEFAULT_REPO_ROOT)
     parser = subparsers.add_parser(
         "full-validate",
-        help="Run the multi-environment Python-first validation workflow.",
+        help="Run the multi-environment Orchard FEM validation workflow.",
         description=(
             "Run orchard-dev and orchard-fenicsx validation workflows from the package CLI. "
             "Environment variables such as BUILD_DIR and ORCHARD_FENICSX_ENV are used as defaults."

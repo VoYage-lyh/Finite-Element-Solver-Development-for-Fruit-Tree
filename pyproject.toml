@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orchard-vibration-solver"
 version = "0.1.0"
-description = "Python-first orchard vibration framework built around PETSc/SLEPc and FEniCSx-facing workflows."
+description = "Orchard FEM framework for orchard tree vibration modeling, simulation, and validation."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []

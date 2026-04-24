@@ -7,7 +7,7 @@ import pytest
 
 from orchard_fem.cross_section.defaults import make_circular_section, make_default_branch_sections
 from orchard_fem.cross_section.scan_loader import load_scan_profiles
-from orchard_fem.io.model_loader import load_orchard_model
+from orchard_fem.io import load_orchard_model
 
 
 def _shorthand_payload() -> dict:

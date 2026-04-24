@@ -17,8 +17,8 @@ def test_full_validation_plan_builds_both_environment_steps(tmp_path) -> None:
     steps = build_full_validation_steps(config)
 
     assert [step.label for step in steps] == [
-        "Run orchard-dev Python integration tests",
-        "Run orchard-fenicsx Python verification and demo workflow",
+        "Run orchard-dev Orchard FEM integration tests",
+        "Run orchard-fenicsx Orchard FEM verification and demo workflow",
     ]
     assert steps[0].command[:7] == [
         "conda",

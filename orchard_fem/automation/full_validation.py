@@ -64,7 +64,7 @@ def build_full_validation_steps(config: FullValidationConfig) -> list[FullValida
     if not config.skip_dev_tests:
         steps.append(
             FullValidationStep(
-                label="Run orchard-dev Python integration tests",
+                label="Run orchard-dev Orchard FEM integration tests",
                 command=[
                     "conda",
                     "run",
@@ -100,7 +100,7 @@ def build_full_validation_steps(config: FullValidationConfig) -> list[FullValida
             command.append("--skip-demo-suite")
         steps.append(
             FullValidationStep(
-                label="Run orchard-fenicsx Python verification and demo workflow",
+                label="Run orchard-fenicsx Orchard FEM verification and demo workflow",
                 command=command,
             )
         )

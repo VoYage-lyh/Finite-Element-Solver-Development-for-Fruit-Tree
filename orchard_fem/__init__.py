@@ -1,9 +1,9 @@
-"""Python-first orchestration and solver package for OrchardVibrationSolver."""
+"""Orchard FEM orchestration and solver package for OrchardVibrationSolver."""
 
 from orchard_fem.application import OrchardApplication
-from orchard_fem.io.model_loader import load_orchard_model
-from orchard_fem.model import OrchardModel
-from orchard_fem.topology.tree import BranchPath, ObservationPoint, TreeTopology, Vec3
+from orchard_fem.domain import OrchardModel
+from orchard_fem.io import load_orchard_model
+from orchard_fem.topology import BranchPath, ObservationPoint, TreeTopology, Vec3
 
 __all__ = [
     "BranchPath",

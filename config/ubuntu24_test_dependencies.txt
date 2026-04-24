@@ -1,8 +1,8 @@
-OrchardVibrationSolver Ubuntu 24.04 test dependency guide
+Orchard FEM Ubuntu 24.04 dependency and validation guide
 =========================================================
 
-This file is the Ubuntu-first dependency checklist for the Python-first workflow.
-It separates the always-needed Python path from optional legacy C++ tooling.
+This file is the Ubuntu-focused dependency checklist for the active Orchard FEM workflow.
+It separates the required Python path from archived C++ reference material.
 
 1. Required system packages
 ---------------------------
@@ -64,8 +64,8 @@ Key packages in that environment:
 - mypy
 - pytorch
 
-5. Python-first validation commands
------------------------------------
+5. Orchard FEM validation commands
+----------------------------------
 python -m orchard_fem doctor
 python -m orchard_fem verify --skip-demo-suite
 python -m orchard_fem full-validate --skip-fenicsx-tests --skip-python-demo-suite
@@ -78,15 +78,16 @@ conda run -n orchard-fenicsx python -m orchard_fem verify --skip-integration
 python -m orchard_fem run examples/demo_orchard.json --output-csv build/demo_frequency_response.csv
 python -m orchard_fem visualize examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
 
-7. Optional legacy C++ tooling
-------------------------------
-Only install these if you intentionally want to inspect or preserve the old reference implementation:
+7. Optional historical C++ tooling
+----------------------------------
+Only install these if you intentionally want to inspect an older checkout that still contains the archived C++ implementation:
 sudo apt install -y build-essential gcc g++ cmake ninja-build pkg-config
 
-Legacy-only commands:
+Historical-checkout-only commands:
 cmake -S . -B build
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 
 Historical note:
+- on the current main branch, Orchard FEM is Python-only
 - see `docs/legacy_reference.md` before using the archived C++ path

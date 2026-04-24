@@ -4,15 +4,16 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from orchard_fem.io.model_loader import load_orchard_model
-from orchard_fem.model import AnalysisMode
-from orchard_fem.solvers.frequency_response import (
+from orchard_fem.discretization import OrchardModalAssembler
+from orchard_fem.dynamics import (
     FrequencyResponseRequest,
     PETScFrequencyResponseSolver,
+    PETScTimeHistorySolver,
+    TimeHistoryRequest,
 )
-from orchard_fem.solvers.modal import ModalAnalysisRequest, SLEPcModalSolver
-from orchard_fem.solvers.modal_assembler import OrchardModalAssembler
-from orchard_fem.solvers.time_history import PETScTimeHistorySolver, TimeHistoryRequest
+from orchard_fem.domain import AnalysisMode
+from orchard_fem.io import load_orchard_model
+from orchard_fem.solver_core import ModalAnalysisRequest, SLEPcModalSolver
 
 
 @dataclass(frozen=True)

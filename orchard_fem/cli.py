@@ -9,7 +9,7 @@ from orchard_fem.commands import register_all_commands
 
 def build_parser(application: OrchardApplication | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Python-first CLI for orchard vibration modeling, solving, and visualization."
+        description="Orchard FEM CLI for orchard vibration modeling, solving, and visualization."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     register_all_commands(subparsers, application or OrchardApplication())
