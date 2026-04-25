@@ -3,6 +3,7 @@ from orchard_fem.dynamics.frequency_response import (
     FrequencyResponseRequest,
     FrequencyResponseResult,
     PETScFrequencyResponseSolver,
+    solve_frequency_response_system,
 )
 from orchard_fem.dynamics.time_history import (
     PETScTimeHistorySolver,
@@ -19,6 +20,7 @@ __all__ = [
     "FrequencyResponseResult",
     "PETScFrequencyResponseSolver",
     "PETScTimeHistorySolver",
+    "solve_frequency_response_system",
     "TimeExcitationState",
     "TimeHistoryPoint",
     "TimeHistoryRequest",

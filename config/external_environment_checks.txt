@@ -85,21 +85,3 @@ python -c "import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_av
 ---------------------------------------
 Run from the repository root:
 python -m orchard_fem doctor
-
-
-9. Optional historical C++ checks
----------------------------------
-Only run these from an older checkout if you intentionally need the archived C++ reference implementation.
-See `docs/legacy_reference.md` first.
-
-G++ version:
-g++ --version
-
-GCC version:
-gcc --version
-
-CMake version:
-cmake --version
-
-Optional Ninja version:
-ninja --version

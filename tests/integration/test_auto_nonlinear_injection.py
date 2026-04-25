@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from orchard_fem.discretization import NonlinearLinkKind, OrchardSystemAssembler
+from orchard_fem.discretization.types import CONSTRAINT_PENALTY
 from orchard_fem.io import load_orchard_model
 from orchard_fem.topology import distance
 
@@ -145,6 +146,15 @@ def _nearest_parent_ux_dof(assembled, child_branch_id: str, parent_branch_id: st
     return nearest_parent.dofs[0]
 
 
+def _nearest_parent_dof(assembled, child_branch_id: str, parent_branch_id: str, index: int) -> int:
+    child_root = assembled.branch_nodes[child_branch_id][0]
+    nearest_parent = min(
+        assembled.branch_nodes[parent_branch_id],
+        key=lambda node: distance(child_root.position, node.position),
+    )
+    return nearest_parent.dofs[index]
+
+
 def test_auto_nonlinear_levels_inject_secondary_and_tertiary_links(tmp_path) -> None:
     model_path = tmp_path / "auto_nonlinear.json"
     model_path.write_text(json.dumps(_auto_nonlinear_payload()), encoding="utf-8")
@@ -190,3 +200,96 @@ def test_explicit_joint_blocks_duplicate_auto_injection(tmp_path) -> None:
 
     labels = {link.label for link in assembled.nonlinear_links}
     assert labels == {"auto_joint:tertiary"}
+
+
+def test_polynomial_joint_law_adds_rotational_cubic_links(tmp_path) -> None:
+    payload = _auto_nonlinear_payload()
+    payload["analysis"]["auto_nonlinear_levels"] = []
+    payload["analysis"]["auto_nonlinear_cubic_scale"] = 0.0
+    payload["joints"] = [
+        {
+            "id": "joint_secondary",
+            "parent_branch_id": "primary",
+            "child_branch_id": "secondary",
+            "linear_stiffness_scale": 0.35,
+            "law": {
+                "type": "polynomial",
+                "linear_scale": 1.4,
+                "cubic_scale": 3200.0,
+            },
+        }
+    ]
+
+    model_path = tmp_path / "joint_polynomial.json"
+    model_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    model = load_orchard_model(str(model_path))
+    assembled = OrchardSystemAssembler().assemble(model)
+
+    links_by_label = {link.label: link for link in assembled.nonlinear_links}
+    assert set(links_by_label) == {
+        "joint:joint_secondary:rx",
+        "joint:joint_secondary:ry",
+        "joint:joint_secondary:rz",
+    }
+
+    for component_index, component in enumerate(("rx", "ry", "rz"), start=3):
+        link = links_by_label[f"joint:joint_secondary:{component}"]
+        assert link.kind == NonlinearLinkKind.CUBIC_SPRING
+        assert link.first_dof == assembled.branch_nodes["secondary"][0].dofs[component_index]
+        assert link.second_dof == _nearest_parent_dof(
+            assembled,
+            "secondary",
+            "primary",
+            component_index,
+        )
+        assert link.cubic_stiffness == 3200.0
+
+
+def test_gap_friction_joint_law_adds_rotational_gap_links(tmp_path) -> None:
+    payload = _auto_nonlinear_payload()
+    payload["analysis"]["auto_nonlinear_levels"] = []
+    payload["analysis"]["auto_nonlinear_cubic_scale"] = 0.0
+    payload["joints"] = [
+        {
+            "id": "joint_secondary",
+            "parent_branch_id": "primary",
+            "child_branch_id": "secondary",
+            "linear_stiffness_scale": 0.35,
+            "law": {
+                "type": "gap_friction",
+                "linear_scale": 0.8,
+                "open_scale": 0.15,
+                "gap_threshold": 0.012,
+            },
+        }
+    ]
+
+    model_path = tmp_path / "joint_gap_friction.json"
+    model_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    model = load_orchard_model(str(model_path))
+    assembled = OrchardSystemAssembler().assemble(model)
+
+    links_by_label = {link.label: link for link in assembled.nonlinear_links}
+    assert set(links_by_label) == {
+        "joint:joint_secondary:rx",
+        "joint:joint_secondary:ry",
+        "joint:joint_secondary:rz",
+    }
+
+    expected_linear = CONSTRAINT_PENALTY * 0.35 * 0.8
+    expected_open = CONSTRAINT_PENALTY * 0.35 * 0.15
+    for component_index, component in enumerate(("rx", "ry", "rz"), start=3):
+        link = links_by_label[f"joint:joint_secondary:{component}"]
+        assert link.kind == NonlinearLinkKind.GAP_SPRING
+        assert link.first_dof == assembled.branch_nodes["secondary"][0].dofs[component_index]
+        assert link.second_dof == _nearest_parent_dof(
+            assembled,
+            "secondary",
+            "primary",
+            component_index,
+        )
+        assert link.linear_stiffness == expected_linear
+        assert link.open_stiffness == expected_open
+        assert link.gap_threshold == 0.012

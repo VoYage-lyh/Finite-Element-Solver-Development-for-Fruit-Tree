@@ -55,6 +55,19 @@ class TimeHistoryResult:
         )
 
 
+@dataclass(frozen=True)
+class TimeHistoryState:
+    displacement: list[float]
+    velocity: list[float]
+    acceleration: list[float]
+
+
+@dataclass(frozen=True)
+class _TimeHistoryExecution:
+    result: TimeHistoryResult
+    final_state: TimeHistoryState
+
+
 def _build_effective_matrix(
     assembled: LinearDynamicAssemblyResult,
     nonlinear_tangent: list[list[float]],
@@ -80,15 +93,22 @@ def _compute_initial_acceleration(
     assembled: LinearDynamicAssemblyResult,
     excitation,
     analysis,
+    displacement: list[float],
+    velocity: list[float],
 ) -> list[float]:
     external_force = build_time_load_vector(assembled, excitation, analysis, 0.0)
     _, nonlinear_force = evaluate_nonlinear_tangent_and_force(
         len(assembled.dof_labels),
         assembled.nonlinear_links,
-        [0.0 for _ in assembled.dof_labels],
+        displacement,
     )
+    damping_force = matrix_vector_multiply(assembled.damping_matrix, velocity)
+    stiffness_force = matrix_vector_multiply(assembled.stiffness_matrix, displacement)
     rhs = [
-        external_force[index] - nonlinear_force[index]
+        external_force[index]
+        - damping_force[index]
+        - stiffness_force[index]
+        - nonlinear_force[index]
         for index in range(len(external_force))
     ]
     return solve_linear_system(create_aij_matrix(assembled.mass_matrix), rhs)
@@ -108,6 +128,15 @@ def solve_time_history_system(
     excitation,
     analysis,
 ) -> TimeHistoryResult:
+    return _solve_time_history_execution(assembled, excitation, analysis).result
+
+
+def _solve_time_history_execution(
+    assembled: LinearDynamicAssemblyResult,
+    excitation,
+    analysis,
+    initial_state: TimeHistoryState | None = None,
+) -> _TimeHistoryExecution:
     require_petsc()
 
     if not assembled.dof_labels:
@@ -124,9 +153,23 @@ def solve_time_history_system(
     mass_scale = 1.0 / (beta * dt * dt)
     damping_scale = gamma / (beta * dt)
 
-    displacement = [0.0 for _ in range(dof_count)]
-    velocity = [0.0 for _ in range(dof_count)]
-    acceleration = _compute_initial_acceleration(assembled, excitation, analysis)
+    displacement = (
+        initial_state.displacement.copy()
+        if initial_state is not None
+        else [0.0 for _ in range(dof_count)]
+    )
+    velocity = (
+        initial_state.velocity.copy()
+        if initial_state is not None
+        else [0.0 for _ in range(dof_count)]
+    )
+    acceleration = _compute_initial_acceleration(
+        assembled,
+        excitation,
+        analysis,
+        displacement,
+        velocity,
+    )
     initial_excitation_state = build_time_excitation_state(
         assembled,
         excitation,
@@ -139,8 +182,8 @@ def solve_time_history_system(
             time_seconds=0.0,
             excitation_signal_value=initial_excitation_state.signal_value,
             excitation_load_value=initial_excitation_state.equivalent_load,
-            excitation_response_value=0.0,
-            observation_values=[0.0 for _ in assembled.observation_dofs],
+            excitation_response_value=displacement[assembled.excitation_dof],
+            observation_values=[displacement[dof] for dof in assembled.observation_dofs],
         )
     ]
 
@@ -257,7 +300,14 @@ def solve_time_history_system(
                 )
             )
 
-    return TimeHistoryResult(
-        observation_names=assembled.observation_names,
-        points=points,
+    return _TimeHistoryExecution(
+        result=TimeHistoryResult(
+            observation_names=assembled.observation_names,
+            points=points,
+        ),
+        final_state=TimeHistoryState(
+            displacement=displacement.copy(),
+            velocity=velocity.copy(),
+            acceleration=acceleration.copy(),
+        ),
     )

@@ -15,7 +15,7 @@ from orchard_fem.domain import (
     ExcitationKind,
     HarmonicExcitation,
 )
-from orchard_fem.dynamics.time_history import solve_time_history_system
+from orchard_fem.dynamics import solve_frequency_response_system, solve_time_history_system
 from orchard_fem.verification import build_hinged_two_bar_system, solve_generalized_frequencies
 
 
@@ -58,7 +58,10 @@ def test_python_duffing_peak_matches_backbone_estimate() -> None:
 
     system = _build_duffing_system()
     analysis = AnalysisSettings(
-        mode=AnalysisMode.TIME_HISTORY,
+        mode=AnalysisMode.FREQUENCY_RESPONSE,
+        frequency_start_hz=1.35,
+        frequency_end_hz=2.15,
+        frequency_steps=21,
         time_step_seconds=0.001,
         total_time_seconds=25.0,
         output_stride=10,
@@ -67,29 +70,23 @@ def test_python_duffing_peak_matches_backbone_estimate() -> None:
         rayleigh_alpha=0.0,
         rayleigh_beta=0.0,
     )
-    linear_frequency = sqrt(100.0) / (2.0 * pi)
-    peak_frequency = 0.0
-    peak_amplitude = 0.0
-
-    for step in range(21):
-        frequency = 1.35 + (0.04 * float(step))
-        excitation = HarmonicExcitation(
-            kind=ExcitationKind.HARMONIC_FORCE,
-            target_branch_id="duffing",
-            target_component="ux",
-            amplitude=0.2,
-            phase_degrees=0.0,
-            driving_frequency_hz=frequency,
-        )
-        response = solve_time_history_system(system, excitation, analysis)
-        amplitude = _estimate_steady_amplitude(response)
-        if amplitude > peak_amplitude:
-            peak_amplitude = amplitude
-            peak_frequency = frequency
+    excitation = HarmonicExcitation(
+        kind=ExcitationKind.HARMONIC_FORCE,
+        target_branch_id="duffing",
+        target_component="ux",
+        amplitude=0.2,
+        phase_degrees=0.0,
+        driving_frequency_hz=0.0,
+    )
+    sweep = solve_frequency_response_system(system, excitation, analysis)
+    peak_point = max(sweep.points, key=lambda point: point.observation_magnitudes[0])
+    peak_frequency = peak_point.frequency_hz
+    peak_amplitude = peak_point.observation_magnitudes[0]
 
     assert peak_amplitude > 0.0
     predicted_peak = sqrt(100.0 + (0.75 * 2.0e4 * peak_amplitude * peak_amplitude)) / (2.0 * pi)
     relative_error = abs(peak_frequency - predicted_peak) / predicted_peak
+    linear_frequency = sqrt(100.0) / (2.0 * pi)
     assert relative_error < 0.05
     assert peak_frequency > linear_frequency * 1.03
 

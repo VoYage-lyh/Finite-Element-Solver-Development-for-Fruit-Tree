@@ -71,8 +71,6 @@ Correctness is enforced through:
 - PETSc/SLEPc gravity-prestress regression
 - standard demo artifact regeneration
 
-Legacy C++ output comparison is not part of the active architecture.
-
 ## Repository Boundaries
 
 Active project roots:
@@ -84,11 +82,4 @@ Active project roots:
 - `docs/`
 - `config/`
 
-Archive markers only:
-
-- `apps/`
-- `include/`
-- `src/`
-- `CMakeLists.txt`
-
-The archived C++ implementation has been removed from the main branch and should not be treated as part of the active architecture.
+For stage-by-stage implementation status, see [solver_roadmap.md](solver_roadmap.md).

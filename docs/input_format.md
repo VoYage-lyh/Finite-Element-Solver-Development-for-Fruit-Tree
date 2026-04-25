@@ -76,11 +76,16 @@ Supported joint law types:
   - `linear_scale`
   - `cubic_scale`
 - `gap_friction`
-  - `closed_scale`
+  - `linear_scale`
   - `open_scale`
   - `gap_threshold`
 
 `polynomial.cubic_scale` is currently interpreted in the reduced structural coordinate space used by the fast solver, not as a direct continuum constitutive coefficient.
+
+In the current beam-based assembler, explicit joint laws are applied on the rotational root DOFs
+(`rx`, `ry`, `rz`) between the child branch root and its nearest parent node. The linear joint
+constraint remains penalty-enforced, while `polynomial` adds cubic rotational links and
+`gap_friction` switches between closed/open rotational stiffness states after the configured gap.
 
 ## Fruits
 
@@ -135,7 +140,9 @@ The current analysis entry supports:
 - `rayleigh_beta`
 - `output_csv`
 
-Frequency-response mode uses the linearized assembled operators of the Euler-Bernoulli beam model.
+Frequency-response mode uses the direct linearized assembled operators when no localized nonlinear
+links are active. If the assembled system contains localized nonlinear links, Orchard FEM falls
+back to a steady-state time-domain sweep and reports amplitudes on the same frequency-response CSV grid.
 
 Time-history mode uses Newmark average-acceleration integration with localized nonlinear links.
 

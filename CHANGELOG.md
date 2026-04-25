@@ -8,6 +8,8 @@
 - Simplified the active package surface to domain, topology, discretization, solver core, dynamics, workflows, visualization, automation, and loaders.
 - Removed remaining compatibility and archival comparison code from the runtime path.
 - Reorganized repository documentation around a cleaner GitHub-style structure with a focused `README.md`, `CONTRIBUTING.md`, and a `docs/` index.
+- Activated explicit `joints[].law` handling in the Python beam assembler so polynomial and gap-style rotational joint nonlinearities now feed the transient nonlinear-link path.
+- Added a formal nonlinear frequency-response path that reuses steady-state time-domain sweeps when localized nonlinear links are present.
 
 ### Added
 

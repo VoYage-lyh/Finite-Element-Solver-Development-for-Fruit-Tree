@@ -8,6 +8,7 @@ from orchard_fem.dynamics import (
     FrequencyResponseResult,
     TimeHistoryPoint,
     TimeHistoryResult,
+    solve_frequency_response_system,
 )
 
 DynamicSystem = LinearDynamicAssemblyResult
@@ -20,6 +21,7 @@ __all__ = [
     "NonlinearLink",
     "NonlinearLinkDefinition",
     "NonlinearLinkKind",
+    "solve_frequency_response_system",
     "TimeHistoryPoint",
     "TimeHistoryResult",
 ]

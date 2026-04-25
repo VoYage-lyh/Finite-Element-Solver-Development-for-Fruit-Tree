@@ -1,12 +1,12 @@
 # Contributing
 
-This repository is maintained as an Orchard FEM project, not as a mixed Python/C++ migration workspace.  
+This repository is maintained as an Orchard FEM project, not as a temporary transition workspace.  
 New work should go into the active Python package and its documentation, tests, and examples.
 
 ## Principles
 
 - Keep the active implementation inside `orchard_fem/`.
-- Do not add new runtime code to `apps/`, `include/`, `src/`, or `CMakeLists.txt`.
+- Do not reintroduce removed build roots or alias shims.
 - Prefer improving package-native workflows over adding ad-hoc scripts.
 - Add or update verification coverage when solver behavior changes.
 - Keep documentation aligned with the active CLI and package structure.
@@ -102,6 +102,6 @@ Use these active package surfaces:
 Before submitting changes, make sure:
 - the code lives in the active Orchard FEM package surface
 - the relevant validation commands pass
-- stale migration notes are not reintroduced
+- stale transitional notes are not reintroduced
 - documentation matches the shipped CLI and workflows
 - example commands in docs still work

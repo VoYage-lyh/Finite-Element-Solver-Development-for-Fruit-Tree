@@ -21,14 +21,14 @@ New code should go into these package layers:
 
 ## Repository Boundaries
 
-These paths are archived and should not receive new implementation work:
+Active work should stay inside the shipped Orchard FEM project roots:
 
-- `apps/`
-- `include/`
-- `src/`
-- `CMakeLists.txt`
-
-They remain only as historical markers for the removed C++ implementation.
+- `orchard_fem/`
+- `orchard_pinn/`
+- `examples/`
+- `tests/`
+- `docs/`
+- `config/`
 
 ## Common Workflows
 

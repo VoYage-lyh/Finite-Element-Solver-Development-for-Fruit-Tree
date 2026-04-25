@@ -20,13 +20,13 @@ Implemented today:
 - PETSc/SLEPc-backed modal analysis.
 - Frequency-response and Newmark time-history workflows.
 - Multi-component observations and trajectory plots.
-- Gravity prestress, default circular section helpers, and auto nonlinear-link injection.
+- Gravity prestress, default circular section helpers, explicit rotational joint laws, and auto nonlinear-link injection.
 - Package-native validation and demo regeneration commands.
 
 Current limitations:
-- Frequency-response remains linearized around the zero-amplitude state.
-- The clamp cubic path is implemented in transient analysis; the broader joint-law nonlinear mapping still needs a fuller beam-joint pass.
-- Historical C++ code is archived and no longer part of the active implementation surface.
+- Nonlinear frequency-response currently uses warm-started steady-state time-domain sweep fallback rather than harmonic balance or full continuation.
+- Nonlinear joint laws currently act on rotational root DOFs; they are available in transient analysis and in nonlinear sweep-based frequency response, but not yet in a dedicated continuation workflow.
+- The discretization layer is still a manual Euler-Bernoulli beam implementation rather than the planned FEniCSx/UFL branch.
 
 ## Quick Start
 
@@ -117,9 +117,8 @@ orchard-fem --help
 - `orchard_pinn/`: reserved surface for future surrogate and inversion work.
 - `examples/`: runnable JSON models.
 - `tests/`: integration and verification coverage.
-- `docs/`: user, developer, architecture, and historical documentation.
+- `docs/`: user, developer, architecture, and roadmap documentation.
 - `config/`: environment files and setup guides.
-- `apps/`, `include/`, `src/`, `CMakeLists.txt`: archive markers for the removed C++ implementation.
 
 ## Documentation
 
@@ -127,15 +126,10 @@ orchard-fem --help
 - [docs/getting_started.md](docs/getting_started.md): installation, first runs, and validation basics.
 - [docs/development.md](docs/development.md): developer workflow and repository conventions.
 - [docs/orchard_fem_architecture.md](docs/orchard_fem_architecture.md): active package architecture.
+- [docs/solver_roadmap.md](docs/solver_roadmap.md): implementation status against the current solver roadmap.
 - [docs/input_format.md](docs/input_format.md): model JSON reference.
 - [docs/verification.md](docs/verification.md): verification strategy and benchmark coverage.
-- [docs/legacy_reference.md](docs/legacy_reference.md): historical note for archived C++ material.
 
 ## Contributing
 
 Contribution guidelines live in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Historical Note
-
-The repository previously carried a C++ solver and comparison workflow.  
-That implementation has been removed from the main branch. The remaining `apps/`, `include/`, `src/`, and `CMakeLists.txt` paths are archive markers only.

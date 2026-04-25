@@ -49,7 +49,7 @@ conda run -n orchard-fenicsx python -m pytest -q \
 
 - File: `tests/verification/test_python_dynamic_benchmarks.py`
 - Coverage:
-  - Duffing hardening peak shift against the backbone estimate,
+  - Duffing hardening peak shift through the formal nonlinear frequency-response sweep against the backbone estimate,
   - hinged two-bar first mode against the rigid-link spring-mass asymptote.
 - Purpose: protect nonlinear and reduced-joint behavior with compact engineering references.
 
@@ -75,4 +75,4 @@ conda run -n orchard-fenicsx python -m pytest -q \
 - If Python solver assembly, dynamics, or verification utilities change, rerun `python -m orchard_fem verify`.
 - If PETSc/SLEPc-backed solver behavior changes, rerun the targeted `orchard-fenicsx` command above or use `python -m orchard_fem full-validate`.
 - If a verification case starts failing after a modeling upgrade, prefer updating the model assumptions and documented reference together rather than silently loosening tolerances.
-- Any new reduction or nonlinear-frequency capability should add its own verification case here instead of only adding smoke tests.
+- Any future harmonic-balance, continuation, or reduction upgrade should extend these verification cases rather than replacing them with smoke tests.

@@ -21,9 +21,86 @@ from orchard_fem.discretization.types import (
     NonlinearLinkDefinition,
     NonlinearLinkKind,
 )
-from orchard_fem.domain import OrchardModel
+from orchard_fem.domain import JointDefinition, JointLawKind, OrchardModel
 from orchard_fem.materials.base import build_material_lookup, evaluate_branch_section_state
 from orchard_fem.topology import Vec3, distance, normalize
+
+
+def _nearest_parent_node(
+    branch_nodes: dict[str, list[BranchNodeState]],
+    child_branch_id: str,
+    parent_branch_id: str,
+) -> BranchNodeState:
+    child_root = branch_nodes[child_branch_id][0]
+    return min(
+        branch_nodes[parent_branch_id],
+        key=lambda node: distance(child_root.position, node.position),
+    )
+
+
+def _joint_component_penalty(
+    component_index: int,
+    joint: JointDefinition | None,
+) -> float:
+    penalty = CONSTRAINT_PENALTY
+    if joint is None:
+        return penalty
+
+    penalty *= max(joint.linear_stiffness_scale, 1.0e-6)
+    if component_index >= 3 and joint.law.kind != JointLawKind.NONE:
+        penalty *= max(joint.law.linear_scale, 1.0e-6)
+    return penalty
+
+
+def _append_joint_nonlinear_links(
+    nonlinear_links: list[NonlinearLinkDefinition],
+    joint: JointDefinition | None,
+    child_root: BranchNodeState,
+    nearest_parent: BranchNodeState,
+) -> None:
+    if joint is None or joint.law.kind == JointLawKind.NONE:
+        return
+
+    rotational_linear_stiffness = _joint_component_penalty(3, joint)
+    rotational_open_stiffness = (
+        CONSTRAINT_PENALTY
+        * max(joint.linear_stiffness_scale, 1.0e-6)
+        * max(joint.law.open_scale, 0.0)
+    )
+
+    for component_index in range(3, 6):
+        component = COMPONENT_LABELS[component_index]
+        label = f"joint:{joint.joint_id}:{component}"
+
+        if joint.law.kind == JointLawKind.POLYNOMIAL:
+            if abs(joint.law.cubic_scale) <= 0.0:
+                continue
+            nonlinear_links.append(
+                NonlinearLinkDefinition(
+                    label=label,
+                    first_dof=child_root.dofs[component_index],
+                    second_dof=nearest_parent.dofs[component_index],
+                    kind=NonlinearLinkKind.CUBIC_SPRING,
+                    cubic_stiffness=joint.law.cubic_scale,
+                )
+            )
+            continue
+
+        if joint.law.kind == JointLawKind.GAP_FRICTION:
+            nonlinear_links.append(
+                NonlinearLinkDefinition(
+                    label=label,
+                    first_dof=child_root.dofs[component_index],
+                    second_dof=nearest_parent.dofs[component_index],
+                    kind=NonlinearLinkKind.GAP_SPRING,
+                    linear_stiffness=rotational_linear_stiffness,
+                    open_stiffness=rotational_open_stiffness,
+                    gap_threshold=max(joint.law.gap_threshold, 0.0),
+                )
+            )
+            continue
+
+        raise ValueError(f"Unsupported joint law kind: {joint.law.kind}")
 
 
 class OrchardSystemAssembler:
@@ -146,28 +223,27 @@ class OrchardSystemAssembler:
                 continue
 
             child_nodes = branch_nodes[branch.branch_id]
-            parent_nodes = branch_nodes[branch.parent_branch_id]
             child_root = child_nodes[0]
-            nearest_parent = min(
-                parent_nodes,
-                key=lambda node: distance(child_root.position, node.position),
+            nearest_parent = _nearest_parent_node(
+                branch_nodes,
+                branch.branch_id,
+                branch.parent_branch_id,
             )
-
-            penalty = CONSTRAINT_PENALTY
-            matching_joint = next(
-                (joint for joint in model.joints if joint.child_branch_id == branch.branch_id),
-                None,
-            )
-            if matching_joint is not None:
-                penalty *= max(matching_joint.linear_stiffness_scale, 1.0e-6)
+            matching_joint = model.find_joint_for_child(branch.branch_id)
 
             for component_index in range(6):
                 add_pair_penalty(
                     stiffness,
                     child_root.dofs[component_index],
                     nearest_parent.dofs[component_index],
-                    penalty,
+                    _joint_component_penalty(component_index, matching_joint),
                 )
+            _append_joint_nonlinear_links(
+                nonlinear_links,
+                matching_joint,
+                child_root,
+                nearest_parent,
+            )
 
         auto_nonlinear_levels = set(model.analysis.auto_nonlinear_levels)
         explicit_joint_children = {joint.child_branch_id for joint in model.joints}
@@ -181,11 +257,11 @@ class OrchardSystemAssembler:
                     continue
 
                 child_nodes = branch_nodes[branch.branch_id]
-                parent_nodes = branch_nodes[branch.parent_branch_id]
                 child_root = child_nodes[0]
-                nearest_parent = min(
-                    parent_nodes,
-                    key=lambda node: distance(child_root.position, node.position),
+                nearest_parent = _nearest_parent_node(
+                    branch_nodes,
+                    branch.branch_id,
+                    branch.parent_branch_id,
                 )
                 nonlinear_links.append(
                     NonlinearLinkDefinition(
