@@ -27,7 +27,7 @@ Implemented today:
 Current limitations:
 - Nonlinear frequency-response currently uses warm-started steady-state time-domain sweep fallback rather than harmonic balance or full continuation.
 - Nonlinear joint laws currently act on rotational root DOFs; they are available in transient analysis and in nonlinear sweep-based frequency response, but not yet in a dedicated continuation workflow.
-- The default solver backbone is still the manual Euler-Bernoulli beam implementation. The experimental FEniCSx backend is wired into the main `run` and `modal` workflows for modal, linear frequency-response, and linear time-history cases, including fruit-attachment augmentation, gravity prestress, and linear joint constraints, but it does not yet cover nonlinear joint laws, localized nonlinear links, or SNES-based nonlinear dynamics.
+- The default solver backbone is still the manual Euler-Bernoulli beam implementation. The experimental FEniCSx backend is wired into the main `run` and `modal` workflows for modal, linear frequency-response, and time-history cases, including fruit-attachment augmentation, gravity prestress, linear joint constraints, and localized nonlinear links solved through PETSc SNES in time history. It does not yet cover nonlinear frequency continuation.
 
 ## Quick Start
 

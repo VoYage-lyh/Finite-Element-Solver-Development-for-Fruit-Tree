@@ -42,6 +42,18 @@ def _target_point(branch, target_node: str) -> tuple[float, float, float]:
     return point.x, point.y, point.z
 
 
+def _extract_parent_dofs(located_dofs: Any) -> np.ndarray:
+    if isinstance(located_dofs, list | tuple):
+        if not located_dofs:
+            return np.asarray([], dtype=np.int64)
+        return np.asarray(located_dofs[0], dtype=np.int64)
+
+    dof_array = np.asarray(located_dofs, dtype=np.int64)
+    if dof_array.ndim == 2:
+        return dof_array[:, 0]
+    return dof_array
+
+
 def resolve_embedded_beam_component_dof(
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
     point: tuple[float, float, float],
@@ -68,16 +80,12 @@ def resolve_embedded_beam_component_dof(
         (component_space, collapsed_space),
         _point_marker(point, atol),
     )
+    dofs = np.unique(_extract_parent_dofs(dof_pairs))
 
-    if dof_pairs.size == 0:
+    if dofs.size == 0:
         raise ValueError(
             f"No DOF found at point {point} for component {component}."
         )
-
-    if dof_pairs.ndim == 1:
-        dofs = np.unique(dof_pairs.astype(np.int64))
-    else:
-        dofs = np.unique(dof_pairs[:, 0].astype(np.int64))
 
     if len(dofs) != 1:
         raise ValueError(

@@ -31,7 +31,7 @@ The active implementation surface is `orchard_fem/`.
 ### Solver Layer
 
 - `orchard_fem/discretization/`: beam properties, DOFs, assembled systems, and matrix utilities
-- `orchard_fem/fenicsx/`: experimental embedded-mesh, field-definition, coefficient, UFL beam-form, PETSc operator-assembly, and early modal / linear frequency-response experiments for the future FEniCSx branch
+- `orchard_fem/fenicsx/`: experimental embedded-mesh, field-definition, coefficient, UFL beam-form, PETSc operator assembly, SLEPc modal solve, PETSc frequency-response solve, Newmark time-history solve, and PETSc SNES localized nonlinear time-history solve
 - `orchard_fem/solver_core/`: modal and preload core operations
 - `orchard_fem/dynamics/`: frequency-response and time-history execution
 - `orchard_fem/numerics/`: PETSc/SLEPc backend helpers

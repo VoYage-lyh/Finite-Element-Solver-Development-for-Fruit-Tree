@@ -77,7 +77,7 @@ def build_embedded_beam_cell_data(
     model: OrchardModel,
     *,
     spec: EmbeddedLineMeshSpec | None = None,
-    shear_correction: float = 1.0,
+    shear_correction: float = 0.4,
 ) -> EmbeddedBeamCellData:
     if shear_correction <= 0.0:
         raise ValueError("shear_correction must be positive.")
@@ -268,7 +268,7 @@ def build_embedded_timoshenko_forms(
     )
 
     def derivative(value: Any) -> Any:
-        return ufl.Dx(value, 0)
+        return ufl.dot(ufl.grad(value), tangent)
 
     def local_components(vector: Any) -> tuple[Any, Any, Any]:
         return (

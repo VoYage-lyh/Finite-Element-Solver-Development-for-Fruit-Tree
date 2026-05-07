@@ -48,11 +48,11 @@ Implemented:
 - Initial DOLFINx embedded-line mesh creation entry point for interval cells embedded in 3D.
 - Initial mixed displacement-rotation field definitions and FunctionSpace construction on top of the embedded DOLFINx mesh surface.
 - Initial experimental Timoshenko-style UFL beam forms driven by orchard cellwise section coefficients.
+- Embedded-line UFL forms now use the physical branch-tangent derivative instead of a global-axis derivative.
 - Initial PETSc operator assembly entry point for the experimental FEniCSx beam branch.
 
 Planned:
 - Automatic tangent generation through `ufl.derivative`.
-- Modal / dynamic solve experiments on the assembled FEniCSx operator branch.
 
 ## 5. Assembly Layer
 
@@ -88,13 +88,15 @@ Implemented:
 - Experimental linear PETSc frequency-response solve on the assembled FEniCSx embedded-beam operator branch.
 - Experimental linear PETSc/Newmark time-history solve on the assembled FEniCSx embedded-beam operator branch.
 - Experimental linear joint-constraint augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
+- Experimental nonlinear joint-law links in the FEniCSx embedded-beam time-history branch.
+- Experimental automatic nonlinear injection and cubic clamp links in the FEniCSx embedded-beam time-history branch.
+- Experimental PETSc SNES nonlinear Newmark solve for localized nonlinear links in the FEniCSx embedded-beam time-history branch.
 - Experimental fruit-attachment augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
 - Experimental gravity-prestress load solve plus geometric-stiffness augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
 - Main-workflow backend routing for `native` versus `fenicsx` in modal, frequency-response, and time-history execution.
 
 Planned:
 - Describing-function or equivalent-linear nonlinear frequency iteration.
-- PETSc SNES-driven nonlinear time solve.
 - Full continuation / harmonic-balance nonlinear frequency workflow.
 
 ## 7. Output And Verification
@@ -120,6 +122,5 @@ These are intentionally kept for future reduction, surrogate, and inversion work
 Near-term implementation order:
 
 1. Push the experimental `orchard_fem.fenicsx` branch from modal and linear frequency-response solves toward tighter benchmark-backed validation.
-2. Extend the experimental `orchard_fem.fenicsx` branch from linear workflows toward orchard-specific joint and localized nonlinear features.
-3. Add nonlinear / SNES-oriented solve experiments on top of the assembled FEniCSx operator branch.
-4. Move selected assembly paths closer to PETSc-native data structures once the FEniCSx branch can represent orchard topology cleanly.
+2. Extend nonlinear frequency-response beyond the current steady-state sweep fallback toward equivalent-linear or continuation methods.
+3. Move selected assembly paths closer to PETSc-native data structures once the FEniCSx branch can represent orchard topology cleanly.

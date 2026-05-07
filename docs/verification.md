@@ -51,7 +51,9 @@ ORCHARD_RUN_DOLFINX_TESTS=1 conda run -n orchard-fenicsx python -m pytest -q \
   tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_experiment_smoke \
   tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode \
   tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment \
-  tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke
+  tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke \
+  tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_polynomial_joint_law \
+  tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_auto_and_clamp_nonlinear_links
 ```
 
 Equivalent package-level verification entry in `orchard-fenicsx`:

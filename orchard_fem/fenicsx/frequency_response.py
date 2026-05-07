@@ -253,7 +253,7 @@ def solve_embedded_beam_frequency_response_experiment(
     *,
     polynomial_degree: int = 1,
     spec: EmbeddedLineMeshSpec | None = None,
-    shear_correction: float = 1.0,
+    shear_correction: float = 0.4,
     comm: object | None = None,
     partitioner: object | None = None,
     max_facet_to_cell_links: int = 2,

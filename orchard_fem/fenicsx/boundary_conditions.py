@@ -44,16 +44,18 @@ def build_point_clamp_boundary_conditions(
         marker,
     )
 
-    dtype = space_bundle.mesh.geometry.x.dtype
-    zero_vector = np.zeros(space_bundle.mesh.geometry.dim, dtype=dtype)
+    displacement_value = dolfinx_fem.Function(displacement_space)
+    rotation_value = dolfinx_fem.Function(rotation_space)
+    displacement_value.x.array[:] = 0.0
+    rotation_value.x.array[:] = 0.0
     return [
         dolfinx_fem.dirichletbc(
-            zero_vector,
+            displacement_value,
             displacement_dofs,
             space_bundle.displacement_space,
         ),
         dolfinx_fem.dirichletbc(
-            zero_vector,
+            rotation_value,
             rotation_dofs,
             space_bundle.rotation_space,
         ),
@@ -65,10 +67,13 @@ def build_model_clamp_boundary_conditions(
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
     *,
     atol: float = 1.0e-8,
+    include_nonlinear_clamps: bool = True,
 ) -> list[Any]:
     boundary_conditions: list[Any] = []
     seen_points: set[tuple[float, float, float]] = set()
     for clamp in model.clamps:
+        if not include_nonlinear_clamps and abs(clamp.cubic_stiffness) > 1.0e-14:
+            continue
         branch = model.require_branch(clamp.branch_id)
         point = (
             branch.path.start.x,

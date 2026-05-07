@@ -5,7 +5,8 @@ from math import cos, pi, sin
 from typing import Any
 
 from orchard_fem.discretization.damping import compute_default_damping_ratio
-from orchard_fem.domain import ExcitationKind, JointLawKind, OrchardModel
+from orchard_fem.dynamics.nonlinear import nonlinear_force, nonlinear_tangent
+from orchard_fem.domain import ExcitationKind, OrchardModel
 from orchard_fem.dynamics.excitation import (
     TimeExcitationState,
     default_driving_frequency_hz,
@@ -37,30 +38,7 @@ class EmbeddedBeamTimeHistoryExperimentResult:
 
 
 def _require_supported_time_history_model(model: OrchardModel) -> None:
-    unsupported_joint_laws = [
-        joint.joint_id
-        for joint in model.joints
-        if joint.law.kind != JointLawKind.NONE
-    ]
-    if unsupported_joint_laws:
-        raise NotImplementedError(
-            "The experimental FEniCSx time-history branch does not yet support nonlinear joint laws. "
-            f"Unsupported joints: {', '.join(sorted(unsupported_joint_laws))}."
-        )
-    if model.analysis.auto_nonlinear_levels:
-        raise NotImplementedError(
-            "The experimental FEniCSx time-history branch does not yet support automatic nonlinear link injection."
-        )
-    nonlinear_clamps = [
-        clamp.branch_id
-        for clamp in model.clamps
-        if abs(clamp.cubic_stiffness) > 1.0e-14
-    ]
-    if nonlinear_clamps:
-        raise NotImplementedError(
-            "The experimental FEniCSx time-history branch does not yet support cubic clamp nonlinearities. "
-            f"Unsupported clamps: {', '.join(sorted(nonlinear_clamps))}."
-        )
+    del model
 
 
 def _resolve_rayleigh_coefficients(model: OrchardModel) -> tuple[float, float]:
@@ -125,6 +103,332 @@ def _solve_direct_system(solver: Any, rhs_vector: Any) -> Any:
             f"(reason={solver.getConvergedReason()})."
         )
     return solution
+
+
+def _create_empty_aij_matrix_like(matrix: Any) -> Any:
+    require_petsc()
+
+    from petsc4py import PETSc
+
+    created = PETSc.Mat().createAIJ(size=matrix.getSize(), comm=matrix.getComm())
+    created.setUp()
+    return created
+
+
+def _accumulate_owned_matrix_value(
+    matrix: Any,
+    owned_rows: tuple[int, int],
+    row: int,
+    column: int,
+    value: float,
+) -> None:
+    ownership_start, ownership_end = owned_rows
+    if not (ownership_start <= row < ownership_end):
+        return
+
+    from petsc4py import PETSc
+
+    matrix.setValue(
+        row,
+        column,
+        float(value),
+        addv=PETSc.InsertMode.ADD_VALUES,
+    )
+
+
+def _accumulate_owned_vector_value(
+    vector: Any,
+    owned_rows: tuple[int, int],
+    index: int,
+    value: float,
+) -> None:
+    ownership_start, ownership_end = owned_rows
+    if not (ownership_start <= index < ownership_end):
+        return
+
+    from petsc4py import PETSc
+
+    vector.setValue(
+        index,
+        float(value),
+        addv=PETSc.InsertMode.ADD_VALUES,
+    )
+
+
+def _evaluate_nonlinear_force_and_tangent(
+    stiffness_matrix: Any,
+    nonlinear_links,
+    displacement: Any,
+) -> tuple[Any, Any]:
+    force_vector = stiffness_matrix.createVecRight()
+    force_vector.set(0.0)
+    tangent_matrix = _create_empty_aij_matrix_like(stiffness_matrix)
+    owned_rows = tangent_matrix.getOwnershipRange()
+    owned_vector_rows = force_vector.getOwnershipRange()
+
+    for link in nonlinear_links:
+        second_value = _vector_value(displacement, link.second_dof) if link.second_dof >= 0 else 0.0
+        relative_displacement = _vector_value(displacement, link.first_dof) - second_value
+        scalar_force = nonlinear_force(link, relative_displacement)
+        scalar_tangent = nonlinear_tangent(link, relative_displacement)
+
+        _accumulate_owned_vector_value(
+            force_vector,
+            owned_vector_rows,
+            link.first_dof,
+            scalar_force,
+        )
+        _accumulate_owned_matrix_value(
+            tangent_matrix,
+            owned_rows,
+            link.first_dof,
+            link.first_dof,
+            scalar_tangent,
+        )
+
+        if link.second_dof >= 0:
+            _accumulate_owned_vector_value(
+                force_vector,
+                owned_vector_rows,
+                link.second_dof,
+                -scalar_force,
+            )
+            _accumulate_owned_matrix_value(
+                tangent_matrix,
+                owned_rows,
+                link.first_dof,
+                link.second_dof,
+                -scalar_tangent,
+            )
+            _accumulate_owned_matrix_value(
+                tangent_matrix,
+                owned_rows,
+                link.second_dof,
+                link.first_dof,
+                -scalar_tangent,
+            )
+            _accumulate_owned_matrix_value(
+                tangent_matrix,
+                owned_rows,
+                link.second_dof,
+                link.second_dof,
+                scalar_tangent,
+            )
+
+    force_vector.assemblyBegin()
+    force_vector.assemblyEnd()
+    tangent_matrix.assemble()
+    return force_vector, tangent_matrix
+
+
+def _build_effective_matrix(
+    stiffness_matrix: Any,
+    mass_matrix: Any,
+    damping_matrix: Any,
+    nonlinear_tangent_matrix: Any | None,
+    *,
+    mass_scale: float,
+    damping_scale: float,
+) -> Any:
+    from petsc4py import PETSc
+
+    effective_matrix = stiffness_matrix.duplicate(copy=True)
+    effective_matrix.axpy(
+        mass_scale,
+        mass_matrix,
+        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+    )
+    effective_matrix.axpy(
+        damping_scale,
+        damping_matrix,
+        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+    )
+    if nonlinear_tangent_matrix is not None:
+        effective_matrix.axpy(
+            1.0,
+            nonlinear_tangent_matrix,
+            structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+        )
+    effective_matrix.assemble()
+    return effective_matrix
+
+
+def _build_residual_vector(
+    stiffness_matrix: Any,
+    mass_matrix: Any,
+    damping_matrix: Any,
+    displacement: Any,
+    velocity: Any,
+    acceleration: Any,
+    nonlinear_force_vector: Any,
+    external_load_vector: Any,
+) -> Any:
+    residual = external_load_vector.duplicate()
+    mass_matrix.mult(acceleration, residual)
+
+    damping_term = external_load_vector.duplicate()
+    damping_matrix.mult(velocity, damping_term)
+    residual.axpy(1.0, damping_term)
+
+    stiffness_term = external_load_vector.duplicate()
+    stiffness_matrix.mult(displacement, stiffness_term)
+    residual.axpy(1.0, stiffness_term)
+    residual.axpy(1.0, nonlinear_force_vector)
+    residual.axpy(-1.0, external_load_vector)
+    return residual
+
+
+def _assign_vector(target: Any, source: Any) -> None:
+    target.set(0.0)
+    target.axpy(1.0, source)
+
+
+def _assign_matrix(target: Any, source: Any) -> None:
+    from petsc4py import PETSc
+
+    target.zeroEntries()
+    target.axpy(
+        1.0,
+        source,
+        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+    )
+    target.assemble()
+
+
+def _state_from_displacement(
+    displacement: Any,
+    displacement_predictor: Any,
+    velocity_predictor: Any,
+    *,
+    mass_scale: float,
+    gamma: float,
+    dt: float,
+) -> tuple[Any, Any]:
+    acceleration = _copy_vector(displacement)
+    acceleration.axpy(-1.0, displacement_predictor)
+    acceleration.scale(mass_scale)
+
+    velocity = _copy_vector(velocity_predictor)
+    velocity_increment = _copy_vector(acceleration)
+    velocity_increment.scale(gamma * dt)
+    velocity.axpy(1.0, velocity_increment)
+    return acceleration, velocity
+
+
+def _solve_nonlinear_newmark_step_with_snes(
+    stiffness_matrix: Any,
+    mass_matrix: Any,
+    damping_matrix: Any,
+    nonlinear_links,
+    displacement_predictor: Any,
+    velocity_predictor: Any,
+    *,
+    excitation_dof: int,
+    excitation,
+    analysis,
+    time_seconds: float,
+    mass_scale: float,
+    damping_scale: float,
+    gamma: float,
+    dt: float,
+) -> tuple[Any, Any, Any, TimeExcitationState]:
+    require_petsc()
+
+    from petsc4py import PETSc
+
+    load_vector, excitation_state = _build_time_load_vector(
+        stiffness_matrix,
+        mass_matrix,
+        damping_matrix,
+        excitation_dof=excitation_dof,
+        excitation=excitation,
+        analysis=analysis,
+        time_seconds=time_seconds,
+    )
+    residual_vector = load_vector.duplicate()
+    jacobian_matrix = _build_effective_matrix(
+        stiffness_matrix,
+        mass_matrix,
+        damping_matrix,
+        None,
+        mass_scale=mass_scale,
+        damping_scale=damping_scale,
+    )
+
+    def assemble_residual(_snes, current_displacement, residual) -> None:
+        acceleration, velocity = _state_from_displacement(
+            current_displacement,
+            displacement_predictor,
+            velocity_predictor,
+            mass_scale=mass_scale,
+            gamma=gamma,
+            dt=dt,
+        )
+        nonlinear_force_vector, _ = _evaluate_nonlinear_force_and_tangent(
+            stiffness_matrix,
+            nonlinear_links,
+            current_displacement,
+        )
+        computed_residual = _build_residual_vector(
+            stiffness_matrix,
+            mass_matrix,
+            damping_matrix,
+            current_displacement,
+            velocity,
+            acceleration,
+            nonlinear_force_vector,
+            load_vector,
+        )
+        _assign_vector(residual, computed_residual)
+
+    def assemble_jacobian(_snes, current_displacement, jacobian, preconditioner) -> None:
+        _, nonlinear_tangent_matrix = _evaluate_nonlinear_force_and_tangent(
+            stiffness_matrix,
+            nonlinear_links,
+            current_displacement,
+        )
+        effective_matrix = _build_effective_matrix(
+            stiffness_matrix,
+            mass_matrix,
+            damping_matrix,
+            nonlinear_tangent_matrix,
+            mass_scale=mass_scale,
+            damping_scale=damping_scale,
+        )
+        _assign_matrix(jacobian, effective_matrix)
+        if preconditioner is not jacobian:
+            _assign_matrix(preconditioner, effective_matrix)
+
+    snes = PETSc.SNES().create(stiffness_matrix.getComm())
+    snes.setFunction(assemble_residual, residual_vector)
+    snes.setJacobian(assemble_jacobian, jacobian_matrix, jacobian_matrix)
+    snes.setTolerances(
+        atol=float(analysis.nonlinear_tolerance),
+        rtol=float(analysis.nonlinear_tolerance),
+        max_it=max(analysis.max_nonlinear_iterations, 1),
+    )
+    snes.getKSP().setType(PETSc.KSP.Type.PREONLY)
+    snes.getKSP().getPC().setType(PETSc.PC.Type.LU)
+    snes.setFromOptions()
+
+    displacement = _copy_vector(displacement_predictor)
+    snes.solve(None, displacement)
+    if snes.getConvergedReason() <= 0:
+        raise RuntimeError(
+            "PETSc SNES failed to converge for FEniCSx nonlinear time history "
+            f"at time {time_seconds:.12g} "
+            f"(reason={snes.getConvergedReason()}, iterations={snes.getIterationNumber()})."
+        )
+
+    acceleration, velocity = _state_from_displacement(
+        displacement,
+        displacement_predictor,
+        velocity_predictor,
+        mass_scale=mass_scale,
+        gamma=gamma,
+        dt=dt,
+    )
+    return displacement, velocity, acceleration, excitation_state
 
 
 def _build_time_excitation_state(
@@ -196,6 +500,27 @@ def _build_time_load_vector(
     return load_vector, state
 
 
+def _regularize_zero_diagonal_matrix(matrix: Any, *, replacement: float = 1.0) -> Any:
+    regularized = matrix.duplicate(copy=True)
+    diagonal = regularized.getDiagonal()
+    values = diagonal.getArray(readonly=True)
+    ownership_start, ownership_end = regularized.getOwnershipRange()
+
+    from petsc4py import PETSc
+
+    for local_index, value in enumerate(values):
+        if abs(float(value)) > 1.0e-20:
+            continue
+        regularized.setValue(
+            ownership_start + local_index,
+            ownership_start + local_index,
+            float(replacement),
+            addv=PETSc.InsertMode.INSERT_VALUES,
+        )
+    regularized.assemble()
+    return regularized
+
+
 def _build_initial_acceleration(
     stiffness_matrix: Any,
     mass_matrix: Any,
@@ -205,7 +530,7 @@ def _build_initial_acceleration(
     excitation,
     analysis,
 ) -> Any:
-    mass_solver = _build_direct_solver(mass_matrix)
+    mass_solver = _build_direct_solver(_regularize_zero_diagonal_matrix(mass_matrix))
     load_vector, _ = _build_time_load_vector(
         stiffness_matrix,
         mass_matrix,
@@ -223,7 +548,7 @@ def solve_embedded_beam_time_history_experiment(
     *,
     polynomial_degree: int = 1,
     spec: EmbeddedLineMeshSpec | None = None,
-    shear_correction: float = 1.0,
+    shear_correction: float = 0.4,
     comm: object | None = None,
     partitioner: object | None = None,
     max_facet_to_cell_links: int = 2,
@@ -280,21 +605,16 @@ def solve_embedded_beam_time_history_experiment(
     stiffness_matrix = experiment.operator_bundle.stiffness_matrix
     mass_matrix = experiment.operator_bundle.mass_matrix
     excitation_dof = response_mapping.excitation_dof
+    nonlinear_links = experiment.operator_bundle.nonlinear_links
 
-    from petsc4py import PETSc
-
-    effective_matrix = stiffness_matrix.duplicate(copy=True)
-    effective_matrix.axpy(
-        mass_scale,
+    effective_matrix = _build_effective_matrix(
+        stiffness_matrix,
         mass_matrix,
-        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
-    )
-    effective_matrix.axpy(
-        damping_scale,
         damping_matrix,
-        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+        None,
+        mass_scale=mass_scale,
+        damping_scale=damping_scale,
     )
-    effective_matrix.assemble()
     effective_solver = _build_direct_solver(effective_matrix)
 
     displacement = stiffness_matrix.createVecRight()
@@ -348,40 +668,60 @@ def solve_embedded_beam_time_history_experiment(
         predictor_velocity_acceleration.scale(dt * (1.0 - gamma))
         velocity_predictor.axpy(1.0, predictor_velocity_acceleration)
 
-        rhs_vector, excitation_state = _build_time_load_vector(
-            stiffness_matrix,
-            mass_matrix,
-            damping_matrix,
-            excitation_dof=excitation_dof,
-            excitation=model.excitation,
-            analysis=model.analysis,
-            time_seconds=time_seconds,
-        )
+        if nonlinear_links:
+            displacement, velocity, acceleration, excitation_state = (
+                _solve_nonlinear_newmark_step_with_snes(
+                    stiffness_matrix,
+                    mass_matrix,
+                    damping_matrix,
+                    nonlinear_links,
+                    displacement_predictor,
+                    velocity_predictor,
+                    excitation_dof=excitation_dof,
+                    excitation=model.excitation,
+                    analysis=model.analysis,
+                    time_seconds=time_seconds,
+                    mass_scale=mass_scale,
+                    damping_scale=damping_scale,
+                    gamma=gamma,
+                    dt=dt,
+                )
+            )
+        else:
+            rhs_vector, excitation_state = _build_time_load_vector(
+                stiffness_matrix,
+                mass_matrix,
+                damping_matrix,
+                excitation_dof=excitation_dof,
+                excitation=model.excitation,
+                analysis=model.analysis,
+                time_seconds=time_seconds,
+            )
 
-        mass_term = rhs_vector.duplicate()
-        mass_matrix.mult(displacement_predictor, mass_term)
-        mass_term.scale(mass_scale)
-        rhs_vector.axpy(1.0, mass_term)
+            mass_term = rhs_vector.duplicate()
+            mass_matrix.mult(displacement_predictor, mass_term)
+            mass_term.scale(mass_scale)
+            rhs_vector.axpy(1.0, mass_term)
 
-        damping_predictor_term = rhs_vector.duplicate()
-        damping_matrix.mult(displacement_predictor, damping_predictor_term)
-        damping_predictor_term.scale(damping_scale)
-        rhs_vector.axpy(1.0, damping_predictor_term)
+            damping_predictor_term = rhs_vector.duplicate()
+            damping_matrix.mult(displacement_predictor, damping_predictor_term)
+            damping_predictor_term.scale(damping_scale)
+            rhs_vector.axpy(1.0, damping_predictor_term)
 
-        damping_velocity_term = rhs_vector.duplicate()
-        damping_matrix.mult(velocity_predictor, damping_velocity_term)
-        rhs_vector.axpy(-1.0, damping_velocity_term)
+            damping_velocity_term = rhs_vector.duplicate()
+            damping_matrix.mult(velocity_predictor, damping_velocity_term)
+            rhs_vector.axpy(-1.0, damping_velocity_term)
 
-        displacement = _solve_direct_system(effective_solver, rhs_vector)
+            displacement = _solve_direct_system(effective_solver, rhs_vector)
 
-        acceleration = _copy_vector(displacement)
-        acceleration.axpy(-1.0, displacement_predictor)
-        acceleration.scale(mass_scale)
+            acceleration = _copy_vector(displacement)
+            acceleration.axpy(-1.0, displacement_predictor)
+            acceleration.scale(mass_scale)
 
-        velocity = _copy_vector(velocity_predictor)
-        acceleration_velocity_increment = _copy_vector(acceleration)
-        acceleration_velocity_increment.scale(gamma * dt)
-        velocity.axpy(1.0, acceleration_velocity_increment)
+            velocity = _copy_vector(velocity_predictor)
+            acceleration_velocity_increment = _copy_vector(acceleration)
+            acceleration_velocity_increment.scale(gamma * dt)
+            velocity.axpy(1.0, acceleration_velocity_increment)
 
         if step % output_stride == 0 or step == total_steps:
             points.append(

@@ -42,6 +42,8 @@ DOLFINX_TEST_TARGETS = [
     "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode",
     "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment",
     "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke",
+    "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_polynomial_joint_law",
+    "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_auto_and_clamp_nonlinear_links",
 ]
 
 

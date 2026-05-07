@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import pi, sqrt
 from typing import Any
 
-from orchard_fem.domain import JointLawKind, OrchardModel
+from orchard_fem.domain import OrchardModel
 from orchard_fem.fenicsx.availability import require_dolfinx
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
 from orchard_fem.fenicsx.operators import (
@@ -30,30 +30,7 @@ class EmbeddedBeamModalExperimentResult:
 
 
 def _require_supported_modal_model(model: OrchardModel) -> None:
-    unsupported_joint_laws = [
-        joint.joint_id
-        for joint in model.joints
-        if joint.law.kind != JointLawKind.NONE
-    ]
-    if unsupported_joint_laws:
-        raise NotImplementedError(
-            "The experimental FEniCSx modal branch does not yet support nonlinear joint laws. "
-            f"Unsupported joints: {', '.join(sorted(unsupported_joint_laws))}."
-        )
-    if model.analysis.auto_nonlinear_levels:
-        raise NotImplementedError(
-            "The experimental FEniCSx modal branch does not yet support automatic nonlinear link injection."
-        )
-    nonlinear_clamps = [
-        clamp.branch_id
-        for clamp in model.clamps
-        if abs(clamp.cubic_stiffness) > 1.0e-14
-    ]
-    if nonlinear_clamps:
-        raise NotImplementedError(
-            "The experimental FEniCSx modal branch does not yet support cubic clamp nonlinearities. "
-            f"Unsupported clamps: {', '.join(sorted(nonlinear_clamps))}."
-        )
+    del model
 
 
 def _solve_petsc_generalized_modes(
@@ -138,7 +115,7 @@ def solve_embedded_beam_modal_experiment(
     num_modes: int = 6,
     polynomial_degree: int = 1,
     spec: EmbeddedLineMeshSpec | None = None,
-    shear_correction: float = 1.0,
+    shear_correction: float = 0.4,
     comm: object | None = None,
     partitioner: object | None = None,
     max_facet_to_cell_links: int = 2,

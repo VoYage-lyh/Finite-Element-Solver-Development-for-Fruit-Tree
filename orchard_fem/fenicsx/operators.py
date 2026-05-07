@@ -7,6 +7,11 @@ from typing import Any, Sequence
 from orchard_fem.discretization.beam.element_matrices import transform_to_global
 from orchard_fem.discretization.beam.local_matrices import build_local_geometric_stiffness_matrix
 from orchard_fem.discretization.beam.transforms import build_transformation_matrix
+from orchard_fem.discretization.types import (
+    COMPONENT_LABELS,
+    NonlinearLinkDefinition,
+    NonlinearLinkKind,
+)
 from orchard_fem.domain import JointDefinition, JointLawKind, OrchardModel
 from orchard_fem.fenicsx.availability import require_dolfinx
 from orchard_fem.fenicsx.boundary_conditions import build_model_clamp_boundary_conditions
@@ -40,6 +45,7 @@ class EmbeddedBeamOperatorBundle:
     geometric_stiffness_matrix: Any | None = None
     prestress_axial_forces: dict[str, list[float]] = field(default_factory=dict)
     fruit_dofs: dict[str, int] = field(default_factory=dict)
+    nonlinear_links: list[NonlinearLinkDefinition] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -57,19 +63,35 @@ def _create_empty_aij_matrix_like(matrix: Any, size: int) -> Any:
     from petsc4py import PETSc
 
     created = PETSc.Mat().createAIJ(size=(size, size), comm=matrix.getComm())
+    created.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
     created.setUp()
     return created
 
 
+def _allow_new_nonzero_allocation(matrix: Any) -> None:
+    from petsc4py import PETSc
+
+    matrix.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
+
+
 def _copy_matrix_entries(source: Any, target: Any) -> None:
+    from petsc4py import PETSc
+
     ownership_start, ownership_end = source.getOwnershipRange()
     for row_index in range(ownership_start, ownership_end):
         columns, values = source.getRow(row_index)
         try:
             if len(columns) > 0:
-                target.setValues(row_index, columns, values)
+                target.setValues(
+                    row_index,
+                    columns,
+                    values,
+                    addv=PETSc.InsertMode.ADD_VALUES,
+                )
         finally:
-            source.restoreRow(row_index, columns, values)
+            restore_row = getattr(source, "restoreRow", None)
+            if restore_row is not None:
+                restore_row(row_index, columns, values)
 
 
 def _accumulate_owned_matrix_value(
@@ -133,6 +155,57 @@ def _joint_component_penalty(
     if component_index >= 3 and joint.law.kind != JointLawKind.NONE:
         penalty *= max(joint.law.linear_scale, 1.0e-6)
     return penalty
+
+
+def _append_joint_nonlinear_links(
+    nonlinear_links: list[NonlinearLinkDefinition],
+    joint: JointDefinition | None,
+    child_root: tuple[int, int, int, int, int, int],
+    nearest_parent: tuple[int, int, int, int, int, int],
+) -> None:
+    if joint is None or joint.law.kind == JointLawKind.NONE:
+        return
+
+    rotational_linear_stiffness = _joint_component_penalty(3, joint)
+    rotational_open_stiffness = (
+        CONSTRAINT_PENALTY
+        * max(joint.linear_stiffness_scale, 1.0e-6)
+        * max(joint.law.open_scale, 0.0)
+    )
+
+    for component_index in range(3, 6):
+        component = COMPONENT_LABELS[component_index]
+        label = f"joint:{joint.joint_id}:{component}"
+
+        if joint.law.kind == JointLawKind.POLYNOMIAL:
+            if abs(joint.law.cubic_scale) <= 0.0:
+                continue
+            nonlinear_links.append(
+                NonlinearLinkDefinition(
+                    label=label,
+                    first_dof=child_root[component_index],
+                    second_dof=nearest_parent[component_index],
+                    kind=NonlinearLinkKind.CUBIC_SPRING,
+                    cubic_stiffness=joint.law.cubic_scale,
+                )
+            )
+            continue
+
+        if joint.law.kind == JointLawKind.GAP_FRICTION:
+            nonlinear_links.append(
+                NonlinearLinkDefinition(
+                    label=label,
+                    first_dof=child_root[component_index],
+                    second_dof=nearest_parent[component_index],
+                    kind=NonlinearLinkKind.GAP_SPRING,
+                    linear_stiffness=rotational_linear_stiffness,
+                    open_stiffness=rotational_open_stiffness,
+                    gap_threshold=max(joint.law.gap_threshold, 0.0),
+                )
+            )
+            continue
+
+        raise ValueError(f"Unsupported joint law kind: {joint.law.kind}")
 
 
 def _normalize_gravity_direction(direction: tuple[float, float, float]) -> Vec3:
@@ -237,6 +310,28 @@ def _build_gravity_load_vector(
     return load_vector
 
 
+def _zero_clamped_gravity_loads(
+    model: OrchardModel,
+    gravity_load_vector: Any,
+    branch_node_dofs: dict[str, list[tuple[int, int, int, int, int, int]]],
+) -> None:
+    from petsc4py import PETSc
+
+    owned_rows = gravity_load_vector.getOwnershipRange()
+    for clamp in model.clamps:
+        for dof in branch_node_dofs[clamp.branch_id][0]:
+            ownership_start, ownership_end = owned_rows
+            if not (ownership_start <= dof < ownership_end):
+                continue
+            gravity_load_vector.setValue(
+                dof,
+                0.0,
+                addv=PETSc.InsertMode.INSERT_VALUES,
+            )
+    gravity_load_vector.assemblyBegin()
+    gravity_load_vector.assemblyEnd()
+
+
 def _solve_static_prestress_displacement(stiffness_matrix: Any, gravity_load_vector: Any) -> Any:
     from petsc4py import PETSc
 
@@ -329,7 +424,9 @@ def _build_geometric_stiffness_matrix(
                 + ((end_point.z - start_point.z) ** 2)
             )
             transformation = build_transformation_matrix(start_point, end_point)
-            local_geometric = build_local_geometric_stiffness_matrix(axial_force, length)
+            # FEniCSx static preload reports compression with the opposite sign
+            # convention from the legacy 12x12 geometric-stiffness helper.
+            local_geometric = build_local_geometric_stiffness_matrix(-axial_force, length)
             global_geometric = transform_to_global(local_geometric, transformation)
             element_dofs = list(node_dofs[local_index]) + list(node_dofs[local_index + 1])
             for local_row, global_row in enumerate(element_dofs):
@@ -358,16 +455,17 @@ def _augment_operators_with_joints(
 ) -> EmbeddedBeamOperatorBundle:
     require_dolfinx()
 
-    if not model.joints:
-        return operator_bundle
-
     branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle)
     stiffness_matrix = operator_bundle.stiffness_matrix.duplicate(copy=True)
+    _allow_new_nonzero_allocation(stiffness_matrix)
     owned_rows = stiffness_matrix.getOwnershipRange()
+    nonlinear_links = list(operator_bundle.nonlinear_links)
+    has_branch_connections = False
 
     for branch in model.branches:
         if branch.parent_branch_id is None:
             continue
+        has_branch_connections = True
 
         child_nodes = branch_node_dofs[branch.branch_id]
         child_root = child_nodes[0]
@@ -411,6 +509,15 @@ def _augment_operators_with_joints(
                 first_dof,
                 -penalty,
             )
+        _append_joint_nonlinear_links(
+            nonlinear_links,
+            joint,
+            child_root,
+            parent_root,
+        )
+
+    if not has_branch_connections:
+        return operator_bundle
 
     stiffness_matrix.assemble()
     return EmbeddedBeamOperatorBundle(
@@ -423,6 +530,114 @@ def _augment_operators_with_joints(
         geometric_stiffness_matrix=operator_bundle.geometric_stiffness_matrix,
         prestress_axial_forces=operator_bundle.prestress_axial_forces,
         fruit_dofs=operator_bundle.fruit_dofs,
+        nonlinear_links=nonlinear_links,
+    )
+
+
+def _augment_operators_with_auto_nonlinear_links(
+    model: OrchardModel,
+    space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    operator_bundle: EmbeddedBeamOperatorBundle,
+) -> EmbeddedBeamOperatorBundle:
+    require_dolfinx()
+
+    auto_nonlinear_levels = set(model.analysis.auto_nonlinear_levels)
+    if not auto_nonlinear_levels:
+        return operator_bundle
+
+    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle)
+    explicit_joint_children = {joint.child_branch_id for joint in model.joints}
+    nonlinear_links = list(operator_bundle.nonlinear_links)
+
+    for branch in model.branches:
+        if branch.parent_branch_id is None:
+            continue
+        if branch.level not in auto_nonlinear_levels:
+            continue
+        if branch.branch_id in explicit_joint_children:
+            continue
+
+        parent_node_index = _nearest_parent_node_index(
+            model,
+            branch.branch_id,
+            branch.parent_branch_id,
+        )
+        nonlinear_links.append(
+            NonlinearLinkDefinition(
+                label=f"auto_joint:{branch.branch_id}",
+                first_dof=branch_node_dofs[branch.branch_id][0][0],
+                second_dof=branch_node_dofs[branch.parent_branch_id][parent_node_index][0],
+                kind=NonlinearLinkKind.CUBIC_SPRING,
+                cubic_stiffness=model.analysis.auto_nonlinear_cubic_scale,
+            )
+        )
+
+    return EmbeddedBeamOperatorBundle(
+        compiled_stiffness_form=operator_bundle.compiled_stiffness_form,
+        compiled_mass_form=operator_bundle.compiled_mass_form,
+        stiffness_matrix=operator_bundle.stiffness_matrix,
+        mass_matrix=operator_bundle.mass_matrix,
+        attachment_damping_matrix=operator_bundle.attachment_damping_matrix,
+        gravity_load_vector=operator_bundle.gravity_load_vector,
+        geometric_stiffness_matrix=operator_bundle.geometric_stiffness_matrix,
+        prestress_axial_forces=operator_bundle.prestress_axial_forces,
+        fruit_dofs=operator_bundle.fruit_dofs,
+        nonlinear_links=nonlinear_links,
+    )
+
+
+def _augment_operators_with_nonlinear_clamps(
+    model: OrchardModel,
+    space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    operator_bundle: EmbeddedBeamOperatorBundle,
+) -> EmbeddedBeamOperatorBundle:
+    require_dolfinx()
+
+    nonlinear_clamps = [
+        clamp for clamp in model.clamps if abs(clamp.cubic_stiffness) > 1.0e-14
+    ]
+    if not nonlinear_clamps:
+        return operator_bundle
+
+    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle)
+    stiffness_matrix = operator_bundle.stiffness_matrix.duplicate(copy=True)
+    _allow_new_nonzero_allocation(stiffness_matrix)
+    owned_rows = stiffness_matrix.getOwnershipRange()
+    nonlinear_links = list(operator_bundle.nonlinear_links)
+
+    for clamp in nonlinear_clamps:
+        root_dofs = branch_node_dofs[clamp.branch_id][0]
+        for dof in root_dofs:
+            _accumulate_owned_matrix_value(
+                stiffness_matrix,
+                owned_rows,
+                dof,
+                dof,
+                CONSTRAINT_PENALTY,
+            )
+        nonlinear_links.append(
+            NonlinearLinkDefinition(
+                label=f"clamp:{clamp.branch_id}",
+                first_dof=root_dofs[0],
+                second_dof=-1,
+                kind=NonlinearLinkKind.CUBIC_SPRING,
+                linear_stiffness=CONSTRAINT_PENALTY,
+                cubic_stiffness=clamp.cubic_stiffness,
+            )
+        )
+
+    stiffness_matrix.assemble()
+    return EmbeddedBeamOperatorBundle(
+        compiled_stiffness_form=operator_bundle.compiled_stiffness_form,
+        compiled_mass_form=operator_bundle.compiled_mass_form,
+        stiffness_matrix=stiffness_matrix,
+        mass_matrix=operator_bundle.mass_matrix,
+        attachment_damping_matrix=operator_bundle.attachment_damping_matrix,
+        gravity_load_vector=operator_bundle.gravity_load_vector,
+        geometric_stiffness_matrix=operator_bundle.geometric_stiffness_matrix,
+        prestress_axial_forces=operator_bundle.prestress_axial_forces,
+        fruit_dofs=operator_bundle.fruit_dofs,
+        nonlinear_links=nonlinear_links,
     )
 
 
@@ -460,6 +675,7 @@ def _augment_operators_with_gravity_prestress(
         mesh_spec,
         branch_node_dofs,
     )
+    _zero_clamped_gravity_loads(model, gravity_load_vector, branch_node_dofs)
     static_displacement = _solve_static_prestress_displacement(
         operator_bundle.stiffness_matrix,
         gravity_load_vector,
@@ -493,6 +709,7 @@ def _augment_operators_with_gravity_prestress(
         geometric_stiffness_matrix=geometric_stiffness_matrix,
         prestress_axial_forces=prestress_axial_forces,
         fruit_dofs=operator_bundle.fruit_dofs,
+        nonlinear_links=operator_bundle.nonlinear_links,
     )
 
 
@@ -620,6 +837,7 @@ def _augment_operators_with_fruits(
         mass_matrix=mass_matrix,
         attachment_damping_matrix=damping_matrix,
         fruit_dofs=fruit_dofs,
+        nonlinear_links=operator_bundle.nonlinear_links,
     )
 
 
@@ -647,7 +865,7 @@ def assemble_embedded_beam_operators(
     mass_matrix = dolfinx_fem_petsc.assemble_matrix(
         compiled_mass_form,
         bcs=bcs,
-        diag=diag,
+        diag=0.0,
     )
     mass_matrix.assemble()
 
@@ -664,7 +882,7 @@ def build_embedded_timoshenko_experiment(
     *,
     polynomial_degree: int = 1,
     spec: EmbeddedLineMeshSpec | None = None,
-    shear_correction: float = 1.0,
+    shear_correction: float = 0.4,
     comm: object | None = None,
     partitioner: object | None = None,
     max_facet_to_cell_links: int = 2,
@@ -702,6 +920,7 @@ def build_embedded_timoshenko_experiment(
             model,
             space_bundle,
             atol=clamp_tolerance,
+            include_nonlinear_clamps=False,
         )
     else:
         effective_bcs = ()
@@ -711,6 +930,16 @@ def build_embedded_timoshenko_experiment(
         diag=diag,
     )
     operator_bundle = _augment_operators_with_joints(
+        model,
+        space_bundle,
+        operator_bundle,
+    )
+    operator_bundle = _augment_operators_with_auto_nonlinear_links(
+        model,
+        space_bundle,
+        operator_bundle,
+    )
+    operator_bundle = _augment_operators_with_nonlinear_clamps(
         model,
         space_bundle,
         operator_bundle,

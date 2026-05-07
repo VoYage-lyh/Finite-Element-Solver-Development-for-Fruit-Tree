@@ -142,18 +142,20 @@ The current analysis entry supports:
 - `output_csv`
 
 `solver_backend` defaults to `native`.
+Frequency-response fields use the `AnalysisSettings` defaults when omitted, so pure time-history JSON files do not need to carry unused frequency sweep values.
 
 - `native` uses the current Orchard FEM beam assembly and solver stack for modal, frequency-response, and time-history workflows.
 - `fenicsx` routes the main workflow to the experimental embedded-beam FEniCSx branch.
-  At the current stage this backend is intended for modal, linear frequency-response, and linear time-history cases.
-  It supports branch observations, fruit-attachment augmentation, gravity prestress, and linear joint constraints,
-  but it does not yet support automatic nonlinear injection or localized nonlinear clamp/joint dynamics.
+  At the current stage this backend is intended for modal, linear frequency-response, and time-history cases.
+  It supports branch observations, fruit-attachment augmentation, gravity prestress, linear joint constraints,
+  and localized nonlinear links in time-history analysis, including explicit joint laws, automatic nonlinear
+  injection, and cubic clamp links solved through PETSc SNES. It does not yet support nonlinear frequency continuation.
 
 Frequency-response mode uses the direct linearized assembled operators when no localized nonlinear
 links are active. If the assembled system contains localized nonlinear links, Orchard FEM falls
 back to a steady-state time-domain sweep and reports amplitudes on the same frequency-response CSV grid.
 
-Time-history mode uses Newmark average-acceleration integration with localized nonlinear links.
+Time-history mode uses Newmark average-acceleration integration. FEniCSx localized nonlinear links are solved with PETSc SNES.
 
 Frequency-response CSV output starts with:
 
