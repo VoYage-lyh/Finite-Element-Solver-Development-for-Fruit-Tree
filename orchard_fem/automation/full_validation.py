@@ -96,6 +96,8 @@ def build_full_validation_steps(config: FullValidationConfig) -> list[FullValida
         ]
         if config.skip_fenicsx_tests:
             command.append("--skip-verification")
+        else:
+            command.append("--enable-dolfinx-tests")
         if config.skip_python_demo_suite:
             command.append("--skip-demo-suite")
         steps.append(

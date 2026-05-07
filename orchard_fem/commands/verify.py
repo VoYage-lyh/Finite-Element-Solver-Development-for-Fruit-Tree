@@ -11,6 +11,7 @@ def _handle_verify(args: argparse.Namespace, application: OrchardApplication) ->
     outputs = application.verify(
         include_integration=not args.skip_integration,
         include_verification=not args.skip_verification,
+        include_dolfinx_tests=args.enable_dolfinx_tests,
         include_demo_suite=not args.skip_demo_suite,
         output_dir=args.output_dir,
         pytest_args=args.pytest_arg,
@@ -49,6 +50,11 @@ def register_verify_command(
         "--skip-demo-suite",
         action="store_true",
         help="Skip regeneration of the standard demo CSV artifacts.",
+    )
+    parser.add_argument(
+        "--enable-dolfinx-tests",
+        action="store_true",
+        help="Enable the optional DOLFINx smoke and benchmark tests in the active environment.",
     )
     parser.add_argument(
         "--output-dir",

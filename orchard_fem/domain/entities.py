@@ -9,6 +9,7 @@ from orchard_fem.domain.enums import (
     ExcitationKind,
     JointLawKind,
     MaterialModelKind,
+    SolverBackendKind,
 )
 from orchard_fem.topology import BranchPath, ObservationPoint, TreeTopology
 
@@ -97,6 +98,7 @@ class HarmonicExcitation:
 @dataclass(frozen=True)
 class AnalysisSettings:
     mode: AnalysisMode = AnalysisMode.FREQUENCY_RESPONSE
+    solver_backend: SolverBackendKind = SolverBackendKind.NATIVE
     frequency_start_hz: float = 1.0
     frequency_end_hz: float = 25.0
     frequency_steps: int = 50

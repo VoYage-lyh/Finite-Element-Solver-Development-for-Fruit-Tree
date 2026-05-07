@@ -193,6 +193,7 @@ def test_python_verify_subcommand_shows_help() -> None:
     assert "--skip-integration" in result.stdout
     assert "--skip-verification" in result.stdout
     assert "--skip-demo-suite" in result.stdout
+    assert "--enable-dolfinx-tests" in result.stdout
 
 
 def test_python_full_validate_subcommand_shows_help() -> None:

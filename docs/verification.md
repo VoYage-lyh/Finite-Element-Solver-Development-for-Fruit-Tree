@@ -34,6 +34,34 @@ conda run -n orchard-fenicsx python -m pytest -q \
   tests/integration/test_gravity_prestress.py::test_gravity_prestress_adds_load_and_reduces_first_mode
 ```
 
+Optional DOLFINx embedded-mesh smoke test in `orchard-fenicsx`:
+
+```bash
+ORCHARD_RUN_DOLFINX_TESTS=1 conda run -n orchard-fenicsx python -m pytest -q \
+  tests/integration/test_fenicsx_boundary_conditions.py::test_build_model_clamp_boundary_conditions_smoke \
+  tests/integration/test_fenicsx_embedded_mesh.py::test_create_dolfinx_embedded_line_mesh_smoke \
+  tests/integration/test_fenicsx_fields.py::test_create_embedded_beam_function_space_smoke \
+  tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_form_bundle_smoke \
+  tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_operator_bundle_smoke \
+  tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_experiment_smoke \
+  tests/integration/test_fenicsx_modal.py::test_embedded_beam_cantilever_first_mode_matches_analytic_reference \
+  tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_fruit_attachment \
+  tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_gravity_prestress \
+  tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_linear_joint_constraint \
+  tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_experiment_smoke \
+  tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode \
+  tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment \
+  tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke
+```
+
+Equivalent package-level verification entry in `orchard-fenicsx`:
+
+```bash
+conda run -n orchard-fenicsx python -m orchard_fem verify \
+  --skip-integration \
+  --enable-dolfinx-tests
+```
+
 ## Case Inventory
 
 ### Orchard FEM Analytical Benchmarks

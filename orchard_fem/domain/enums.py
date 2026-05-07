@@ -24,3 +24,8 @@ class ExcitationKind(str, Enum):
 class AnalysisMode(str, Enum):
     FREQUENCY_RESPONSE = "frequency_response"
     TIME_HISTORY = "time_history"
+
+
+class SolverBackendKind(str, Enum):
+    NATIVE = "native"
+    FENICSX = "fenicsx"

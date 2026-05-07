@@ -41,6 +41,7 @@ def test_full_validation_plan_builds_both_environment_steps(tmp_path) -> None:
         "orchard_fem",
     ]
     assert "--skip-integration" in steps[1].command
+    assert "--enable-dolfinx-tests" in steps[1].command
     assert str(tmp_path / "build" / "validation" / "python") in steps[1].command
 
 

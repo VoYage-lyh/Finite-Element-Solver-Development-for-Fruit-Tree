@@ -19,6 +19,7 @@ The active implementation lives in the `orchard_fem` package.
 Implemented today:
 - PETSc/SLEPc-backed modal analysis.
 - Frequency-response and Newmark time-history workflows.
+- Main-workflow backend selection between the native beam solver and the experimental FEniCSx branch.
 - Multi-component observations and trajectory plots.
 - Gravity prestress, default circular section helpers, explicit rotational joint laws, and auto nonlinear-link injection.
 - Package-native validation and demo regeneration commands.
@@ -26,7 +27,7 @@ Implemented today:
 Current limitations:
 - Nonlinear frequency-response currently uses warm-started steady-state time-domain sweep fallback rather than harmonic balance or full continuation.
 - Nonlinear joint laws currently act on rotational root DOFs; they are available in transient analysis and in nonlinear sweep-based frequency response, but not yet in a dedicated continuation workflow.
-- The discretization layer is still a manual Euler-Bernoulli beam implementation rather than the planned FEniCSx/UFL branch.
+- The default solver backbone is still the manual Euler-Bernoulli beam implementation. The experimental FEniCSx backend is wired into the main `run` and `modal` workflows for modal, linear frequency-response, and linear time-history cases, including fruit-attachment augmentation, gravity prestress, and linear joint constraints, but it does not yet cover nonlinear joint laws, localized nonlinear links, or SNES-based nonlinear dynamics.
 
 ## Quick Start
 
@@ -56,6 +57,8 @@ Frequency-response demo:
 python -m orchard_fem run examples/demo_orchard.json --output-csv build/demo_frequency_response.csv
 python -m orchard_fem visualize examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
 ```
+
+To run the same workflow through the experimental FEniCSx backend, set `"solver_backend": "fenicsx"` inside the model `analysis` block.
 
 Time-history demo:
 

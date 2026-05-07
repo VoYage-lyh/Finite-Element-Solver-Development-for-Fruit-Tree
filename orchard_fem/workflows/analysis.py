@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orchard_fem.discretization import OrchardModalAssembler
+from orchard_fem.domain import AnalysisMode, SolverBackendKind
 from orchard_fem.dynamics import (
     FrequencyResponseRequest,
     PETScFrequencyResponseSolver,
     PETScTimeHistorySolver,
     TimeHistoryRequest,
 )
-from orchard_fem.domain import AnalysisMode
 from orchard_fem.io import load_orchard_model
 from orchard_fem.solver_core import ModalAnalysisRequest, SLEPcModalSolver
 
@@ -49,37 +49,68 @@ def run_configured_analysis(
         default_solver_output(model.analysis.output_csv),
     )
 
-    if model.analysis.mode == AnalysisMode.FREQUENCY_RESPONSE:
-        PETScFrequencyResponseSolver().solve(
-            FrequencyResponseRequest(
-                model_path=str(model_json),
-                output_csv=str(resolved_output),
-            )
+    if model.analysis.solver_backend == SolverBackendKind.FENICSX:
+        from orchard_fem.fenicsx import (
+            solve_embedded_beam_frequency_response_experiment,
+            solve_embedded_beam_time_history_experiment,
         )
-    elif model.analysis.mode == AnalysisMode.TIME_HISTORY:
-        PETScTimeHistorySolver().solve(
-            TimeHistoryRequest(
-                model_path=str(model_json),
-                output_csv=str(resolved_output),
+
+        if model.analysis.mode == AnalysisMode.FREQUENCY_RESPONSE:
+            result = solve_embedded_beam_frequency_response_experiment(model)
+            result.result.write_csv(str(resolved_output))
+        elif model.analysis.mode == AnalysisMode.TIME_HISTORY:
+            result = solve_embedded_beam_time_history_experiment(model)
+            result.result.write_csv(str(resolved_output))
+        else:
+            raise RuntimeError(f"Unsupported analysis mode: {model.analysis.mode}")
+    elif model.analysis.solver_backend == SolverBackendKind.NATIVE:
+        if model.analysis.mode == AnalysisMode.FREQUENCY_RESPONSE:
+            PETScFrequencyResponseSolver().solve(
+                FrequencyResponseRequest(
+                    model_path=str(model_json),
+                    output_csv=str(resolved_output),
+                )
             )
-        )
+        elif model.analysis.mode == AnalysisMode.TIME_HISTORY:
+            PETScTimeHistorySolver().solve(
+                TimeHistoryRequest(
+                    model_path=str(model_json),
+                    output_csv=str(resolved_output),
+                )
+            )
+        else:
+            raise RuntimeError(f"Unsupported analysis mode: {model.analysis.mode}")
     else:
-        raise RuntimeError(f"Unsupported analysis mode: {model.analysis.mode}")
+        raise RuntimeError(
+            f"Unsupported solver backend: {model.analysis.solver_backend}"
+        )
 
     return AnalysisRunOutputs(mode=model.analysis.mode, output_csv=resolved_output)
 
 
 def write_modal_summary(model_path: Path, output_csv: Path, num_modes: int) -> Path:
     model = load_orchard_model(str(model_path))
-    assembled = OrchardModalAssembler().assemble(model)
-    modes = SLEPcModalSolver().solve(
-        ModalAnalysisRequest(
-            num_modes=num_modes,
-            stiffness_matrix=assembled.stiffness_matrix,
-            mass_matrix=assembled.mass_matrix,
-            dof_labels=assembled.dof_labels,
+    if model.analysis.solver_backend == SolverBackendKind.FENICSX:
+        from orchard_fem.fenicsx import solve_embedded_beam_modal_experiment
+
+        backend_label = "fenicsx"
+        modal_result = solve_embedded_beam_modal_experiment(model, num_modes=num_modes)
+        modes = modal_result.modes
+    elif model.analysis.solver_backend == SolverBackendKind.NATIVE:
+        backend_label = "native"
+        assembled = OrchardModalAssembler().assemble(model)
+        modes = SLEPcModalSolver().solve(
+            ModalAnalysisRequest(
+                num_modes=num_modes,
+                stiffness_matrix=assembled.stiffness_matrix,
+                mass_matrix=assembled.mass_matrix,
+                dof_labels=assembled.dof_labels,
+            )
         )
-    )
+    else:
+        raise RuntimeError(
+            f"Unsupported solver backend: {model.analysis.solver_backend}"
+        )
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
@@ -92,7 +123,7 @@ def write_modal_summary(model_path: Path, output_csv: Path, num_modes: int) -> P
                     f"{mode.frequency_hz:.12e}",
                     f"{mode.eigenvalue:.12e}",
                     f"{mode.modal_mass:.12e}",
-                    "slepc",
+                    backend_label,
                 ]
             )
     return output_csv

@@ -79,6 +79,7 @@ class OrchardApplication:
         self,
         include_integration: bool = True,
         include_verification: bool = True,
+        include_dolfinx_tests: bool = False,
         include_demo_suite: bool = True,
         output_dir: Path = DEFAULT_VALIDATION_OUTPUT_DIR,
         pytest_args: Sequence[str] | None = None,
@@ -86,6 +87,7 @@ class OrchardApplication:
         return run_validation_suite(
             include_integration=include_integration,
             include_verification=include_verification,
+            include_dolfinx_tests=include_dolfinx_tests,
             include_demo_suite=include_demo_suite,
             output_dir=output_dir,
             pytest_args=pytest_args,

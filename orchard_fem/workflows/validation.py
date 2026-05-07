@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -26,6 +27,23 @@ VERIFICATION_TEST_TARGETS = [
     "tests/integration/test_gravity_prestress.py::test_gravity_prestress_adds_load_and_reduces_first_mode",
 ]
 
+DOLFINX_TEST_TARGETS = [
+    "tests/integration/test_fenicsx_boundary_conditions.py::test_build_model_clamp_boundary_conditions_smoke",
+    "tests/integration/test_fenicsx_embedded_mesh.py::test_create_dolfinx_embedded_line_mesh_smoke",
+    "tests/integration/test_fenicsx_fields.py::test_create_embedded_beam_function_space_smoke",
+    "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_form_bundle_smoke",
+    "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_operator_bundle_smoke",
+    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_experiment_smoke",
+    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_cantilever_first_mode_matches_analytic_reference",
+    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_fruit_attachment",
+    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_gravity_prestress",
+    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_linear_joint_constraint",
+    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_experiment_smoke",
+    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode",
+    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment",
+    "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke",
+]
+
 
 @dataclass(frozen=True)
 class ValidationOutputs:
@@ -49,13 +67,20 @@ def require_pytest() -> None:
     )
 
 
-def run_pytest_targets(targets: Sequence[str], extra_args: Sequence[str] | None = None) -> None:
+def run_pytest_targets(
+    targets: Sequence[str],
+    extra_args: Sequence[str] | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> None:
     if not targets:
         return
 
     require_pytest()
     command = [sys.executable, "-m", "pytest", "-q", *targets, *(extra_args or [])]
-    completed = subprocess.run(command, cwd=REPO_ROOT, check=False)
+    environment = os.environ.copy()
+    if extra_env:
+        environment.update(extra_env)
+    completed = subprocess.run(command, cwd=REPO_ROOT, env=environment, check=False)
     if completed.returncode != 0:
         raise RuntimeError(
             "Validation pytest run failed with exit code "
@@ -66,6 +91,7 @@ def run_pytest_targets(targets: Sequence[str], extra_args: Sequence[str] | None 
 def run_validation_suite(
     include_integration: bool = True,
     include_verification: bool = True,
+    include_dolfinx_tests: bool = False,
     include_demo_suite: bool = True,
     output_dir: Path = DEFAULT_VALIDATION_OUTPUT_DIR,
     pytest_args: Sequence[str] | None = None,
@@ -75,10 +101,20 @@ def run_validation_suite(
         pytest_targets.extend(INTEGRATION_TEST_TARGETS)
     if include_verification:
         pytest_targets.extend(VERIFICATION_TEST_TARGETS)
+    if include_dolfinx_tests:
+        pytest_targets.extend(DOLFINX_TEST_TARGETS)
 
     if pytest_targets:
         print_validation_step("Run Orchard FEM verification tests")
-        run_pytest_targets(pytest_targets, extra_args=pytest_args)
+        run_pytest_targets(
+            pytest_targets,
+            extra_args=pytest_args,
+            extra_env=(
+                {"ORCHARD_RUN_DOLFINX_TESTS": "1"}
+                if include_dolfinx_tests
+                else None
+            ),
+        )
 
     demo_suite_outputs = None
     if include_demo_suite:

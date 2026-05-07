@@ -128,6 +128,7 @@ The current harmonic excitation entry supports:
 The current analysis entry supports:
 
 - `mode`: `frequency_response` or `time_history`
+- `solver_backend`: `native` or `fenicsx`
 - `frequency_start_hz`
 - `frequency_end_hz`
 - `frequency_steps`
@@ -139,6 +140,14 @@ The current analysis entry supports:
 - `rayleigh_alpha`
 - `rayleigh_beta`
 - `output_csv`
+
+`solver_backend` defaults to `native`.
+
+- `native` uses the current Orchard FEM beam assembly and solver stack for modal, frequency-response, and time-history workflows.
+- `fenicsx` routes the main workflow to the experimental embedded-beam FEniCSx branch.
+  At the current stage this backend is intended for modal, linear frequency-response, and linear time-history cases.
+  It supports branch observations, fruit-attachment augmentation, gravity prestress, and linear joint constraints,
+  but it does not yet support automatic nonlinear injection or localized nonlinear clamp/joint dynamics.
 
 Frequency-response mode uses the direct linearized assembled operators when no localized nonlinear
 links are active. If the assembled system contains localized nonlinear links, Orchard FEM falls

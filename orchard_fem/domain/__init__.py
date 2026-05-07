@@ -16,6 +16,7 @@ from orchard_fem.domain.enums import (
     ExcitationKind,
     JointLawKind,
     MaterialModelKind,
+    SolverBackendKind,
 )
 from orchard_fem.domain.parsing import (
     parse_regions,
@@ -44,4 +45,5 @@ __all__ = [
     "parse_section_series",
     "parse_shape",
     "parse_vec3",
+    "SolverBackendKind",
 ]

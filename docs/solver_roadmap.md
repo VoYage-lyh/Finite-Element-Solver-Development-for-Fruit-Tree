@@ -44,12 +44,15 @@ Status: Mixed
 Implemented:
 - Manual 3D Euler-Bernoulli beam element with closed-form 12x12 local operators.
 - Global coordinate transforms and beam-element scatter logic.
+- Embedded 1D line-mesh specification builder for the future FEniCSx branch.
+- Initial DOLFINx embedded-line mesh creation entry point for interval cells embedded in 3D.
+- Initial mixed displacement-rotation field definitions and FunctionSpace construction on top of the embedded DOLFINx mesh surface.
+- Initial experimental Timoshenko-style UFL beam forms driven by orchard cellwise section coefficients.
+- Initial PETSc operator assembly entry point for the experimental FEniCSx beam branch.
 
 Planned:
-- FEniCSx / DOLFINx 1D mesh branch.
-- Mixed displacement-rotation field formulation in UFL.
-- Timoshenko weak-form implementation.
 - Automatic tangent generation through `ufl.derivative`.
+- Modal / dynamic solve experiments on the assembled FEniCSx operator branch.
 
 ## 5. Assembly Layer
 
@@ -80,6 +83,14 @@ Implemented:
 - Linear PETSc frequency response for systems without localized nonlinear links.
 - Newmark time integration with manual Newton-style inner iteration.
 - Nonlinear frequency-response fallback via warm-started steady-state time-domain sweep when localized nonlinear links are active.
+- Experimental SLEPc modal solve on the assembled FEniCSx embedded-beam operator branch.
+- Experimental root-clamp Dirichlet boundary conditions for the FEniCSx embedded-beam modal branch.
+- Experimental linear PETSc frequency-response solve on the assembled FEniCSx embedded-beam operator branch.
+- Experimental linear PETSc/Newmark time-history solve on the assembled FEniCSx embedded-beam operator branch.
+- Experimental linear joint-constraint augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
+- Experimental fruit-attachment augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
+- Experimental gravity-prestress load solve plus geometric-stiffness augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
+- Main-workflow backend routing for `native` versus `fenicsx` in modal, frequency-response, and time-history execution.
 
 Planned:
 - Describing-function or equivalent-linear nonlinear frequency iteration.
@@ -103,3 +114,12 @@ Status: Reserved
 - `orchard_pinn/`
 
 These are intentionally kept for future reduction, surrogate, and inversion work, but they are not part of the active solver core today.
+
+## Next Push
+
+Near-term implementation order:
+
+1. Push the experimental `orchard_fem.fenicsx` branch from modal and linear frequency-response solves toward tighter benchmark-backed validation.
+2. Extend the experimental `orchard_fem.fenicsx` branch from linear workflows toward orchard-specific joint and localized nonlinear features.
+3. Add nonlinear / SNES-oriented solve experiments on top of the assembled FEniCSx operator branch.
+4. Move selected assembly paths closer to PETSc-native data structures once the FEniCSx branch can represent orchard topology cleanly.

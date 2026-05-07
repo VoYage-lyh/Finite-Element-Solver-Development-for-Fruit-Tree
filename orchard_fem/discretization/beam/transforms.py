@@ -13,11 +13,11 @@ def _cross(left: Vec3, right: Vec3) -> Vec3:
     )
 
 
-def build_transformation_matrix(
+def build_local_frame(
     start: Vec3,
     end: Vec3,
     preferred_up: Vec3 = Vec3(0.0, 0.0, 1.0),
-) -> Matrix:
+) -> tuple[Vec3, Vec3, Vec3]:
     local_x = normalize(Vec3(end.x - start.x, end.y - start.y, end.z - start.z))
     preferred_up = normalize(preferred_up)
 
@@ -28,6 +28,19 @@ def build_transformation_matrix(
 
     local_y = normalize(_cross(preferred_up, local_x))
     local_z = normalize(_cross(local_x, local_y))
+    return local_x, local_y, local_z
+
+
+def build_transformation_matrix(
+    start: Vec3,
+    end: Vec3,
+    preferred_up: Vec3 = Vec3(0.0, 0.0, 1.0),
+) -> Matrix:
+    local_x, local_y, local_z = build_local_frame(
+        start,
+        end,
+        preferred_up=preferred_up,
+    )
 
     rotation = [
         [local_x.x, local_x.y, local_x.z],

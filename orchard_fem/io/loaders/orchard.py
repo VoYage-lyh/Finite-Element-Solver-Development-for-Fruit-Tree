@@ -17,6 +17,7 @@ from orchard_fem.domain import (
     MaterialProperties,
     OrchardMetadata,
     OrchardModel,
+    SolverBackendKind,
     parse_section_series,
     parse_vec3,
 )
@@ -144,6 +145,9 @@ def load_orchard_model(file_path: str) -> OrchardModel:
     gravity_direction = parse_vec3(analysis_payload.get("gravity_direction", [0.0, 0.0, -1.0]))
     analysis = AnalysisSettings(
         mode=AnalysisMode(analysis_payload.get("mode", "frequency_response")),
+        solver_backend=SolverBackendKind(
+            analysis_payload.get("solver_backend", "native")
+        ),
         frequency_start_hz=float(analysis_payload["frequency_start_hz"]),
         frequency_end_hz=float(analysis_payload["frequency_end_hz"]),
         frequency_steps=int(analysis_payload["frequency_steps"]),
