@@ -166,6 +166,18 @@ class OrchardSystemAssembler:
                 mass_per_length = 0.5 * (
                     first_state.mass_per_length + second_state.mass_per_length
                 )
+                axial_rigidity = 0.5 * (
+                    first_state.axial_rigidity + second_state.axial_rigidity
+                )
+                torsional_rigidity = 0.5 * (
+                    first_state.torsional_rigidity + second_state.torsional_rigidity
+                )
+                bending_rigidity_y = 0.5 * (
+                    first_state.bending_rigidity_y + second_state.bending_rigidity_y
+                )
+                bending_rigidity_z = 0.5 * (
+                    first_state.bending_rigidity_z + second_state.bending_rigidity_z
+                )
                 element_length = distance(first.position, second.position)
 
                 properties = BeamElementProperties(
@@ -185,6 +197,10 @@ class OrchardSystemAssembler:
                     torsion_constant=polar_moment,
                     density=mass_per_length / area if area > 0.0 else 0.0,
                     length=element_length,
+                    axial_rigidity=axial_rigidity,
+                    torsional_rigidity=torsional_rigidity,
+                    bending_rigidity_y=bending_rigidity_y,
+                    bending_rigidity_z=bending_rigidity_z,
                 )
                 transformation = build_transformation_matrix(first.position, second.position)
                 global_stiffness, global_mass = build_global_element_matrices(
@@ -202,7 +218,7 @@ class OrchardSystemAssembler:
                         dofs=tuple(element_dofs),
                         transformation_matrix=transformation,
                         length=element_length,
-                        axial_rigidity=properties.youngs_modulus * properties.area,
+                        axial_rigidity=axial_rigidity,
                     )
                 )
 

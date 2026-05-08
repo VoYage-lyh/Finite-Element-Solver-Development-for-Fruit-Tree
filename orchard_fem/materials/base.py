@@ -26,6 +26,11 @@ class BranchSectionState:
     ix: float
     iy: float
     polar_moment: float
+    axial_rigidity: float
+    shear_rigidity: float
+    torsional_rigidity: float
+    bending_rigidity_y: float
+    bending_rigidity_z: float
     mass_per_length: float
     effective_youngs_modulus: float
     effective_shear_modulus: float
@@ -99,15 +104,33 @@ def _evaluate_profile_state(
     damping_weight = 0.0
     mass_per_length = 0.0
     density_area_sum = 0.0
+    axial_rigidity = 0.0
+    shear_rigidity = 0.0
+    torsional_rigidity = 0.0
+    bending_rigidity_y = 0.0
+    bending_rigidity_z = 0.0
 
     for region in properties.regions:
         material = material_lookup[region.material_id]
+        youngs_modulus = _tangent_modulus(material)
+        shear_modulus = youngs_modulus / (2.0 * (1.0 + material.poisson_ratio))
+        region_ix = region.ix_centroid + (
+            region.area * ((region.centroid[1] - properties.centroid[1]) ** 2)
+        )
+        region_iy = region.iy_centroid + (
+            region.area * ((region.centroid[0] - properties.centroid[0]) ** 2)
+        )
         region_mass = material.density * region.area
         mass_per_length += region_mass
-        modulus_area_sum += _tangent_modulus(material) * region.area
+        modulus_area_sum += youngs_modulus * region.area
         poisson_area_sum += material.poisson_ratio * region.area
         damping_weight += region_mass * material.damping_ratio
         density_area_sum += region.area
+        axial_rigidity += youngs_modulus * region.area
+        shear_rigidity += shear_modulus * region.area
+        torsional_rigidity += shear_modulus * (region_ix + region_iy)
+        bending_rigidity_y += youngs_modulus * region_ix
+        bending_rigidity_z += youngs_modulus * region_iy
 
     if density_area_sum <= 0.0 or properties.total_area <= 0.0:
         raise ValueError("Branch section state requires positive area")
@@ -123,6 +146,11 @@ def _evaluate_profile_state(
         ix=properties.ix_centroid,
         iy=properties.iy_centroid,
         polar_moment=properties.ix_centroid + properties.iy_centroid,
+        axial_rigidity=axial_rigidity,
+        shear_rigidity=shear_rigidity,
+        torsional_rigidity=torsional_rigidity,
+        bending_rigidity_y=bending_rigidity_y,
+        bending_rigidity_z=bending_rigidity_z,
         mass_per_length=mass_per_length,
         effective_youngs_modulus=effective_youngs_modulus,
         effective_shear_modulus=effective_shear_modulus,
@@ -172,6 +200,11 @@ def evaluate_branch_section_state(
                 ix=_interpolate(left.ix, right.ix, alpha),
                 iy=_interpolate(left.iy, right.iy, alpha),
                 polar_moment=_interpolate(left.polar_moment, right.polar_moment, alpha),
+                axial_rigidity=_interpolate(left.axial_rigidity, right.axial_rigidity, alpha),
+                shear_rigidity=_interpolate(left.shear_rigidity, right.shear_rigidity, alpha),
+                torsional_rigidity=_interpolate(left.torsional_rigidity, right.torsional_rigidity, alpha),
+                bending_rigidity_y=_interpolate(left.bending_rigidity_y, right.bending_rigidity_y, alpha),
+                bending_rigidity_z=_interpolate(left.bending_rigidity_z, right.bending_rigidity_z, alpha),
                 mass_per_length=_interpolate(left.mass_per_length, right.mass_per_length, alpha),
                 effective_youngs_modulus=_interpolate(left.effective_youngs_modulus, right.effective_youngs_modulus, alpha),
                 effective_shear_modulus=_interpolate(left.effective_shear_modulus, right.effective_shear_modulus, alpha),

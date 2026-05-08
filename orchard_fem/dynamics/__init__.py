@@ -1,3 +1,7 @@
+from orchard_fem.dynamics.continuation import (
+    ContinuationPoint,
+    solve_frequency_continuation,
+)
 from orchard_fem.dynamics.frequency_response import (
     FrequencyResponsePoint,
     FrequencyResponseRequest,
@@ -18,9 +22,11 @@ __all__ = [
     "FrequencyResponsePoint",
     "FrequencyResponseRequest",
     "FrequencyResponseResult",
+    "ContinuationPoint",
     "PETScFrequencyResponseSolver",
     "PETScTimeHistorySolver",
     "solve_frequency_response_system",
+    "solve_frequency_continuation",
     "TimeExcitationState",
     "TimeHistoryPoint",
     "TimeHistoryRequest",

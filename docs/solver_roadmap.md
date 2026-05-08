@@ -48,11 +48,10 @@ Implemented:
 - Initial DOLFINx embedded-line mesh creation entry point for interval cells embedded in 3D.
 - Initial mixed displacement-rotation field definitions and FunctionSpace construction on top of the embedded DOLFINx mesh surface.
 - Initial experimental Timoshenko-style UFL beam forms driven by orchard cellwise section coefficients.
+- FEniCSx cell coefficients now use direct layered-section rigidities (`EA`, `GA`, `GJ`, `EI`) instead of only area-averaged Young's modulus times total section moments.
 - Embedded-line UFL forms now use the physical branch-tangent derivative instead of a global-axis derivative.
-- Initial PETSc operator assembly entry point for the experimental FEniCSx beam branch.
-
-Planned:
-- Automatic tangent generation through `ufl.derivative`.
+- Elastic residual forms and automatic Jacobian generation through `ufl.derivative`.
+- PETSc operator assembly entry point for the default FEniCSx beam branch.
 
 ## 5. Assembly Layer
 
@@ -72,7 +71,7 @@ Implemented:
 Partial / reduced:
 - The working system is assembled in Python matrix form and converted to PETSc at solve time, not assembled PETSc-native from the start.
 - Parent-child continuity is still enforced by pairwise penalty links rather than a stronger local continuity treatment.
-- Tissue stiffness is still represented through effective section properties rather than a direct per-tissue `sum(E_i I_i)` beam operator.
+- The native fallback and FEniCSx branch both consume direct layered-section rigidities for stiffness. The native branch remains a simpler Euler-Bernoulli fallback, while the default FEniCSx branch carries the active Timoshenko/UFL workflow.
 
 ## 6. Solver Layer
 
@@ -82,22 +81,23 @@ Implemented:
 - SLEPc modal solve with shift-and-invert.
 - Linear PETSc frequency response for systems without localized nonlinear links.
 - Newmark time integration with manual Newton-style inner iteration.
-- Nonlinear frequency-response fallback via warm-started steady-state time-domain sweep when localized nonlinear links are active.
+- Adaptive first-harmonic balance frequency-continuation sweep for localized nonlinear links in the native solver branch.
 - Experimental SLEPc modal solve on the assembled FEniCSx embedded-beam operator branch.
 - Experimental root-clamp Dirichlet boundary conditions for the FEniCSx embedded-beam modal branch.
 - Experimental linear PETSc frequency-response solve on the assembled FEniCSx embedded-beam operator branch.
+- Experimental adaptive first-harmonic balance frequency-continuation sweep on the FEniCSx embedded-beam operator branch.
 - Experimental linear PETSc/Newmark time-history solve on the assembled FEniCSx embedded-beam operator branch.
 - Experimental linear joint-constraint augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
 - Experimental nonlinear joint-law links in the FEniCSx embedded-beam time-history branch.
 - Experimental automatic nonlinear injection and cubic clamp links in the FEniCSx embedded-beam time-history branch.
-- Experimental PETSc SNES nonlinear Newmark solve for localized nonlinear links in the FEniCSx embedded-beam time-history branch.
+- Experimental PETSc SNES nonlinear Newmark solve for localized nonlinear links in the FEniCSx embedded-beam time-history branch, with beam elastic residual and Jacobian assembled from UFL forms.
 - Experimental fruit-attachment augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
 - Experimental gravity-prestress load solve plus geometric-stiffness augmentation on the FEniCSx embedded-beam modal, linear frequency-response, and linear time-history branch.
-- Main-workflow backend routing for `native` versus `fenicsx` in modal, frequency-response, and time-history execution.
+- Main-workflow backend routing with `fenicsx` as the default solver backend and `native` available only through explicit opt-in.
+- Shared staged FEniCSx system-assembly facade used by modal, frequency-response, and time-history entry points. Current stages are mesh, function space, cell data, coefficients, UFL forms, boundary conditions, base operators, branch joints, automatic nonlinear links, nonlinear clamps, fruit attachments, and gravity prestress.
 
 Planned:
-- Describing-function or equivalent-linear nonlinear frequency iteration.
-- Full continuation / harmonic-balance nonlinear frequency workflow.
+- Higher-order harmonic balance for strongly nonsinusoidal localized nonlinear responses.
 
 ## 7. Output And Verification
 
@@ -121,6 +121,6 @@ These are intentionally kept for future reduction, surrogate, and inversion work
 
 Near-term implementation order:
 
-1. Push the experimental `orchard_fem.fenicsx` branch from modal and linear frequency-response solves toward tighter benchmark-backed validation.
-2. Extend nonlinear frequency-response beyond the current steady-state sweep fallback toward equivalent-linear or continuation methods.
+1. Push the default `orchard_fem.fenicsx` branch from modal and frequency-response solves toward tighter benchmark-backed validation.
+2. Extend the first-harmonic nonlinear frequency workflow toward higher-order harmonics only after the main FEniCSx branch is stable.
 3. Move selected assembly paths closer to PETSc-native data structures once the FEniCSx branch can represent orchard topology cleanly.

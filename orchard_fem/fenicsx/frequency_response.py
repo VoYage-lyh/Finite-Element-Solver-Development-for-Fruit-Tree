@@ -5,12 +5,16 @@ from math import pi
 from typing import Any
 
 from orchard_fem.discretization.damping import compute_default_damping_ratio
-from orchard_fem.domain import JointLawKind, OrchardModel
+from orchard_fem.discretization.types import NonlinearLinkDefinition
+from orchard_fem.dynamics.continuation import solve_frequency_continuation
+from orchard_fem.domain import OrchardModel
 from orchard_fem.dynamics.excitation import build_frequency_excitation_load
 from orchard_fem.dynamics.frequency_response import (
     FrequencyResponsePoint,
     FrequencyResponseResult,
 )
+from orchard_fem.dynamics.harmonic_balance import first_harmonic_link_response
+from orchard_fem.fenicsx.assembly import assemble_fenicsx_system
 from orchard_fem.fenicsx.availability import require_dolfinx
 from orchard_fem.fenicsx.dofs import (
     EmbeddedBeamResponseMapping,
@@ -19,7 +23,6 @@ from orchard_fem.fenicsx.dofs import (
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
 from orchard_fem.fenicsx.operators import (
     EmbeddedBeamExperimentBundle,
-    build_embedded_timoshenko_experiment,
 )
 from orchard_fem.materials.base import build_material_lookup
 from orchard_fem.numerics import require_petsc
@@ -48,30 +51,7 @@ def _frequency_grid(analysis) -> list[float]:
 
 
 def _require_supported_frequency_response_model(model: OrchardModel) -> None:
-    unsupported_joint_laws = [
-        joint.joint_id
-        for joint in model.joints
-        if joint.law.kind != JointLawKind.NONE
-    ]
-    if unsupported_joint_laws:
-        raise NotImplementedError(
-            "The experimental FEniCSx frequency-response branch does not yet support nonlinear joint laws. "
-            f"Unsupported joints: {', '.join(sorted(unsupported_joint_laws))}."
-        )
-    if model.analysis.auto_nonlinear_levels:
-        raise NotImplementedError(
-            "The experimental FEniCSx frequency-response branch does not yet support automatic nonlinear link injection."
-        )
-    nonlinear_clamps = [
-        clamp.branch_id
-        for clamp in model.clamps
-        if abs(clamp.cubic_stiffness) > 1.0e-14
-    ]
-    if nonlinear_clamps:
-        raise NotImplementedError(
-            "The experimental FEniCSx frequency-response branch does not yet support cubic clamp nonlinearities. "
-            f"Unsupported clamps: {', '.join(sorted(nonlinear_clamps))}."
-        )
+    del model
 
 
 def _resolve_rayleigh_coefficients(model: OrchardModel) -> tuple[float, float]:
@@ -120,6 +100,38 @@ def _add_matrix_in_place(target: Any, increment: Any) -> None:
         structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
     )
     target.assemble()
+
+
+def _create_empty_aij_matrix_like(matrix: Any) -> Any:
+    require_petsc()
+
+    from petsc4py import PETSc
+
+    created = PETSc.Mat().createAIJ(size=matrix.getSize(), comm=matrix.getComm())
+    created.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
+    created.setUp()
+    return created
+
+
+def _accumulate_owned_matrix_value(
+    matrix: Any,
+    owned_rows: tuple[int, int],
+    row: int,
+    column: int,
+    value: float,
+) -> None:
+    ownership_start, ownership_end = owned_rows
+    if not (ownership_start <= row < ownership_end):
+        return
+
+    from petsc4py import PETSc
+
+    matrix.setValue(
+        row,
+        column,
+        float(value),
+        addv=PETSc.InsertMode.ADD_VALUES,
+    )
 
 
 def _build_real_block_dynamic_matrix(
@@ -224,6 +236,133 @@ def _vector_value(vector: Any, global_index: int) -> float:
     return float(values[0])
 
 
+def _relative_complex_components(
+    solution: Any,
+    system_size: int,
+    link: NonlinearLinkDefinition,
+) -> tuple[float, float]:
+    first_real = _vector_value(solution, link.first_dof)
+    first_imag = _vector_value(solution, system_size + link.first_dof)
+    if link.second_dof >= 0:
+        second_real = _vector_value(solution, link.second_dof)
+        second_imag = _vector_value(solution, system_size + link.second_dof)
+    else:
+        second_real = 0.0
+        second_imag = 0.0
+
+    real_delta = first_real - second_real
+    imag_delta = first_imag - second_imag
+    return real_delta, imag_delta
+
+
+def _accumulate_owned_vector_value(
+    vector: Any,
+    owned_rows: tuple[int, int],
+    row: int,
+    value: float,
+) -> None:
+    ownership_start, ownership_end = owned_rows
+    if not (ownership_start <= row < ownership_end):
+        return
+
+    from petsc4py import PETSc
+
+    vector.setValue(int(row), float(value), addv=PETSc.InsertMode.ADD_VALUES)
+
+
+def _build_first_harmonic_nonlinear_vector_and_tangent(
+    block_matrix: Any,
+    nonlinear_links: list[NonlinearLinkDefinition],
+    solution: Any,
+    *,
+    build_tangent: bool,
+) -> tuple[Any, Any | None]:
+    vector = block_matrix.createVecRight()
+    vector.set(0.0)
+    matrix = _create_empty_aij_matrix_like(block_matrix) if build_tangent else None
+    vector_owned_rows = vector.getOwnershipRange()
+    matrix_owned_rows = matrix.getOwnershipRange() if matrix is not None else (0, 0)
+    system_size = block_matrix.getSize()[0] // 2
+
+    for link in nonlinear_links:
+        relative_real, relative_imag = _relative_complex_components(
+            solution,
+            system_size,
+            link,
+        )
+        link_response = first_harmonic_link_response(
+            link,
+            relative_real,
+            relative_imag,
+        )
+        signed_dofs = [(link.first_dof, 1.0)]
+        if link.second_dof >= 0:
+            signed_dofs.append((link.second_dof, -1.0))
+
+        for row_dof, row_sign in signed_dofs:
+            _accumulate_owned_vector_value(
+                vector,
+                vector_owned_rows,
+                row_dof,
+                row_sign * link_response.force_real,
+            )
+            _accumulate_owned_vector_value(
+                vector,
+                vector_owned_rows,
+                system_size + row_dof,
+                row_sign * link_response.force_imag,
+            )
+            if matrix is None:
+                continue
+
+            for column_dof, column_sign in signed_dofs:
+                sign = row_sign * column_sign
+                _accumulate_owned_matrix_value(
+                    matrix,
+                    matrix_owned_rows,
+                    row_dof,
+                    column_dof,
+                    sign * link_response.tangent_rr,
+                )
+                _accumulate_owned_matrix_value(
+                    matrix,
+                    matrix_owned_rows,
+                    row_dof,
+                    system_size + column_dof,
+                    sign * link_response.tangent_ri,
+                )
+                _accumulate_owned_matrix_value(
+                    matrix,
+                    matrix_owned_rows,
+                    system_size + row_dof,
+                    column_dof,
+                    sign * link_response.tangent_ir,
+                )
+                _accumulate_owned_matrix_value(
+                    matrix,
+                    matrix_owned_rows,
+                    system_size + row_dof,
+                    system_size + column_dof,
+                    sign * link_response.tangent_ii,
+                )
+
+    vector.assemblyBegin()
+    vector.assemblyEnd()
+    if matrix is not None:
+        matrix.assemble()
+    return vector, matrix
+
+
+def _solution_relative_change(current_solution: Any, previous_solution: Any | None) -> float:
+    if previous_solution is None:
+        return float("inf")
+    difference = current_solution.duplicate()
+    difference.set(0.0)
+    difference.axpy(1.0, current_solution)
+    difference.axpy(-1.0, previous_solution)
+    return difference.norm() / max(current_solution.norm(), 1.0)
+
+
 def _extract_frequency_response_point(
     solution: Any,
     *,
@@ -248,6 +387,180 @@ def _extract_frequency_response_point(
     )
 
 
+def _solve_harmonic_balance_frequency_point(
+    stiffness_matrix: Any,
+    mass_matrix: Any,
+    damping_matrix: Any,
+    nonlinear_links: list[NonlinearLinkDefinition],
+    *,
+    excitation_dof: int,
+    excitation,
+    analysis,
+    omega: float,
+    initial_solution: Any | None,
+) -> Any:
+    require_petsc()
+
+    from petsc4py import PETSc
+
+    max_iterations = max(int(analysis.max_nonlinear_iterations), 1)
+    tolerance = float(analysis.nonlinear_tolerance)
+    block_matrix = _build_real_block_dynamic_matrix(
+        stiffness_matrix,
+        mass_matrix,
+        damping_matrix,
+        omega=omega,
+    )
+    rhs_vector = _build_frequency_rhs_vector(
+        block_matrix,
+        excitation_dof=excitation_dof,
+        stiffness_matrix=stiffness_matrix,
+        mass_matrix=mass_matrix,
+        damping_matrix=damping_matrix,
+        excitation=excitation,
+        omega=omega,
+    )
+    linear_solution = _solve_petsc_real_block_system(block_matrix, rhs_vector)
+
+    def build_residual(current_solution: Any) -> Any:
+        residual = rhs_vector.duplicate()
+        block_matrix.mult(current_solution, residual)
+        residual.axpy(-1.0, rhs_vector)
+        nonlinear_vector, _ = _build_first_harmonic_nonlinear_vector_and_tangent(
+            block_matrix,
+            nonlinear_links,
+            current_solution,
+            build_tangent=False,
+        )
+        residual.axpy(1.0, nonlinear_vector)
+        return residual
+
+    def build_jacobian(current_solution: Any) -> Any:
+        jacobian = block_matrix.duplicate(copy=True)
+        jacobian.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
+        jacobian.zeroEntries()
+        jacobian.axpy(
+            1.0,
+            block_matrix,
+            structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+        )
+        _, nonlinear_tangent = _build_first_harmonic_nonlinear_vector_and_tangent(
+            block_matrix,
+            nonlinear_links,
+            current_solution,
+            build_tangent=True,
+        )
+        if nonlinear_tangent is not None:
+            jacobian.axpy(
+                1.0,
+                nonlinear_tangent,
+                structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+            )
+        jacobian.assemble()
+        return jacobian
+
+    def solve_correction(jacobian: Any, residual: Any) -> Any:
+        correction_rhs = residual.duplicate()
+        residual.copy(correction_rhs)
+        correction_rhs.scale(-1.0)
+        correction = correction_rhs.duplicate()
+        solver = PETSc.KSP().create(block_matrix.getComm())
+        solver.setOperators(jacobian)
+        solver.setType(PETSc.KSP.Type.PREONLY)
+        solver.getPC().setType(PETSc.PC.Type.LU)
+        solver.setFromOptions()
+        solver.solve(correction_rhs, correction)
+        if solver.getConvergedReason() <= 0:
+            raise RuntimeError(
+                "PETSc KSP failed inside FEniCSx harmonic-balance Newton "
+                f"(reason={solver.getConvergedReason()})."
+            )
+        return correction
+
+    def solve_from_start(start_solution: Any) -> Any:
+        solution = start_solution.duplicate()
+        start_solution.copy(solution)
+        target_norm = tolerance * max(
+            rhs_vector.norm(norm_type=PETSc.NormType.NORM_INFINITY),
+            1.0,
+        )
+
+        for _ in range(max_iterations):
+            residual = build_residual(solution)
+            residual_norm = residual.norm(norm_type=PETSc.NormType.NORM_INFINITY)
+            if residual_norm <= target_norm:
+                return solution
+
+            correction = solve_correction(build_jacobian(solution), residual)
+            if correction.norm(norm_type=PETSc.NormType.NORM_INFINITY) <= (
+                tolerance
+                * max(solution.norm(norm_type=PETSc.NormType.NORM_INFINITY), 1.0)
+            ):
+                return solution
+
+            accepted_solution = None
+            accepted_norm = residual_norm
+            step_scale = 1.0
+            for _line_search_index in range(10):
+                trial = solution.duplicate()
+                solution.copy(trial)
+                trial.axpy(step_scale, correction)
+                trial_residual = build_residual(trial)
+                trial_norm = trial_residual.norm(norm_type=PETSc.NormType.NORM_INFINITY)
+                if trial_norm < accepted_norm:
+                    accepted_solution = trial
+                    accepted_norm = trial_norm
+                    break
+                step_scale *= 0.5
+
+            if accepted_solution is None:
+                solution.axpy(1.0, correction)
+            else:
+                solution = accepted_solution
+
+        final_residual = build_residual(solution)
+        raise RuntimeError(
+            "FEniCSx harmonic-balance frequency response failed to converge "
+            f"(residual={final_residual.norm(norm_type=PETSc.NormType.NORM_INFINITY):.6e}, "
+            f"target={target_norm:.6e})."
+        )
+
+    def scaled_solution(base_solution: Any, scale: float) -> Any:
+        scaled = base_solution.duplicate()
+        base_solution.copy(scaled)
+        scaled.scale(float(scale))
+        return scaled
+
+    def append_unique_start(starts: list[Any], candidate: Any) -> None:
+        for existing in starts:
+            difference = existing.duplicate()
+            existing.copy(difference)
+            difference.axpy(-1.0, candidate)
+            if difference.norm() <= 1.0e-14:
+                return
+        starts.append(candidate)
+
+    starts: list[Any] = []
+    if initial_solution is not None:
+        append_unique_start(starts, initial_solution)
+    for candidate in (
+        linear_solution,
+        scaled_solution(linear_solution, 0.25),
+        scaled_solution(linear_solution, 0.5),
+        scaled_solution(linear_solution, 2.0),
+    ):
+        append_unique_start(starts, candidate)
+
+    errors: list[str] = []
+    for start_solution in starts:
+        try:
+            return solve_from_start(start_solution)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    raise RuntimeError("; ".join(errors))
+
+
 def solve_embedded_beam_frequency_response_experiment(
     model: OrchardModel,
     *,
@@ -265,7 +578,7 @@ def solve_embedded_beam_frequency_response_experiment(
     require_petsc()
     _require_supported_frequency_response_model(model)
 
-    experiment = build_embedded_timoshenko_experiment(
+    assembly = assemble_fenicsx_system(
         model,
         polynomial_degree=polynomial_degree,
         spec=spec,
@@ -276,6 +589,7 @@ def solve_embedded_beam_frequency_response_experiment(
         use_model_clamps=use_model_clamps,
         clamp_tolerance=clamp_tolerance,
     )
+    experiment = assembly.experiment
     response_mapping = resolve_embedded_beam_response_mapping(
         model,
         experiment.space_bundle,
@@ -297,33 +611,61 @@ def solve_embedded_beam_frequency_response_experiment(
         )
 
     system_size = experiment.operator_bundle.stiffness_matrix.getSize()[0]
+    nonlinear_links = experiment.operator_bundle.nonlinear_links
     points: list[FrequencyResponsePoint] = []
-    for frequency_hz in _frequency_grid(model.analysis):
-        omega = 2.0 * pi * frequency_hz
-        block_matrix = _build_real_block_dynamic_matrix(
-            experiment.operator_bundle.stiffness_matrix,
-            experiment.operator_bundle.mass_matrix,
-            damping_matrix,
-            omega=omega,
+    target_frequencies = _frequency_grid(model.analysis)
+    if nonlinear_links:
+        continuation_points = solve_frequency_continuation(
+            target_frequencies,
+            lambda frequency_hz, initial_solution: _solve_harmonic_balance_frequency_point(
+                experiment.operator_bundle.stiffness_matrix,
+                experiment.operator_bundle.mass_matrix,
+                damping_matrix,
+                nonlinear_links,
+                excitation_dof=response_mapping.excitation_dof,
+                excitation=model.excitation,
+                analysis=model.analysis,
+                omega=2.0 * pi * frequency_hz,
+                initial_solution=initial_solution,
+            ),
+            _solution_relative_change,
         )
-        rhs_vector = _build_frequency_rhs_vector(
-            block_matrix,
-            excitation_dof=response_mapping.excitation_dof,
-            stiffness_matrix=experiment.operator_bundle.stiffness_matrix,
-            mass_matrix=experiment.operator_bundle.mass_matrix,
-            damping_matrix=damping_matrix,
-            excitation=model.excitation,
-            omega=omega,
-        )
-        solution = _solve_petsc_real_block_system(block_matrix, rhs_vector)
-        points.append(
+        points = [
             _extract_frequency_response_point(
-                solution,
-                frequency_hz=frequency_hz,
+                point.state,
+                frequency_hz=point.frequency_hz,
                 system_size=system_size,
                 response_mapping=response_mapping,
             )
-        )
+            for point in continuation_points
+        ]
+    else:
+        for frequency_hz in target_frequencies:
+            omega = 2.0 * pi * frequency_hz
+            block_matrix = _build_real_block_dynamic_matrix(
+                experiment.operator_bundle.stiffness_matrix,
+                experiment.operator_bundle.mass_matrix,
+                damping_matrix,
+                omega=omega,
+            )
+            rhs_vector = _build_frequency_rhs_vector(
+                block_matrix,
+                excitation_dof=response_mapping.excitation_dof,
+                stiffness_matrix=experiment.operator_bundle.stiffness_matrix,
+                mass_matrix=experiment.operator_bundle.mass_matrix,
+                damping_matrix=damping_matrix,
+                excitation=model.excitation,
+                omega=omega,
+            )
+            solution = _solve_petsc_real_block_system(block_matrix, rhs_vector)
+            points.append(
+                _extract_frequency_response_point(
+                    solution,
+                    frequency_hz=frequency_hz,
+                    system_size=system_size,
+                    response_mapping=response_mapping,
+                )
+            )
 
     return EmbeddedBeamFrequencyResponseExperimentResult(
         experiment=experiment,

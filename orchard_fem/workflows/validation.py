@@ -17,6 +17,8 @@ INTEGRATION_TEST_TARGETS = [
     "tests/integration/test_cross_section_defaults.py",
     "tests/integration/test_auto_nonlinear_injection.py",
     "tests/integration/test_gravity_prestress.py",
+    "tests/integration/test_demo_workflow.py",
+    "tests/integration/test_frequency_continuation.py",
     "tests/integration/test_python_cli.py",
     "tests/integration/test_python_scaffold.py",
 ]
@@ -31,8 +33,11 @@ DOLFINX_TEST_TARGETS = [
     "tests/integration/test_fenicsx_boundary_conditions.py::test_build_model_clamp_boundary_conditions_smoke",
     "tests/integration/test_fenicsx_embedded_mesh.py::test_create_dolfinx_embedded_line_mesh_smoke",
     "tests/integration/test_fenicsx_fields.py::test_create_embedded_beam_function_space_smoke",
+    "tests/integration/test_fenicsx_beam_forms.py::test_fenicsx_system_assembly_facade_is_exported",
+    "tests/integration/test_fenicsx_beam_forms.py::test_fenicsx_system_assembly_reports_pipeline_stages",
     "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_form_bundle_smoke",
     "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_operator_bundle_smoke",
+    "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_ufl_jacobian_matches_linear_stiffness_form",
     "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_experiment_smoke",
     "tests/integration/test_fenicsx_modal.py::test_embedded_beam_cantilever_first_mode_matches_analytic_reference",
     "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_fruit_attachment",
@@ -41,6 +46,7 @@ DOLFINX_TEST_TARGETS = [
     "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_experiment_smoke",
     "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode",
     "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment",
+    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_harmonic_balance_nonlinear_links",
     "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke",
     "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_polynomial_joint_law",
     "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_auto_and_clamp_nonlinear_links",
@@ -120,7 +126,7 @@ def run_validation_suite(
 
     demo_suite_outputs = None
     if include_demo_suite:
-        print_validation_step("Run Orchard FEM PETSc/SLEPc demo suite")
+        print_validation_step("Run Orchard FEM FEniCSx demo suite")
         demo_suite_outputs = run_standard_demo_suite(output_dir=output_dir)
 
     return ValidationOutputs(

@@ -12,6 +12,7 @@ from orchard_fem.dynamics.excitation import (
     default_driving_frequency_hz,
 )
 from orchard_fem.dynamics.time_history import TimeHistoryPoint, TimeHistoryResult
+from orchard_fem.fenicsx.assembly import assemble_fenicsx_system
 from orchard_fem.fenicsx.availability import require_dolfinx
 from orchard_fem.fenicsx.dofs import (
     EmbeddedBeamResponseMapping,
@@ -23,7 +24,6 @@ from orchard_fem.fenicsx.frequency_response import (
 )
 from orchard_fem.fenicsx.operators import (
     EmbeddedBeamExperimentBundle,
-    build_embedded_timoshenko_experiment,
 )
 from orchard_fem.materials.base import build_material_lookup
 from orchard_fem.numerics import require_petsc
@@ -35,6 +35,14 @@ class EmbeddedBeamTimeHistoryExperimentResult:
     response_mapping: EmbeddedBeamResponseMapping
     damping_matrix: Any
     result: TimeHistoryResult
+
+
+@dataclass(frozen=True)
+class UflElasticOperatorBridge:
+    form_bundle: Any
+    compiled_residual_form: Any
+    compiled_jacobian_form: Any
+    stiffness_augmentation_matrix: Any
 
 
 def _require_supported_time_history_model(model: OrchardModel) -> None:
@@ -111,8 +119,182 @@ def _create_empty_aij_matrix_like(matrix: Any) -> Any:
     from petsc4py import PETSc
 
     created = PETSc.Mat().createAIJ(size=matrix.getSize(), comm=matrix.getComm())
+    created.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
     created.setUp()
     return created
+
+
+def _copy_owned_matrix_entries_into_target(source: Any, target: Any) -> None:
+    from petsc4py import PETSc
+
+    target_rows, target_columns = target.getSize()
+    ownership_start, ownership_end = source.getOwnershipRange()
+    for row_index in range(ownership_start, ownership_end):
+        if row_index >= target_rows:
+            continue
+        columns, values = source.getRow(row_index)
+        try:
+            filtered_columns = []
+            filtered_values = []
+            for column, value in zip(columns, values):
+                if int(column) >= target_columns:
+                    continue
+                filtered_columns.append(int(column))
+                filtered_values.append(float(value))
+            if filtered_columns:
+                target.setValues(
+                    row_index,
+                    filtered_columns,
+                    filtered_values,
+                    addv=PETSc.InsertMode.ADD_VALUES,
+                )
+        finally:
+            restore_row = getattr(source, "restoreRow", None)
+            if restore_row is not None:
+                restore_row(row_index, columns, values)
+
+
+def _extend_matrix_like(template_matrix: Any, source_matrix: Any) -> Any:
+    if template_matrix.getSize() == source_matrix.getSize():
+        copied = source_matrix.duplicate(copy=True)
+        copied.assemble()
+        return copied
+
+    extended = _create_empty_aij_matrix_like(template_matrix)
+    _copy_owned_matrix_entries_into_target(source_matrix, extended)
+    extended.assemble()
+    return extended
+
+
+def _extend_vector_like(template_vector: Any, source_vector: Any) -> Any:
+    from petsc4py import PETSc
+
+    extended = template_vector.duplicate()
+    extended.set(0.0)
+    source_size = source_vector.getSize()
+    ownership_start, ownership_end = extended.getOwnershipRange()
+    for global_index in range(ownership_start, min(ownership_end, source_size)):
+        value = source_vector.getValues([global_index])[0]
+        extended.setValue(
+            global_index,
+            float(value),
+            addv=PETSc.InsertMode.INSERT_VALUES,
+        )
+    extended.assemblyBegin()
+    extended.assemblyEnd()
+    return extended
+
+
+def _set_ufl_state_from_displacement(form_bundle: Any, displacement: Any) -> None:
+    state_values = form_bundle.state_function.x.array
+    source_values = displacement.getArray(readonly=True)
+    if state_values.size > source_values.size:
+        state_values[:] = displacement.getValues(list(range(state_values.size)))
+    else:
+        state_values[:] = source_values[: state_values.size]
+    form_bundle.state_function.x.scatter_forward()
+
+
+def _assemble_ufl_elastic_residual(
+    bridge: UflElasticOperatorBridge,
+    template_vector: Any,
+    displacement: Any,
+) -> Any:
+    require_dolfinx()
+
+    from petsc4py import PETSc
+    from dolfinx.fem import petsc as dolfinx_fem_petsc
+
+    _set_ufl_state_from_displacement(bridge.form_bundle, displacement)
+    residual = dolfinx_fem_petsc.assemble_vector(bridge.compiled_residual_form)
+    ghost_update = getattr(residual, "ghostUpdate", None)
+    if ghost_update is not None:
+        ghost_update(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
+    residual.assemblyBegin()
+    residual.assemblyEnd()
+    return _extend_vector_like(template_vector, residual)
+
+
+def _assemble_ufl_elastic_jacobian(
+    bridge: UflElasticOperatorBridge,
+    template_matrix: Any,
+    displacement: Any,
+) -> Any:
+    require_dolfinx()
+
+    from dolfinx.fem import petsc as dolfinx_fem_petsc
+
+    _set_ufl_state_from_displacement(bridge.form_bundle, displacement)
+    jacobian = dolfinx_fem_petsc.assemble_matrix(bridge.compiled_jacobian_form)
+    jacobian.assemble()
+    return _extend_matrix_like(template_matrix, jacobian)
+
+
+def _build_ufl_elastic_operator_bridge(
+    form_bundle: Any,
+    stiffness_matrix: Any,
+) -> UflElasticOperatorBridge:
+    require_dolfinx()
+
+    from dolfinx import fem as dolfinx_fem
+    from petsc4py import PETSc
+
+    compiled_residual_form = dolfinx_fem.form(form_bundle.residual_form)
+    compiled_jacobian_form = dolfinx_fem.form(form_bundle.jacobian_form)
+    bridge = UflElasticOperatorBridge(
+        form_bundle=form_bundle,
+        compiled_residual_form=compiled_residual_form,
+        compiled_jacobian_form=compiled_jacobian_form,
+        stiffness_augmentation_matrix=stiffness_matrix,
+    )
+
+    zero_displacement = stiffness_matrix.createVecRight()
+    zero_displacement.set(0.0)
+    ufl_jacobian = _assemble_ufl_elastic_jacobian(
+        bridge,
+        stiffness_matrix,
+        zero_displacement,
+    )
+    augmentation_matrix = stiffness_matrix.duplicate(copy=True)
+    augmentation_matrix.axpy(
+        -1.0,
+        ufl_jacobian,
+        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+    )
+    augmentation_matrix.assemble()
+    return UflElasticOperatorBridge(
+        form_bundle=form_bundle,
+        compiled_residual_form=compiled_residual_form,
+        compiled_jacobian_form=compiled_jacobian_form,
+        stiffness_augmentation_matrix=augmentation_matrix,
+    )
+
+
+def _build_ufl_augmented_elastic_force(
+    bridge: UflElasticOperatorBridge,
+    stiffness_matrix: Any,
+    displacement: Any,
+) -> Any:
+    elastic_force = _assemble_ufl_elastic_residual(
+        bridge,
+        stiffness_matrix.createVecRight(),
+        displacement,
+    )
+    augmentation_force = stiffness_matrix.createVecRight()
+    bridge.stiffness_augmentation_matrix.mult(displacement, augmentation_force)
+    elastic_force.axpy(1.0, augmentation_force)
+    return elastic_force
+
+
+def _build_ufl_augmented_elastic_jacobian(
+    bridge: UflElasticOperatorBridge,
+    stiffness_matrix: Any,
+    displacement: Any,
+) -> Any:
+    return _add_matrix_in_place(
+        _assemble_ufl_elastic_jacobian(bridge, stiffness_matrix, displacement),
+        bridge.stiffness_augmentation_matrix,
+    )
 
 
 def _accumulate_owned_matrix_value(
@@ -253,13 +435,12 @@ def _build_effective_matrix(
     return effective_matrix
 
 
-def _build_residual_vector(
-    stiffness_matrix: Any,
+def _build_residual_vector_from_elastic_force(
     mass_matrix: Any,
     damping_matrix: Any,
-    displacement: Any,
     velocity: Any,
     acceleration: Any,
+    elastic_force_vector: Any,
     nonlinear_force_vector: Any,
     external_load_vector: Any,
 ) -> Any:
@@ -270,9 +451,7 @@ def _build_residual_vector(
     damping_matrix.mult(velocity, damping_term)
     residual.axpy(1.0, damping_term)
 
-    stiffness_term = external_load_vector.duplicate()
-    stiffness_matrix.mult(displacement, stiffness_term)
-    residual.axpy(1.0, stiffness_term)
+    residual.axpy(1.0, elastic_force_vector)
     residual.axpy(1.0, nonlinear_force_vector)
     residual.axpy(-1.0, external_load_vector)
     return residual
@@ -319,6 +498,7 @@ def _solve_nonlinear_newmark_step_with_snes(
     stiffness_matrix: Any,
     mass_matrix: Any,
     damping_matrix: Any,
+    ufl_bridge: UflElasticOperatorBridge,
     nonlinear_links,
     displacement_predictor: Any,
     velocity_predictor: Any,
@@ -369,13 +549,17 @@ def _solve_nonlinear_newmark_step_with_snes(
             nonlinear_links,
             current_displacement,
         )
-        computed_residual = _build_residual_vector(
+        elastic_force_vector = _build_ufl_augmented_elastic_force(
+            ufl_bridge,
             stiffness_matrix,
+            current_displacement,
+        )
+        computed_residual = _build_residual_vector_from_elastic_force(
             mass_matrix,
             damping_matrix,
-            current_displacement,
             velocity,
             acceleration,
+            elastic_force_vector,
             nonlinear_force_vector,
             load_vector,
         )
@@ -387,8 +571,13 @@ def _solve_nonlinear_newmark_step_with_snes(
             nonlinear_links,
             current_displacement,
         )
-        effective_matrix = _build_effective_matrix(
+        elastic_jacobian = _build_ufl_augmented_elastic_jacobian(
+            ufl_bridge,
             stiffness_matrix,
+            current_displacement,
+        )
+        effective_matrix = _build_effective_matrix(
+            elastic_jacobian,
             mass_matrix,
             damping_matrix,
             nonlinear_tangent_matrix,
@@ -400,6 +589,7 @@ def _solve_nonlinear_newmark_step_with_snes(
             _assign_matrix(preconditioner, effective_matrix)
 
     snes = PETSc.SNES().create(stiffness_matrix.getComm())
+    snes.setType(PETSc.SNES.Type.NEWTONLS)
     snes.setFunction(assemble_residual, residual_vector)
     snes.setJacobian(assemble_jacobian, jacobian_matrix, jacobian_matrix)
     snes.setTolerances(
@@ -407,6 +597,7 @@ def _solve_nonlinear_newmark_step_with_snes(
         rtol=float(analysis.nonlinear_tolerance),
         max_it=max(analysis.max_nonlinear_iterations, 1),
     )
+    snes.getLineSearch().setType(PETSc.SNESLineSearch.Type.BASIC)
     snes.getKSP().setType(PETSc.KSP.Type.PREONLY)
     snes.getKSP().getPC().setType(PETSc.PC.Type.LU)
     snes.setFromOptions()
@@ -563,7 +754,7 @@ def solve_embedded_beam_time_history_experiment(
     if model.analysis.time_step_seconds <= 0.0 or model.analysis.total_time_seconds <= 0.0:
         raise RuntimeError("Time-history analysis requires positive time step and total time.")
 
-    experiment = build_embedded_timoshenko_experiment(
+    assembly = assemble_fenicsx_system(
         model,
         polynomial_degree=polynomial_degree,
         spec=spec,
@@ -574,6 +765,7 @@ def solve_embedded_beam_time_history_experiment(
         use_model_clamps=use_model_clamps,
         clamp_tolerance=clamp_tolerance,
     )
+    experiment = assembly.experiment
     response_mapping = resolve_embedded_beam_response_mapping(
         model,
         experiment.space_bundle,
@@ -606,6 +798,11 @@ def solve_embedded_beam_time_history_experiment(
     mass_matrix = experiment.operator_bundle.mass_matrix
     excitation_dof = response_mapping.excitation_dof
     nonlinear_links = experiment.operator_bundle.nonlinear_links
+    ufl_bridge = (
+        _build_ufl_elastic_operator_bridge(experiment.form_bundle, stiffness_matrix)
+        if nonlinear_links
+        else None
+    )
 
     effective_matrix = _build_effective_matrix(
         stiffness_matrix,
@@ -674,6 +871,7 @@ def solve_embedded_beam_time_history_experiment(
                     stiffness_matrix,
                     mass_matrix,
                     damping_matrix,
+                    ufl_bridge,
                     nonlinear_links,
                     displacement_predictor,
                     velocity_predictor,

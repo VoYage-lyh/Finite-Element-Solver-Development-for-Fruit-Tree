@@ -4,6 +4,7 @@ from math import pi, sqrt
 
 import pytest
 
+from orchard_fem.discretization.beam import BeamElementProperties, build_local_stiffness_matrix
 from orchard_fem.verification import (
     build_uniform_planar_beam,
     solve_generalized_frequencies,
@@ -21,6 +22,30 @@ def _circular_inertia(radius: float) -> float:
 
 def _l2_norm(values: list[float]) -> float:
     return sqrt(sum(value * value for value in values))
+
+
+def test_native_beam_stiffness_accepts_direct_section_rigidities() -> None:
+    properties = BeamElementProperties(
+        youngs_modulus=1.0,
+        shear_modulus=1.0,
+        area=1.0,
+        iy=1.0,
+        iz=1.0,
+        torsion_constant=1.0,
+        density=1.0,
+        length=2.0,
+        axial_rigidity=20.0,
+        torsional_rigidity=30.0,
+        bending_rigidity_y=40.0,
+        bending_rigidity_z=50.0,
+    )
+
+    stiffness = build_local_stiffness_matrix(properties)
+
+    assert stiffness[0][0] == pytest.approx(10.0)
+    assert stiffness[3][3] == pytest.approx(15.0)
+    assert stiffness[1][1] == pytest.approx(12.0 * 50.0 / (2.0**3))
+    assert stiffness[2][2] == pytest.approx(12.0 * 40.0 / (2.0**3))
 
 
 def test_python_cantilever_first_mode_matches_analytic_reference() -> None:

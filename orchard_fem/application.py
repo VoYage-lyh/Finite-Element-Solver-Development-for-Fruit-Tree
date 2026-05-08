@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Sequence
 
 from orchard_fem.automation import FullValidationConfig, FullValidationOutputs, run_full_validation
+from orchard_fem.domain import SolverBackendKind
 from orchard_fem.environment import run_environment_audit
 from orchard_fem.postprocess import plot_frequency_response_csv
 from orchard_fem.visualization import VisualizationOutputs, visualize_analysis
@@ -28,20 +29,31 @@ class OrchardApplication:
         self,
         model_json: Path,
         output_csv: Path | None = None,
+        solver_backend: SolverBackendKind | None = None,
     ) -> AnalysisRunOutputs:
-        return run_configured_analysis(model_json=model_json, output_csv=output_csv)
+        return run_configured_analysis(
+            model_json=model_json,
+            output_csv=output_csv,
+            solver_backend=solver_backend,
+        )
 
     def run_modal_summary(
         self,
         model_json: Path,
         output_csv: Path | None = None,
         num_modes: int = 6,
+        solver_backend: SolverBackendKind | None = None,
     ) -> Path:
         resolved_output = resolve_output_path(
             output_csv,
             default_modal_output(model_json),
         )
-        return write_modal_summary(model_json, resolved_output, num_modes)
+        return write_modal_summary(
+            model_json,
+            resolved_output,
+            num_modes,
+            solver_backend=solver_backend,
+        )
 
     def visualize(
         self,

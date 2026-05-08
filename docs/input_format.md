@@ -141,19 +141,18 @@ The current analysis entry supports:
 - `rayleigh_beta`
 - `output_csv`
 
-`solver_backend` defaults to `native`.
+`solver_backend` defaults to `fenicsx`.
 Frequency-response fields use the `AnalysisSettings` defaults when omitted, so pure time-history JSON files do not need to carry unused frequency sweep values.
 
-- `native` uses the current Orchard FEM beam assembly and solver stack for modal, frequency-response, and time-history workflows.
-- `fenicsx` routes the main workflow to the experimental embedded-beam FEniCSx branch.
-  At the current stage this backend is intended for modal, linear frequency-response, and time-history cases.
+- `fenicsx` is the main solver backend for modal, frequency-response, and time-history cases.
   It supports branch observations, fruit-attachment augmentation, gravity prestress, linear joint constraints,
-  and localized nonlinear links in time-history analysis, including explicit joint laws, automatic nonlinear
-  injection, and cubic clamp links solved through PETSc SNES. It does not yet support nonlinear frequency continuation.
+  localized nonlinear links, first-harmonic nonlinear frequency continuation, and PETSc SNES nonlinear time history.
+- `native` uses the older Python beam assembly and solver stack. It remains available only when explicitly requested with `"solver_backend": "native"` or the CLI `--solver-backend native` override.
 
 Frequency-response mode uses the direct linearized assembled operators when no localized nonlinear
-links are active. If the assembled system contains localized nonlinear links, Orchard FEM falls
-back to a steady-state time-domain sweep and reports amplitudes on the same frequency-response CSV grid.
+links are active. If localized nonlinear links are active, both active backends use
+adaptive first-harmonic balance continuation and report amplitudes on the same frequency-response
+CSV grid.
 
 Time-history mode uses Newmark average-acceleration integration. FEniCSx localized nonlinear links are solved with PETSc SNES.
 

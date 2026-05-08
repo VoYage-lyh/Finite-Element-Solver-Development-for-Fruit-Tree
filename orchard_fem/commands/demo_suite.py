@@ -18,6 +18,12 @@ def _handle_demo_suite(args: argparse.Namespace, application: OrchardApplication
     print(f"  frequency_response: {outputs.frequency_response_csv}")
     print(f"  time_history: {outputs.time_history_csv}")
     print(f"  modal_summary: {outputs.modal_summary_csv}")
+    print(f"  frequency_geometry: {outputs.frequency_visualization.geometry_figure}")
+    print(f"  frequency_figure: {outputs.frequency_visualization.analysis_figure}")
+    print(f"  time_geometry: {outputs.time_history_visualization.geometry_figure}")
+    print(f"  time_figure: {outputs.time_history_visualization.analysis_figure}")
+    for trajectory_figure in outputs.time_history_visualization.trajectory_figures:
+        print(f"  trajectory: {trajectory_figure}")
     return 0
 
 
@@ -27,13 +33,13 @@ def register_demo_suite_command(
 ) -> None:
     parser = subparsers.add_parser(
         "demo-suite",
-        help="Run the standard Orchard FEM demo suite and regenerate validation CSV artifacts.",
+        help="Run the standard Orchard FEM demo suite and regenerate validation CSV/figure artifacts.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("build/validation/python"),
-        help="Directory for generated CSV validation artifacts.",
+        help="Directory for generated validation CSV and figure artifacts.",
     )
     parser.add_argument(
         "--frequency-model",

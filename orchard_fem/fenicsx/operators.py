@@ -14,21 +14,14 @@ from orchard_fem.discretization.types import (
 )
 from orchard_fem.domain import JointDefinition, JointLawKind, OrchardModel
 from orchard_fem.fenicsx.availability import require_dolfinx
-from orchard_fem.fenicsx.boundary_conditions import build_model_clamp_boundary_conditions
 from orchard_fem.fenicsx.beam_forms import (
     EmbeddedBeamCellData,
     EmbeddedBeamCoefficientFunctions,
     EmbeddedBeamFormBundle,
-    build_embedded_beam_cell_data,
-    build_embedded_timoshenko_forms,
-    create_embedded_beam_coefficient_functions,
 )
-from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec, build_embedded_line_mesh_spec
+from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
 from orchard_fem.fenicsx.dofs import resolve_embedded_beam_component_dof
-from orchard_fem.fenicsx.fields import (
-    EmbeddedBeamFunctionSpaceBundle,
-    create_embedded_beam_function_space,
-)
+from orchard_fem.fenicsx.fields import EmbeddedBeamFunctionSpaceBundle
 from orchard_fem.topology import Vec3
 
 CONSTRAINT_PENALTY = 1.0e12
@@ -891,77 +884,18 @@ def build_embedded_timoshenko_experiment(
     clamp_tolerance: float = 1.0e-8,
     diag: float = 1.0,
 ) -> EmbeddedBeamExperimentBundle:
-    resolved_spec = spec or build_embedded_line_mesh_spec(model)
-    space_bundle = create_embedded_beam_function_space(
-        resolved_spec,
+    from orchard_fem.fenicsx.assembly import assemble_fenicsx_system
+
+    return assemble_fenicsx_system(
+        model,
         polynomial_degree=polynomial_degree,
+        spec=spec,
+        shear_correction=shear_correction,
         comm=comm,
         partitioner=partitioner,
         max_facet_to_cell_links=max_facet_to_cell_links,
-    )
-    cell_data = build_embedded_beam_cell_data(
-        model,
-        spec=resolved_spec,
-        shear_correction=shear_correction,
-    )
-    coefficient_functions = create_embedded_beam_coefficient_functions(
-        space_bundle.mesh,
-        cell_data,
-    )
-    form_bundle = build_embedded_timoshenko_forms(
-        space_bundle,
-        coefficient_functions,
-    )
-    effective_bcs: Sequence[Any]
-    if bcs is not None:
-        effective_bcs = bcs
-    elif use_model_clamps:
-        effective_bcs = build_model_clamp_boundary_conditions(
-            model,
-            space_bundle,
-            atol=clamp_tolerance,
-            include_nonlinear_clamps=False,
-        )
-    else:
-        effective_bcs = ()
-    operator_bundle = assemble_embedded_beam_operators(
-        form_bundle,
-        bcs=effective_bcs,
+        use_model_clamps=use_model_clamps,
+        clamp_tolerance=clamp_tolerance,
+        bcs=bcs,
         diag=diag,
-    )
-    operator_bundle = _augment_operators_with_joints(
-        model,
-        space_bundle,
-        operator_bundle,
-    )
-    operator_bundle = _augment_operators_with_auto_nonlinear_links(
-        model,
-        space_bundle,
-        operator_bundle,
-    )
-    operator_bundle = _augment_operators_with_nonlinear_clamps(
-        model,
-        space_bundle,
-        operator_bundle,
-    )
-    operator_bundle = _augment_operators_with_fruits(
-        model,
-        space_bundle,
-        operator_bundle,
-    )
-    operator_bundle = _augment_operators_with_gravity_prestress(
-        model,
-        space_bundle,
-        resolved_spec,
-        cell_data,
-        operator_bundle,
-    )
-    return EmbeddedBeamExperimentBundle(
-        mesh_spec=resolved_spec,
-        space_bundle=space_bundle,
-        cell_data=cell_data,
-        coefficient_functions=coefficient_functions,
-        form_bundle=form_bundle,
-        operator_bundle=operator_bundle,
-        fruit_dofs=operator_bundle.fruit_dofs,
-    )
+    ).experiment

@@ -13,12 +13,16 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[ubuntu-test]"
 ```
 
+Use this only for code inspection and explicit native fallback tests.
+
 ### Recommended PETSc/SLEPc Environment
 
 ```bash
 conda env create -f config/fenicsx_pinn_environment.yml
 conda activate orchard-fenicsx
 ```
+
+Use this for normal solver runs. The default backend is FEniCSx.
 
 ## 2. Check the Environment
 

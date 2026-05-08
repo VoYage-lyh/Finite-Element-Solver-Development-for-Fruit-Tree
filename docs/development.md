@@ -54,7 +54,7 @@ python -m orchard_fem full-validate
 Regenerate standard demo artifacts:
 
 ```bash
-python -m orchard_fem demo-suite --output-dir build/validation/python
+conda run -n orchard-fenicsx python -m orchard_fem demo-suite --output-dir build/validation/python
 ```
 
 ## Testing Matrix

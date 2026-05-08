@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from orchard_fem.discretization import OrchardModalAssembler
@@ -42,8 +42,14 @@ def resolve_output_path(path: Path | None, fallback: Path) -> Path:
 def run_configured_analysis(
     model_json: Path,
     output_csv: Path | None = None,
+    solver_backend: SolverBackendKind | None = None,
 ) -> AnalysisRunOutputs:
     model = load_orchard_model(str(model_json))
+    if solver_backend is not None:
+        model = replace(
+            model,
+            analysis=replace(model.analysis, solver_backend=solver_backend),
+        )
     resolved_output = resolve_output_path(
         output_csv,
         default_solver_output(model.analysis.output_csv),
@@ -88,8 +94,18 @@ def run_configured_analysis(
     return AnalysisRunOutputs(mode=model.analysis.mode, output_csv=resolved_output)
 
 
-def write_modal_summary(model_path: Path, output_csv: Path, num_modes: int) -> Path:
+def write_modal_summary(
+    model_path: Path,
+    output_csv: Path,
+    num_modes: int,
+    solver_backend: SolverBackendKind | None = None,
+) -> Path:
     model = load_orchard_model(str(model_path))
+    if solver_backend is not None:
+        model = replace(
+            model,
+            analysis=replace(model.analysis, solver_backend=solver_backend),
+        )
     if model.analysis.solver_backend == SolverBackendKind.FENICSX:
         from orchard_fem.fenicsx import solve_embedded_beam_modal_experiment
 

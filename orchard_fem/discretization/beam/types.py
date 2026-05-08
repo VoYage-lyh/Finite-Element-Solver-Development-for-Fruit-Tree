@@ -16,3 +16,7 @@ class BeamElementProperties:
     torsion_constant: float
     density: float
     length: float
+    axial_rigidity: float | None = None
+    torsional_rigidity: float | None = None
+    bending_rigidity_y: float | None = None
+    bending_rigidity_z: float | None = None

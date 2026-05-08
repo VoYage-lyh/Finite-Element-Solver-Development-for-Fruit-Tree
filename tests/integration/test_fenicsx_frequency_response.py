@@ -148,6 +148,19 @@ def _cantilever_with_fruit_payload() -> dict:
     return payload
 
 
+def _cantilever_with_nonlinear_clamp_payload() -> dict:
+    payload = _cantilever_payload()
+    payload["metadata"]["name"] = "fenicsx_cantilever_nonlinear_frequency_response"
+    payload["clamps"][0]["cubic_stiffness"] = 1.0e4
+    payload["excitation"]["amplitude"] = 0.1
+    payload["analysis"]["frequency_start_hz"] = 1.0
+    payload["analysis"]["frequency_end_hz"] = 6.0
+    payload["analysis"]["frequency_steps"] = 4
+    payload["analysis"]["max_nonlinear_iterations"] = 8
+    payload["analysis"]["nonlinear_tolerance"] = 1.0e-7
+    return payload
+
+
 def test_embedded_beam_frequency_response_experiment_smoke(tmp_path) -> None:
     if os.environ.get("ORCHARD_RUN_DOLFINX_TESTS") != "1":
         pytest.skip("Set ORCHARD_RUN_DOLFINX_TESTS=1 to run DOLFINx frequency-response tests")
@@ -219,3 +232,26 @@ def test_embedded_beam_frequency_response_supports_fruit_attachment(tmp_path) ->
     assert result.result.observation_names == ["tip", "fruit_obs"]
     assert len(result.result.points) == model.analysis.frequency_steps
     assert max(point.observation_magnitudes[1] for point in result.result.points) >= 0.0
+
+
+def test_embedded_beam_frequency_response_supports_harmonic_balance_nonlinear_links(tmp_path) -> None:
+    if os.environ.get("ORCHARD_RUN_DOLFINX_TESTS") != "1":
+        pytest.skip("Set ORCHARD_RUN_DOLFINX_TESTS=1 to run DOLFINx frequency-response tests")
+
+    model_path = tmp_path / "fenicsx_cantilever_nonlinear_frequency_response.json"
+    model_path.write_text(
+        json.dumps(_cantilever_with_nonlinear_clamp_payload()),
+        encoding="utf-8",
+    )
+    model = load_orchard_model(str(model_path))
+
+    result = solve_embedded_beam_frequency_response_experiment(
+        model,
+        polynomial_degree=1,
+        use_model_clamps=True,
+    )
+
+    assert result.experiment.operator_bundle.nonlinear_links
+    assert result.result.observation_names == ["tip"]
+    assert len(result.result.points) == model.analysis.frequency_steps
+    assert all(point.observation_magnitudes[0] >= 0.0 for point in result.result.points)

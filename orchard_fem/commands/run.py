@@ -5,12 +5,18 @@ from functools import partial
 from pathlib import Path
 
 from orchard_fem.application import OrchardApplication
+from orchard_fem.domain import SolverBackendKind
 
 
 def _handle_run(args: argparse.Namespace, application: OrchardApplication) -> int:
     outputs = application.run_analysis(
         model_json=args.model_json,
         output_csv=args.output_csv,
+        solver_backend=(
+            SolverBackendKind(args.solver_backend)
+            if args.solver_backend is not None
+            else None
+        ),
     )
     print(f"Wrote {outputs.mode.value} results to {outputs.output_csv}")
     return 0
@@ -30,5 +36,11 @@ def register_run_command(
         type=Path,
         default=None,
         help="Override the response CSV path. Defaults to build/<analysis.output_csv>.",
+    )
+    parser.add_argument(
+        "--solver-backend",
+        choices=[backend.value for backend in SolverBackendKind],
+        default=None,
+        help="Override analysis.solver_backend. Defaults to the model JSON value.",
     )
     parser.set_defaults(handler=partial(_handle_run, application=application))

@@ -5,11 +5,11 @@ from math import pi, sqrt
 from typing import Any
 
 from orchard_fem.domain import OrchardModel
+from orchard_fem.fenicsx.assembly import assemble_fenicsx_system
 from orchard_fem.fenicsx.availability import require_dolfinx
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
 from orchard_fem.fenicsx.operators import (
     EmbeddedBeamExperimentBundle,
-    build_embedded_timoshenko_experiment,
 )
 from orchard_fem.numerics import require_slepc
 
@@ -125,7 +125,7 @@ def solve_embedded_beam_modal_experiment(
     require_dolfinx()
     _require_supported_modal_model(model)
 
-    experiment = build_embedded_timoshenko_experiment(
+    assembly = assemble_fenicsx_system(
         model,
         polynomial_degree=polynomial_degree,
         spec=spec,
@@ -137,11 +137,11 @@ def solve_embedded_beam_modal_experiment(
         clamp_tolerance=clamp_tolerance,
     )
     modes = _solve_petsc_generalized_modes(
-        experiment.operator_bundle.stiffness_matrix,
-        experiment.operator_bundle.mass_matrix,
+        assembly.stiffness_matrix,
+        assembly.mass_matrix,
         num_modes=num_modes,
     )
     return EmbeddedBeamModalExperimentResult(
-        experiment=experiment,
+        experiment=assembly.experiment,
         modes=modes,
     )

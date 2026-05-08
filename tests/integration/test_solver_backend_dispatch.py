@@ -87,7 +87,6 @@ def _fenicsx_frequency_payload() -> dict:
         },
         "analysis": {
             "mode": "frequency_response",
-            "solver_backend": "fenicsx",
             "frequency_start_hz": 1.0,
             "frequency_end_hz": 5.0,
             "frequency_steps": 3,
@@ -112,7 +111,6 @@ def _fenicsx_time_history_payload() -> dict:
     payload["metadata"]["name"] = "fenicsx_dispatch_time_history"
     payload["analysis"] = {
         "mode": "time_history",
-        "solver_backend": "fenicsx",
         "frequency_start_hz": 1.0,
         "frequency_end_hz": 5.0,
         "frequency_steps": 3,

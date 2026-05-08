@@ -98,7 +98,7 @@ class HarmonicExcitation:
 @dataclass(frozen=True)
 class AnalysisSettings:
     mode: AnalysisMode = AnalysisMode.FREQUENCY_RESPONSE
-    solver_backend: SolverBackendKind = SolverBackendKind.NATIVE
+    solver_backend: SolverBackendKind = SolverBackendKind.FENICSX
     frequency_start_hz: float = 1.0
     frequency_end_hz: float = 25.0
     frequency_steps: int = 50

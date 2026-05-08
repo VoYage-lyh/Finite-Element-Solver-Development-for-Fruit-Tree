@@ -533,14 +533,15 @@
   },
   "analysis": {
     "mode": "frequency_response",
+    "solver_backend": "fenicsx",
     "frequency_start_hz": 2.0,
     "frequency_end_hz": 28.0,
     "frequency_steps": 30,
     "time_step_seconds": 0.002,
     "total_time_seconds": 0.8,
     "output_stride": 4,
-    "max_nonlinear_iterations": 20,
-    "nonlinear_tolerance": 1.0e-8,
+    "max_nonlinear_iterations": 80,
+    "nonlinear_tolerance": 1.0e-6,
     "rayleigh_alpha": 0.0,
     "rayleigh_beta": 1.0e-4,
     "output_csv": "demo_frequency_response.csv"

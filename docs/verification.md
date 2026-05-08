@@ -43,6 +43,7 @@ ORCHARD_RUN_DOLFINX_TESTS=1 conda run -n orchard-fenicsx python -m pytest -q \
   tests/integration/test_fenicsx_fields.py::test_create_embedded_beam_function_space_smoke \
   tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_form_bundle_smoke \
   tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_operator_bundle_smoke \
+  tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_ufl_jacobian_matches_linear_stiffness_form \
   tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_experiment_smoke \
   tests/integration/test_fenicsx_modal.py::test_embedded_beam_cantilever_first_mode_matches_analytic_reference \
   tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_fruit_attachment \
@@ -51,6 +52,7 @@ ORCHARD_RUN_DOLFINX_TESTS=1 conda run -n orchard-fenicsx python -m pytest -q \
   tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_experiment_smoke \
   tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode \
   tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment \
+  tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_harmonic_balance_nonlinear_links \
   tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke \
   tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_polynomial_joint_law \
   tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_auto_and_clamp_nonlinear_links
@@ -105,4 +107,4 @@ conda run -n orchard-fenicsx python -m orchard_fem verify \
 - If Python solver assembly, dynamics, or verification utilities change, rerun `python -m orchard_fem verify`.
 - If PETSc/SLEPc-backed solver behavior changes, rerun the targeted `orchard-fenicsx` command above or use `python -m orchard_fem full-validate`.
 - If a verification case starts failing after a modeling upgrade, prefer updating the model assumptions and documented reference together rather than silently loosening tolerances.
-- Any future harmonic-balance, continuation, or reduction upgrade should extend these verification cases rather than replacing them with smoke tests.
+- Any future harmonic-balance or reduction upgrade should extend these verification cases rather than replacing them with smoke tests.

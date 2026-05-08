@@ -25,6 +25,30 @@ def _build_plane_bending_stiffness(
     ]
 
 
+def _axial_rigidity(properties: BeamElementProperties) -> float:
+    if properties.axial_rigidity is not None:
+        return properties.axial_rigidity
+    return properties.youngs_modulus * properties.area
+
+
+def _torsional_rigidity(properties: BeamElementProperties) -> float:
+    if properties.torsional_rigidity is not None:
+        return properties.torsional_rigidity
+    return properties.shear_modulus * properties.torsion_constant
+
+
+def _bending_rigidity_y(properties: BeamElementProperties) -> float:
+    if properties.bending_rigidity_y is not None:
+        return properties.bending_rigidity_y
+    return properties.youngs_modulus * properties.iy
+
+
+def _bending_rigidity_z(properties: BeamElementProperties) -> float:
+    if properties.bending_rigidity_z is not None:
+        return properties.bending_rigidity_z
+    return properties.youngs_modulus * properties.iz
+
+
 def _build_plane_bending_mass(density_area: float, length: float) -> list[list[float]]:
     l2 = length * length
     scale = density_area * length / 420.0
@@ -41,8 +65,8 @@ def build_local_stiffness_matrix(properties: BeamElementProperties) -> Matrix:
         raise ValueError("Beam element length must be positive")
 
     matrix = zero_matrix12()
-    axial = properties.youngs_modulus * properties.area / properties.length
-    torsion = properties.shear_modulus * properties.torsion_constant / properties.length
+    axial = _axial_rigidity(properties) / properties.length
+    torsion = _torsional_rigidity(properties) / properties.length
 
     matrix[0][0] = axial
     matrix[0][6] = -axial
@@ -55,13 +79,13 @@ def build_local_stiffness_matrix(properties: BeamElementProperties) -> Matrix:
     matrix[9][9] = torsion
 
     bending_z = _build_plane_bending_stiffness(
-        properties.youngs_modulus * properties.iz,
+        _bending_rigidity_z(properties),
         properties.length,
     )
     _add_submatrix(matrix, [1, 5, 7, 11], bending_z)
 
     bending_y_base = _build_plane_bending_stiffness(
-        properties.youngs_modulus * properties.iy,
+        _bending_rigidity_y(properties),
         properties.length,
     )
     sign = [1.0, -1.0, 1.0, -1.0]

@@ -147,7 +147,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
     analysis = AnalysisSettings(
         mode=AnalysisMode(analysis_payload.get("mode", "frequency_response")),
         solver_backend=SolverBackendKind(
-            analysis_payload.get("solver_backend", "native")
+            analysis_payload.get("solver_backend", analysis_defaults.solver_backend.value)
         ),
         frequency_start_hz=float(
             analysis_payload.get("frequency_start_hz", analysis_defaults.frequency_start_hz)

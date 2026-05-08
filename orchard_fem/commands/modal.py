@@ -5,6 +5,7 @@ from functools import partial
 from pathlib import Path
 
 from orchard_fem.application import OrchardApplication
+from orchard_fem.domain import SolverBackendKind
 
 
 def _handle_modal(args: argparse.Namespace, application: OrchardApplication) -> int:
@@ -12,6 +13,11 @@ def _handle_modal(args: argparse.Namespace, application: OrchardApplication) -> 
         model_json=args.model_json,
         output_csv=args.output_csv,
         num_modes=args.num_modes,
+        solver_backend=(
+            SolverBackendKind(args.solver_backend)
+            if args.solver_backend is not None
+            else None
+        ),
     )
     print(f"Wrote modal summary to {output_csv}")
     return 0
@@ -37,5 +43,11 @@ def register_modal_command(
         type=int,
         default=6,
         help="Number of physical modes to export.",
+    )
+    parser.add_argument(
+        "--solver-backend",
+        choices=[backend.value for backend in SolverBackendKind],
+        default=None,
+        help="Override analysis.solver_backend. Defaults to the model JSON value.",
     )
     parser.set_defaults(handler=partial(_handle_modal, application=application))

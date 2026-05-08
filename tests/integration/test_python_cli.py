@@ -149,6 +149,26 @@ def test_cli_parser_registers_expected_subcommands() -> None:
     assert "full-validate" in help_text
 
 
+def test_run_and_modal_commands_expose_solver_backend_override() -> None:
+    run_result = subprocess.run(
+        [sys.executable, "-m", "orchard_fem", "run", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    modal_result = subprocess.run(
+        [sys.executable, "-m", "orchard_fem", "modal", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert run_result.returncode == 0
+    assert modal_result.returncode == 0
+    assert "--solver-backend" in run_result.stdout
+    assert "--solver-backend" in modal_result.stdout
+
+
 def test_python_doctor_subcommand_shows_help() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "orchard_fem", "doctor", "--help"],
@@ -254,6 +274,8 @@ def test_cli_run_writes_frequency_response_csv(tmp_path) -> None:
             "examples/demo_orchard.json",
             "--output-csv",
             str(output_csv),
+            "--solver-backend",
+            "native",
         ]
     )
 
@@ -277,6 +299,8 @@ def test_cli_modal_writes_summary_csv(tmp_path) -> None:
             str(output_csv),
             "--num-modes",
             "3",
+            "--solver-backend",
+            "native",
         ]
     )
 

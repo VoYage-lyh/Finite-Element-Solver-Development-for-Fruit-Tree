@@ -1,3 +1,8 @@
+from orchard_fem.fenicsx.assembly import (
+    FenicsxAssemblyStage,
+    FenicsxSystemAssembly,
+    assemble_fenicsx_system,
+)
 from orchard_fem.fenicsx.beam_forms import (
     EmbeddedBeamCellData,
     EmbeddedBeamCoefficientFunctions,
@@ -68,6 +73,9 @@ __all__ = [
     "EmbeddedBeamModalResult",
     "EmbeddedBeamResponseMapping",
     "EmbeddedBeamTimeHistoryExperimentResult",
+    "FenicsxAssemblyStage",
+    "FenicsxSystemAssembly",
+    "assemble_fenicsx_system",
     "assemble_embedded_beam_operators",
     "build_embedded_rayleigh_damping_matrix",
     "build_model_clamp_boundary_conditions",

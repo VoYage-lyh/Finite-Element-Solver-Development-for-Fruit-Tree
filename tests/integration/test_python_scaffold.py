@@ -9,6 +9,7 @@ import pytest
 from orchard_fem.discretization import OrchardModalAssembler
 from orchard_fem.cross_section.integrator import SectionIntegrator
 from orchard_fem.cross_section.tissue import RegionGeometry, SectionShapeKind, TissueRegion, TissueType
+from orchard_fem.domain import SolverBackendKind
 from orchard_fem.io import (
     build_topology_from_model_payload,
     load_model_payload,
@@ -33,6 +34,7 @@ def test_typed_model_loader_can_read_demo_model() -> None:
     assert len(model.branches) == 4
     assert model.require_branch("trunk").discretization.num_elements == 5
     assert model.excitation.target_branch_id == "trunk"
+    assert model.analysis.solver_backend == SolverBackendKind.FENICSX
     assert model.analysis.output_csv == "demo_frequency_response.csv"
     assert model.observations[0].target_components == ["ux"]
 

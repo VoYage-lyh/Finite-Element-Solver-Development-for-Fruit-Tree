@@ -67,6 +67,9 @@ class EmbeddedBeamCoefficientFunctions:
 class EmbeddedBeamFormBundle:
     stiffness_form: Any
     mass_form: Any
+    state_function: Any
+    residual_form: Any
+    jacobian_form: Any
 
 
 def _zeros(count: int) -> np.ndarray:
@@ -127,23 +130,30 @@ def build_embedded_beam_cell_data(
             mass_line = 0.5 * (
                 first_state.mass_per_length + second_state.mass_per_length
             )
-            youngs_modulus = 0.5 * (
-                first_state.effective_youngs_modulus
-                + second_state.effective_youngs_modulus
+            section_axial_rigidity = 0.5 * (
+                first_state.axial_rigidity + second_state.axial_rigidity
             )
-            shear_modulus = 0.5 * (
-                first_state.effective_shear_modulus
-                + second_state.effective_shear_modulus
+            section_shear_rigidity = 0.5 * (
+                first_state.shear_rigidity + second_state.shear_rigidity
+            )
+            section_torsional_rigidity = 0.5 * (
+                first_state.torsional_rigidity + second_state.torsional_rigidity
+            )
+            section_bending_rigidity_y = 0.5 * (
+                first_state.bending_rigidity_y + second_state.bending_rigidity_y
+            )
+            section_bending_rigidity_z = 0.5 * (
+                first_state.bending_rigidity_z + second_state.bending_rigidity_z
             )
             density = mass_line / area if area > 0.0 else 0.0
             tangent, local_y, local_z = build_local_frame(first_point, second_point)
 
-            axial_rigidity[cell_index] = youngs_modulus * area
-            shear_rigidity_y[cell_index] = shear_correction * shear_modulus * area
-            shear_rigidity_z[cell_index] = shear_correction * shear_modulus * area
-            torsional_rigidity[cell_index] = shear_modulus * polar_moment
-            bending_rigidity_y[cell_index] = youngs_modulus * iy
-            bending_rigidity_z[cell_index] = youngs_modulus * iz
+            axial_rigidity[cell_index] = section_axial_rigidity
+            shear_rigidity_y[cell_index] = shear_correction * section_shear_rigidity
+            shear_rigidity_z[cell_index] = shear_correction * section_shear_rigidity
+            torsional_rigidity[cell_index] = section_torsional_rigidity
+            bending_rigidity_y[cell_index] = section_bending_rigidity_y
+            bending_rigidity_z[cell_index] = section_bending_rigidity_z
             mass_per_length[cell_index] = mass_line
             rotary_inertia_t[cell_index] = density * polar_moment
             rotary_inertia_y[cell_index] = density * iy
@@ -239,10 +249,13 @@ def build_embedded_timoshenko_forms(
     require_dolfinx()
 
     import ufl
+    from dolfinx import fem as dolfinx_fem
 
     displacement_rotation = ufl.TrialFunction(space_bundle.mixed_space)
+    state_function = dolfinx_fem.Function(space_bundle.mixed_space, name="beam_state")
     test_field = ufl.TestFunction(space_bundle.mixed_space)
     displacement, rotation = ufl.split(displacement_rotation)
+    state_displacement, state_rotation = ufl.split(state_function)
     displacement_test, rotation_test = ufl.split(test_field)
 
     tangent = ufl.as_vector(
@@ -277,32 +290,64 @@ def build_embedded_timoshenko_forms(
             ufl.dot(vector, local_z),
         )
 
-    u_t, u_y, u_z = local_components(displacement)
-    v_t, v_y, v_z = local_components(displacement_test)
+    def generalized_strains(displacement_field: Any, rotation_field: Any) -> tuple[Any, ...]:
+        u_t, u_y, u_z = local_components(displacement_field)
+        theta_t, theta_y, theta_z = local_components(rotation_field)
+        return (
+            derivative(u_t),
+            derivative(theta_t),
+            derivative(u_y) - theta_z,
+            derivative(u_z) + theta_y,
+            derivative(theta_y),
+            derivative(theta_z),
+        )
+
+    def stiffness_virtual_work(
+        displacement_field: Any,
+        rotation_field: Any,
+        displacement_test_field: Any,
+        rotation_test_field: Any,
+    ) -> Any:
+        (
+            axial_strain,
+            torsion_strain,
+            shear_y,
+            shear_z,
+            curvature_y,
+            curvature_z,
+        ) = generalized_strains(displacement_field, rotation_field)
+        (
+            axial_test,
+            torsion_test,
+            shear_y_test,
+            shear_z_test,
+            curvature_y_test,
+            curvature_z_test,
+        ) = generalized_strains(displacement_test_field, rotation_test_field)
+        return (
+            coefficients.axial_rigidity * axial_strain * axial_test
+            + coefficients.torsional_rigidity * torsion_strain * torsion_test
+            + coefficients.shear_rigidity_y * shear_y * shear_y_test
+            + coefficients.shear_rigidity_z * shear_z * shear_z_test
+            + coefficients.bending_rigidity_y * curvature_y * curvature_y_test
+            + coefficients.bending_rigidity_z * curvature_z * curvature_z_test
+        ) * ufl.dx
+
+    stiffness_form = stiffness_virtual_work(
+        displacement,
+        rotation,
+        displacement_test,
+        rotation_test,
+    )
+    residual_form = stiffness_virtual_work(
+        state_displacement,
+        state_rotation,
+        displacement_test,
+        rotation_test,
+    )
+    jacobian_form = ufl.derivative(residual_form, state_function, displacement_rotation)
     theta_t, theta_y, theta_z = local_components(rotation)
     psi_t, psi_y, psi_z = local_components(rotation_test)
-
-    axial_strain = derivative(u_t)
-    axial_test = derivative(v_t)
-    torsion_strain = derivative(theta_t)
-    torsion_test = derivative(psi_t)
-    shear_y = derivative(u_y) - theta_z
-    shear_y_test = derivative(v_y) - psi_z
-    shear_z = derivative(u_z) + theta_y
-    shear_z_test = derivative(v_z) + psi_y
-    curvature_y = derivative(theta_y)
-    curvature_y_test = derivative(psi_y)
-    curvature_z = derivative(theta_z)
-    curvature_z_test = derivative(psi_z)
-
-    stiffness_form = (
-        coefficients.axial_rigidity * axial_strain * axial_test
-        + coefficients.torsional_rigidity * torsion_strain * torsion_test
-        + coefficients.shear_rigidity_y * shear_y * shear_y_test
-        + coefficients.shear_rigidity_z * shear_z * shear_z_test
-        + coefficients.bending_rigidity_y * curvature_y * curvature_y_test
-        + coefficients.bending_rigidity_z * curvature_z * curvature_z_test
-    ) * ufl.dx
 
     mass_form = (
         coefficients.mass_per_length * ufl.dot(displacement, displacement_test)
@@ -314,4 +359,7 @@ def build_embedded_timoshenko_forms(
     return EmbeddedBeamFormBundle(
         stiffness_form=stiffness_form,
         mass_form=mass_form,
+        state_function=state_function,
+        residual_form=residual_form,
+        jacobian_form=jacobian_form,
     )

@@ -26,12 +26,12 @@ The active implementation surface is `orchard_fem/`.
 - `orchard_fem/domain/`: enums, dataclasses, and parsing helpers
 - `orchard_fem/topology/`: vectors, branch paths, observations, and tree graph logic
 - `orchard_fem/cross_section/`: section profiles, tissue regions, and defaults
-- `orchard_fem/materials/`: material properties and branch-average material helpers
+- `orchard_fem/materials/`: material properties, branch-average material helpers, and layered-section rigidity evaluation for solver backends
 
 ### Solver Layer
 
 - `orchard_fem/discretization/`: beam properties, DOFs, assembled systems, and matrix utilities
-- `orchard_fem/fenicsx/`: experimental embedded-mesh, field-definition, coefficient, UFL beam-form, PETSc operator assembly, SLEPc modal solve, PETSc frequency-response solve, Newmark time-history solve, and PETSc SNES localized nonlinear time-history solve
+- `orchard_fem/fenicsx/`: default FEniCSx backend with a shared staged system-assembly facade, embedded-mesh, field-definition, coefficient, UFL beam residual/Jacobian forms, PETSc operator assembly, SLEPc modal solve, PETSc linear and first-harmonic nonlinear frequency-response solve, Newmark time-history solve, and PETSc SNES localized nonlinear time-history solve using the UFL elastic residual/Jacobian bridge
 - `orchard_fem/solver_core/`: modal and preload core operations
 - `orchard_fem/dynamics/`: frequency-response and time-history execution
 - `orchard_fem/numerics/`: PETSc/SLEPc backend helpers
