@@ -419,6 +419,7 @@
       "id": "fruit_left_primary",
       "branch_id": "primary_left",
       "location_s": 0.72,
+      "target_component": "uz",
       "mass": 0.18,
       "stiffness": 1400.0,
       "damping": 1.8
@@ -427,6 +428,7 @@
       "id": "fruit_left_secondary",
       "branch_id": "secondary_left",
       "location_s": 0.88,
+      "target_component": "uz",
       "mass": 0.12,
       "stiffness": 950.0,
       "damping": 1.1

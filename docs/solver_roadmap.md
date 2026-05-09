@@ -9,12 +9,36 @@ Status labels:
 - Planned
 - Reserved
 
+## Phase 1 Completion Baseline
+
+Status: Implemented
+
+Phase 1 is the core modeling pipeline from a 3D orchard skeleton to a runnable
+FEniCSx analysis and basic visual output. The completed baseline includes:
+
+- Skeleton JSON import through `orchard_fem import-skeleton`.
+- Polyline branch centerlines with arc-length stationing.
+- Default circular branch sections for quick geometry-to-model conversion.
+- FEniCSx embedded 1D mesh generation in 3D coordinates.
+- Coincident linear parent-child branch roots sharing the same mesh DOFs.
+- Explicit nonlinear joints retaining independent child-root DOFs for nonlinear links.
+- Fruit attachment on a selected translational component, including fruit self-weight
+  in gravity preload.
+- FEniCSx frequency-response execution and geometry/response visualization from the
+  imported skeleton model.
+
+Non-coincident parent-child constraints without `dolfinx_mpc` remain outside this
+Phase 1 baseline. Imported linear branch connections should therefore place the
+child root on a parent branch mesh node. Non-coincident constraint handling is the
+first Phase 2 item.
+
 ## 1. Input Layer
 
 Status: Implemented
 
 - JSON model loading is active in `orchard_fem.io.loaders`.
 - Branches, materials, joints, fruits, clamps, excitation, analysis settings, and observations are all typed on load.
+- `import-skeleton` converts 3D centerline skeleton JSON into solver-ready Orchard FEM JSON with default circular sections.
 
 ## 2. Domain Object Layer
 
@@ -28,6 +52,7 @@ Status: Mixed
 
 Implemented:
 - `BranchPath` geometry, direction, and inclination angle.
+- Polyline `BranchPath` stationing by accumulated arc length for imported centerline skeletons.
 - Tissue-region section integration through `SectionIntegrator`.
 
 Partial / reduced:
@@ -59,7 +84,7 @@ Status: Mixed
 
 Implemented:
 - Global `K`, `M`, `C`, gravity load, excitation DOF, and observation DOF assembly.
-- Fruit point mass plus spring-damper attachment.
+- Fruit point mass plus spring-damper attachment, including target translational component selection and fruit self-weight in gravity preload.
 - Penalty-style clamp and branch-connection constraints.
 - Localized nonlinear links:
   - clamp cubic links
@@ -70,7 +95,7 @@ Implemented:
 
 Partial / reduced:
 - The working system is assembled in Python matrix form and converted to PETSc at solve time, not assembled PETSc-native from the start.
-- Parent-child continuity is still enforced by pairwise penalty links rather than a stronger local continuity treatment.
+- Coincident linear FEniCSx parent-child branch roots now share mesh DOFs; non-coincident and nonlinear branch connections still use pairwise augmentation/penalty links.
 - The native fallback and FEniCSx branch both consume direct layered-section rigidities for stiffness. The native branch remains a simpler Euler-Bernoulli fallback, while the default FEniCSx branch carries the active Timoshenko/UFL workflow.
 
 ## 6. Solver Layer
@@ -121,6 +146,6 @@ These are intentionally kept for future reduction, surrogate, and inversion work
 
 Near-term implementation order:
 
-1. Push the default `orchard_fem.fenicsx` branch from modal and frequency-response solves toward tighter benchmark-backed validation.
-2. Extend the first-harmonic nonlinear frequency workflow toward higher-order harmonics only after the main FEniCSx branch is stable.
-3. Move selected assembly paths closer to PETSc-native data structures once the FEniCSx branch can represent orchard topology cleanly.
+1. Replace remaining non-coincident parent-child penalty links with a stronger FEniCSx constraint strategy.
+2. Move selected assembly paths closer to PETSc-native data structures once the FEniCSx branch can represent orchard topology cleanly.
+3. Extend the first-harmonic nonlinear frequency workflow toward higher-order harmonics only after the main FEniCSx branch is stable.

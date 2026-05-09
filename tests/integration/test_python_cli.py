@@ -126,6 +126,7 @@ def test_python_module_entrypoint_shows_help() -> None:
     assert "modal" in result.stdout
     assert "visualize" in result.stdout
     assert "plot-frequency-response" in result.stdout
+    assert "import-skeleton" in result.stdout
     assert "doctor" in result.stdout
     assert "full-validate" in result.stdout
     assert "verify" in result.stdout
@@ -143,6 +144,7 @@ def test_cli_parser_registers_expected_subcommands() -> None:
     assert "modal" in help_text
     assert "visualize" in help_text
     assert "plot-frequency-response" in help_text
+    assert "import-skeleton" in help_text
     assert "demo-suite" in help_text
     assert "verify" in help_text
     assert "doctor" in help_text

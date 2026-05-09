@@ -22,7 +22,48 @@ def resolve_branch_station(branch: dict, target_node) -> float:
 
 
 def resolve_branch_point(branch: dict, station: float) -> list[float]:
-    return lerp(branch["start"], branch["end"], station)
+    points = branch.get("points")
+    if not points:
+        return lerp(branch["start"], branch["end"], station)
+    if len(points) < 2:
+        raise RuntimeError(f"Branch '{branch['id']}' points must contain at least two points")
+
+    clamped_station = max(0.0, min(1.0, station))
+    segment_lengths: list[float] = []
+    total_length = 0.0
+    for index in range(len(points) - 1):
+        length = sum(
+            (float(points[index + 1][axis]) - float(points[index][axis])) ** 2
+            for axis in range(3)
+        ) ** 0.5
+        segment_lengths.append(length)
+        total_length += length
+    if total_length <= 1.0e-12:
+        return [float(value) for value in points[0]]
+
+    target_length = clamped_station * total_length
+    traversed = 0.0
+    for index, segment_length in enumerate(segment_lengths):
+        if segment_length <= 1.0e-12:
+            continue
+        if traversed + segment_length >= target_length:
+            return lerp(
+                points[index],
+                points[index + 1],
+                (target_length - traversed) / segment_length,
+            )
+        traversed += segment_length
+    return [float(value) for value in points[-1]]
+
+
+def branch_polyline_points(branch: dict) -> list[list[float]]:
+    points = branch.get("points")
+    if points:
+        return [[float(value) for value in point] for point in points]
+    return [
+        [float(value) for value in branch["start"]],
+        [float(value) for value in branch["end"]],
+    ]
 
 
 def build_branch_lookup(model: dict) -> Dict[str, dict]:

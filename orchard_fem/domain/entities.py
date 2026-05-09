@@ -74,6 +74,7 @@ class FruitAttachment:
     mass: float
     stiffness: float
     damping: float
+    target_component: str = "ux"
 
 
 @dataclass(frozen=True)

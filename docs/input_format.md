@@ -14,6 +14,19 @@ This document summarizes the current JSON input format used by the orchard vibra
 - `analysis`: frequency-response or time-history settings.
 - `observations`: branch or fruit outputs to record.
 
+## Skeleton Import
+
+Use the CLI converter when the upstream data is a 3D centerline skeleton:
+
+```bash
+python -m orchard_fem import-skeleton examples/skeleton_orchard.json build/orchard_model.json
+```
+
+The skeleton format accepts branch `points`, radius shorthand fields such as
+`outer_radius_root` / `outer_radius_tip`, optional fruits, clamps, joints, excitation,
+analysis, and observations. The converter emits the solver-ready JSON described below.
+It does not invent an excitation or analysis block; those must be provided explicitly.
+
 ## Materials
 
 Each material entry supports:
@@ -36,11 +49,20 @@ Each branch entry supports:
 - `level`
 - `start`: `[x, y, z]`
 - `end`: `[x, y, z]`
+- `points`: optional polyline centerline, `[[x, y, z], ...]`; when present it overrides straight `start/end` stationing while still exporting `start` and `end` for compatibility
 - `discretization.num_elements`
 - `discretization.hotspot`
 - `stations`
 
-`num_elements` controls how many 2-node Euler-Bernoulli beam elements are used along the branch centerline.
+`num_elements` controls how many 2-node embedded beam elements are used along the branch centerline. For polyline branches, stations are measured by accumulated arc length.
+
+For quick model construction, a station may use the default circular shorthand:
+
+```json
+{"s": 0.0, "shorthand": "circular", "outer_radius": 0.025}
+```
+
+This expands to concentric `pith_default`, `xylem_default`, and `phloem_default` regions. Those material IDs must exist in `materials`.
 
 Each station entry supports:
 
@@ -97,6 +119,11 @@ Each fruit entry supports:
 - `mass`
 - `stiffness`
 - `damping`
+- `target_component`: translational branch component coupled to the fruit DOF, default `ux`; use `uz` when fruit gravity should act in the default vertical gravity direction
+
+Fruits are represented as concentrated mass plus spring-damper attachments. When
+`include_gravity_prestress` is enabled, fruit self-weight is added to the static preload
+through the configured `target_component`.
 
 ## Clamps
 

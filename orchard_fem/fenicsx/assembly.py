@@ -141,6 +141,7 @@ def assemble_fenicsx_system(
     operator_bundle = _augment_operators_with_joints(
         model,
         space_bundle,
+        resolved_spec,
         operator_bundle,
     )
     stages.append(
@@ -154,6 +155,7 @@ def assemble_fenicsx_system(
     operator_bundle = _augment_operators_with_auto_nonlinear_links(
         model,
         space_bundle,
+        resolved_spec,
         operator_bundle,
     )
     stages.append(
@@ -168,6 +170,7 @@ def assemble_fenicsx_system(
     operator_bundle = _augment_operators_with_nonlinear_clamps(
         model,
         space_bundle,
+        resolved_spec,
         operator_bundle,
     )
     stages.append(
@@ -181,6 +184,7 @@ def assemble_fenicsx_system(
     operator_bundle = _augment_operators_with_fruits(
         model,
         space_bundle,
+        resolved_spec,
         operator_bundle,
     )
     stages.append(

@@ -20,8 +20,9 @@ Implemented today:
 - PETSc/SLEPc-backed modal analysis.
 - Frequency-response and Newmark time-history workflows.
 - Main-workflow backend selection with FEniCSx as the default solver branch and the native beam solver as an explicit fallback.
+- Skeleton-to-solver JSON import for 3D orchard centerline data, including polyline branches and default circular sections.
 - Multi-component observations and trajectory plots.
-- Gravity prestress, default circular section helpers, explicit rotational joint laws, and auto nonlinear-link injection.
+- Gravity prestress, fruit self-weight, default circular section helpers, explicit rotational joint laws, and auto nonlinear-link injection.
 - Package-native validation and demo regeneration commands.
 
 Current limitations:
@@ -105,6 +106,7 @@ Available commands:
 - `modal`: export modal frequencies and summary data.
 - `visualize`: generate geometry, response, and trajectory figures.
 - `plot-frequency-response`: plot a frequency-response CSV directly.
+- `import-skeleton`: convert a 3D orchard skeleton JSON into solver-ready Orchard FEM JSON.
 - `demo-suite`: regenerate standard FEniCSx demo CSV and figure artifacts.
 - `verify`: run validation in the current environment.
 - `full-validate`: orchestrate `orchard-dev` and `orchard-fenicsx` validation flows.

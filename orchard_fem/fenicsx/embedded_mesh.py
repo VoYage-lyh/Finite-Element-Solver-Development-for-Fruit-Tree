@@ -62,23 +62,39 @@ def build_embedded_line_mesh_spec(model: OrchardModel) -> EmbeddedLineMeshSpec:
     branch_ids: list[str] = []
     branch_element_indices: list[int] = []
 
-    def register_point(point: Vec3) -> int:
+    explicit_joint_children = {joint.child_branch_id for joint in model.joints}
+    auto_nonlinear_levels = set(model.analysis.auto_nonlinear_levels)
+
+    def register_point(point: Vec3, *, force_new: bool = False) -> int:
         key = _point_key(point)
-        existing = point_index_by_key.get(key)
-        if existing is not None:
-            return existing
+        if not force_new:
+            existing = point_index_by_key.get(key)
+            if existing is not None:
+                return existing
 
         index = len(points)
         points.append((point.x, point.y, point.z))
-        point_index_by_key[key] = index
+        if not force_new:
+            point_index_by_key[key] = index
         return index
 
     for branch in model.branches:
         num_elements = max(branch.discretization.num_elements, 1)
-        node_indices = [
-            register_point(branch.path.point_at(node_index / num_elements))
-            for node_index in range(num_elements + 1)
-        ]
+        force_independent_root = (
+            branch.parent_branch_id is not None
+            and (
+                branch.branch_id in explicit_joint_children
+                or branch.level in auto_nonlinear_levels
+            )
+        )
+        node_indices = []
+        for node_index in range(num_elements + 1):
+            node_indices.append(
+                register_point(
+                    branch.path.point_at(node_index / num_elements),
+                    force_new=node_index == 0 and force_independent_root,
+                )
+            )
 
         for element_index in range(num_elements):
             first = node_indices[element_index]

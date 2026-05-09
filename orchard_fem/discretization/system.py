@@ -14,6 +14,7 @@ from orchard_fem.discretization.dofs import DOFManager, branch_dof, resolve_node
 from orchard_fem.discretization.matrix_ops import add_pair_penalty, scatter, zero_matrix
 from orchard_fem.discretization.types import (
     COMPONENT_LABELS,
+    COMPONENT_INDEX,
     CONSTRAINT_PENALTY,
     BranchElementState,
     BranchNodeState,
@@ -310,9 +311,32 @@ class OrchardSystemAssembler:
             fruit_dof = fruit_dofs[fruit.fruit_id]
             nodes = branch_nodes[fruit.branch_id]
             nearest_node = min(nodes, key=lambda node: fabs(node.station - fruit.location_s))
-            coupled_branch_dof = nearest_node.dofs[0]
+            try:
+                component_index = COMPONENT_INDEX[fruit.target_component]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Unsupported fruit target_component '{fruit.target_component}' "
+                    f"for fruit '{fruit.fruit_id}'"
+                ) from exc
+            if component_index >= 3:
+                raise ValueError(
+                    f"Fruit '{fruit.fruit_id}' must target a translational component "
+                    "(ux, uy, or uz)."
+                )
+            coupled_branch_dof = nearest_node.dofs[component_index]
 
             mass[fruit_dof][fruit_dof] += max(fruit.mass, 1.0e-9)
+            if apply_gravity_prestress:
+                gravity_components = (
+                    gravity_direction.x,
+                    gravity_direction.y,
+                    gravity_direction.z,
+                )
+                gravity_load[fruit_dof] += (
+                    max(fruit.mass, 0.0)
+                    * gravity_scale
+                    * gravity_components[component_index]
+                )
 
             stiffness_value = max(fruit.stiffness, 1.0e-6)
             stiffness[fruit_dof][fruit_dof] += stiffness_value

@@ -9,6 +9,7 @@ from orchard_fem.discretization.beam.local_matrices import build_local_geometric
 from orchard_fem.discretization.beam.transforms import build_transformation_matrix
 from orchard_fem.discretization.types import (
     COMPONENT_LABELS,
+    COMPONENT_INDEX,
     NonlinearLinkDefinition,
     NonlinearLinkKind,
 )
@@ -20,7 +21,7 @@ from orchard_fem.fenicsx.beam_forms import (
     EmbeddedBeamFormBundle,
 )
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
-from orchard_fem.fenicsx.dofs import resolve_embedded_beam_component_dof
+from orchard_fem.fenicsx.dofs import resolve_embedded_beam_component_dof_by_vertex
 from orchard_fem.fenicsx.fields import EmbeddedBeamFunctionSpaceBundle
 from orchard_fem.topology import Vec3
 
@@ -108,16 +109,20 @@ def _accumulate_owned_matrix_value(
     )
 
 
-def _nearest_fruit_anchor_point(model: OrchardModel, fruit) -> tuple[float, float, float]:
-    branch = model.require_branch(fruit.branch_id)
-    num_elements = max(branch.discretization.num_elements, 1)
-    node_index = min(
-        range(num_elements + 1),
-        key=lambda candidate: abs((candidate / num_elements) - fruit.location_s),
-    )
-    station = node_index / num_elements
-    point = branch.path.point_at(station)
-    return point.x, point.y, point.z
+def _fruit_component_index(fruit) -> int:
+    try:
+        component_index = COMPONENT_INDEX[fruit.target_component]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported fruit target_component '{fruit.target_component}' "
+            f"for fruit '{fruit.fruit_id}'"
+        ) from exc
+    if component_index >= 3:
+        raise ValueError(
+            f"Fruit '{fruit.fruit_id}' must target a translational component "
+            "(ux, uy, or uz)."
+        )
+    return component_index
 
 
 def _nearest_parent_node_index(model: OrchardModel, child_branch_id: str, parent_branch_id: str) -> int:
@@ -173,6 +178,8 @@ def _append_joint_nonlinear_links(
         if joint.law.kind == JointLawKind.POLYNOMIAL:
             if abs(joint.law.cubic_scale) <= 0.0:
                 continue
+            if child_root[component_index] == nearest_parent[component_index]:
+                continue
             nonlinear_links.append(
                 NonlinearLinkDefinition(
                     label=label,
@@ -185,6 +192,8 @@ def _append_joint_nonlinear_links(
             continue
 
         if joint.law.kind == JointLawKind.GAP_FRICTION:
+            if child_root[component_index] == nearest_parent[component_index]:
+                continue
             nonlinear_links.append(
                 NonlinearLinkDefinition(
                     label=label,
@@ -215,21 +224,23 @@ def _normalize_gravity_direction(direction: tuple[float, float, float]) -> Vec3:
 def _resolve_branch_node_dofs(
     model: OrchardModel,
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    mesh_spec: EmbeddedLineMeshSpec,
 ) -> dict[str, list[tuple[int, int, int, int, int, int]]]:
     components = ("ux", "uy", "uz", "rx", "ry", "rz")
     branch_node_dofs: dict[str, list[tuple[int, int, int, int, int, int]]] = {}
 
     for branch in model.branches:
-        num_elements = max(branch.discretization.num_elements, 1)
+        cell_indices = mesh_spec.cells_for_branch(branch.branch_id)
+        if not cell_indices:
+            raise ValueError(f"Branch '{branch.branch_id}' has no mesh cells")
+        vertex_indices = [mesh_spec.cells[cell_indices[0]][0]]
+        vertex_indices.extend(mesh_spec.cells[cell_index][1] for cell_index in cell_indices)
         nodes: list[tuple[int, int, int, int, int, int]] = []
-        for node_index in range(num_elements + 1):
-            station = node_index / num_elements
-            point = branch.path.point_at(station)
-            point_tuple = (point.x, point.y, point.z)
+        for vertex_index in vertex_indices:
             dofs = tuple(
-                resolve_embedded_beam_component_dof(
+                resolve_embedded_beam_component_dof_by_vertex(
                     space_bundle,
-                    point_tuple,
+                    vertex_index,
                     component,
                 )
                 for component in components
@@ -297,6 +308,26 @@ def _build_gravity_load_vector(
                 _accumulate_owned_vector_value(load_vector, owned_rows, dofs[0], nodal_force[0])
                 _accumulate_owned_vector_value(load_vector, owned_rows, dofs[1], nodal_force[1])
                 _accumulate_owned_vector_value(load_vector, owned_rows, dofs[2], nodal_force[2])
+
+    gravity_components = (
+        gravity_direction.x,
+        gravity_direction.y,
+        gravity_direction.z,
+        0.0,
+        0.0,
+        0.0,
+    )
+    for fruit in model.fruits:
+        fruit_dof = operator_bundle.fruit_dofs.get(fruit.fruit_id)
+        if fruit_dof is None:
+            continue
+        component_index = _fruit_component_index(fruit)
+        _accumulate_owned_vector_value(
+            load_vector,
+            owned_rows,
+            fruit_dof,
+            max(fruit.mass, 0.0) * gravity_scale * gravity_components[component_index],
+        )
 
     load_vector.assemblyBegin()
     load_vector.assemblyEnd()
@@ -444,11 +475,12 @@ def _build_geometric_stiffness_matrix(
 def _augment_operators_with_joints(
     model: OrchardModel,
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    mesh_spec: EmbeddedLineMeshSpec,
     operator_bundle: EmbeddedBeamOperatorBundle,
 ) -> EmbeddedBeamOperatorBundle:
     require_dolfinx()
 
-    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle)
+    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle, mesh_spec)
     stiffness_matrix = operator_bundle.stiffness_matrix.duplicate(copy=True)
     _allow_new_nonzero_allocation(stiffness_matrix)
     owned_rows = stiffness_matrix.getOwnershipRange()
@@ -474,6 +506,8 @@ def _augment_operators_with_joints(
             penalty = _joint_component_penalty(component_index, joint)
             first_dof = child_root[component_index]
             second_dof = parent_root[component_index]
+            if first_dof == second_dof:
+                continue
             _accumulate_owned_matrix_value(
                 stiffness_matrix,
                 owned_rows,
@@ -530,6 +564,7 @@ def _augment_operators_with_joints(
 def _augment_operators_with_auto_nonlinear_links(
     model: OrchardModel,
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    mesh_spec: EmbeddedLineMeshSpec,
     operator_bundle: EmbeddedBeamOperatorBundle,
 ) -> EmbeddedBeamOperatorBundle:
     require_dolfinx()
@@ -538,7 +573,7 @@ def _augment_operators_with_auto_nonlinear_links(
     if not auto_nonlinear_levels:
         return operator_bundle
 
-    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle)
+    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle, mesh_spec)
     explicit_joint_children = {joint.child_branch_id for joint in model.joints}
     nonlinear_links = list(operator_bundle.nonlinear_links)
 
@@ -555,11 +590,15 @@ def _augment_operators_with_auto_nonlinear_links(
             branch.branch_id,
             branch.parent_branch_id,
         )
+        first_dof = branch_node_dofs[branch.branch_id][0][0]
+        second_dof = branch_node_dofs[branch.parent_branch_id][parent_node_index][0]
+        if first_dof == second_dof:
+            continue
         nonlinear_links.append(
             NonlinearLinkDefinition(
                 label=f"auto_joint:{branch.branch_id}",
-                first_dof=branch_node_dofs[branch.branch_id][0][0],
-                second_dof=branch_node_dofs[branch.parent_branch_id][parent_node_index][0],
+                first_dof=first_dof,
+                second_dof=second_dof,
                 kind=NonlinearLinkKind.CUBIC_SPRING,
                 cubic_stiffness=model.analysis.auto_nonlinear_cubic_scale,
             )
@@ -582,6 +621,7 @@ def _augment_operators_with_auto_nonlinear_links(
 def _augment_operators_with_nonlinear_clamps(
     model: OrchardModel,
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    mesh_spec: EmbeddedLineMeshSpec,
     operator_bundle: EmbeddedBeamOperatorBundle,
 ) -> EmbeddedBeamOperatorBundle:
     require_dolfinx()
@@ -592,7 +632,7 @@ def _augment_operators_with_nonlinear_clamps(
     if not nonlinear_clamps:
         return operator_bundle
 
-    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle)
+    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle, mesh_spec)
     stiffness_matrix = operator_bundle.stiffness_matrix.duplicate(copy=True)
     _allow_new_nonzero_allocation(stiffness_matrix)
     owned_rows = stiffness_matrix.getOwnershipRange()
@@ -659,7 +699,7 @@ def _augment_operators_with_gravity_prestress(
     if not model.analysis.include_gravity_prestress:
         return operator_bundle
 
-    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle)
+    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle, mesh_spec)
     gravity_load_vector = _build_gravity_load_vector(
         model,
         space_bundle,
@@ -709,6 +749,7 @@ def _augment_operators_with_gravity_prestress(
 def _augment_operators_with_fruits(
     model: OrchardModel,
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    mesh_spec: EmbeddedLineMeshSpec,
     operator_bundle: EmbeddedBeamOperatorBundle,
 ) -> EmbeddedBeamOperatorBundle:
     require_dolfinx()
@@ -737,18 +778,22 @@ def _augment_operators_with_fruits(
     stiffness_owned_rows = stiffness_matrix.getOwnershipRange()
     mass_owned_rows = mass_matrix.getOwnershipRange()
     damping_owned_rows = damping_matrix.getOwnershipRange()
+    branch_node_dofs = _resolve_branch_node_dofs(model, space_bundle, mesh_spec)
 
     fruit_dofs: dict[str, int] = {}
     for fruit_index, fruit in enumerate(model.fruits):
         fruit_dof = base_size + fruit_index
         fruit_dofs[fruit.fruit_id] = fruit_dof
 
-        anchor_point = _nearest_fruit_anchor_point(model, fruit)
-        coupled_branch_dof = resolve_embedded_beam_component_dof(
-            space_bundle,
-            anchor_point,
-            "ux",
+        branch = model.require_branch(fruit.branch_id)
+        num_elements = max(branch.discretization.num_elements, 1)
+        node_index = min(
+            range(num_elements + 1),
+            key=lambda candidate: abs((candidate / num_elements) - fruit.location_s),
         )
+        coupled_branch_dof = branch_node_dofs[fruit.branch_id][node_index][
+            _fruit_component_index(fruit)
+        ]
 
         _accumulate_owned_matrix_value(
             mass_matrix,

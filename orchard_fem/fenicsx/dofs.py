@@ -54,6 +54,12 @@ def _extract_parent_dofs(located_dofs: Any) -> np.ndarray:
     return dof_array
 
 
+def _ensure_vertex_connectivity(mesh: Any) -> None:
+    topology = mesh.topology
+    topology.create_connectivity(0, topology.dim)
+    topology.create_connectivity(topology.dim, 0)
+
+
 def resolve_embedded_beam_component_dof(
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
     point: tuple[float, float, float],
@@ -76,6 +82,8 @@ def resolve_embedded_beam_component_dof(
 
     component_space = parent_subspace.sub(component_index)
     collapsed_space, _ = component_space.collapse()
+    _ensure_vertex_connectivity(space_bundle.mesh)
+    _ensure_vertex_connectivity(collapsed_space.mesh)
     dof_pairs = dolfinx_fem.locate_dofs_geometrical(
         (component_space, collapsed_space),
         _point_marker(point, atol),
@@ -90,6 +98,46 @@ def resolve_embedded_beam_component_dof(
     if len(dofs) != 1:
         raise ValueError(
             f"Expected exactly one DOF at point {point} for component {component}, found {len(dofs)}."
+        )
+    return int(dofs[0])
+
+
+def resolve_embedded_beam_component_dof_by_vertex(
+    space_bundle: EmbeddedBeamFunctionSpaceBundle,
+    vertex_index: int,
+    component: str,
+) -> int:
+    require_dolfinx()
+
+    from dolfinx import fem as dolfinx_fem
+
+    if component in _DISPLACEMENT_COMPONENTS:
+        parent_subspace = space_bundle.displacement_space
+        component_index = _DISPLACEMENT_COMPONENTS[component]
+    elif component in _ROTATION_COMPONENTS:
+        parent_subspace = space_bundle.rotation_space
+        component_index = _ROTATION_COMPONENTS[component]
+    else:
+        raise ValueError(f"Unsupported embedded beam component: {component}")
+
+    component_space = parent_subspace.sub(component_index)
+    collapsed_space, _ = component_space.collapse()
+    _ensure_vertex_connectivity(space_bundle.mesh)
+    _ensure_vertex_connectivity(collapsed_space.mesh)
+    dof_pairs = dolfinx_fem.locate_dofs_topological(
+        (component_space, collapsed_space),
+        0,
+        np.asarray([int(vertex_index)], dtype=np.int32),
+    )
+    dofs = np.unique(_extract_parent_dofs(dof_pairs))
+    if dofs.size == 0:
+        raise ValueError(
+            f"No DOF found at vertex {vertex_index} for component {component}."
+        )
+    if len(dofs) != 1:
+        raise ValueError(
+            f"Expected exactly one DOF at vertex {vertex_index} for component "
+            f"{component}, found {len(dofs)}."
         )
     return int(dofs[0])
 

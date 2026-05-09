@@ -22,8 +22,11 @@ from orchard_fem.domain import (
     parse_vec3,
 )
 from orchard_fem.io.loaders.payload import load_model_payload
-from orchard_fem.io.loaders.topology import build_topology_from_model_payload
-from orchard_fem.topology import BranchPath, ObservationPoint
+from orchard_fem.io.loaders.topology import (
+    build_topology_from_model_payload,
+    parse_branch_path_payload,
+)
+from orchard_fem.topology import ObservationPoint
 
 
 def _parse_observation_target_components(observation: dict) -> list[str]:
@@ -72,10 +75,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
             branch_id=str(branch["id"]),
             parent_branch_id=branch.get("parent_branch_id"),
             level=int(branch["level"]),
-            path=BranchPath(
-                start=parse_vec3(branch["start"]),
-                end=parse_vec3(branch["end"]),
-            ),
+            path=parse_branch_path_payload(branch),
             section_series=parse_section_series(
                 branch["stations"],
                 available_material_ids=available_material_ids,
@@ -116,6 +116,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
             mass=float(fruit["mass"]),
             stiffness=float(fruit["stiffness"]),
             damping=float(fruit["damping"]),
+            target_component=str(fruit.get("target_component", "ux")),
         )
         for fruit in payload.get("fruits", [])
     ]

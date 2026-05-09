@@ -1,0 +1,75 @@
+{
+  "metadata": {
+    "name": "skeleton_orchard_import_demo"
+  },
+  "branches": [
+    {
+      "id": "trunk",
+      "parent_branch_id": null,
+      "level": 0,
+      "points": [[0.0, 0.0, 0.0], [0.02, 0.0, 0.8], [0.0, 0.0, 1.6]],
+      "outer_radius_root": 0.045,
+      "outer_radius_tip": 0.028,
+      "target_element_length": 0.25
+    },
+    {
+      "id": "primary_left",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "points": [[0.02, 0.0, 0.8], [-0.45, 0.05, 1.35], [-0.9, 0.1, 1.55]],
+      "outer_radius_root": 0.026,
+      "outer_radius_tip": 0.014,
+      "target_element_length": 0.20
+    }
+  ],
+  "fruits": [
+    {
+      "id": "fruit_primary",
+      "branch_id": "primary_left",
+      "location_s": 0.75,
+      "target_component": "uz",
+      "mass": 0.12,
+      "stiffness": 850.0,
+      "damping": 0.4
+    }
+  ],
+  "clamps": [
+    {
+      "branch_id": "trunk",
+      "support_stiffness": 1.0,
+      "support_damping": 0.0
+    }
+  ],
+  "excitation": {
+    "kind": "harmonic_force",
+    "target_branch_id": "trunk",
+    "target_node": "tip",
+    "target_component": "ux",
+    "amplitude": 1.0,
+    "phase_degrees": 0.0,
+    "driving_frequency_hz": 5.0
+  },
+  "analysis": {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 12.0,
+    "frequency_steps": 12,
+    "include_gravity_prestress": true,
+    "output_csv": "skeleton_frequency_response.csv"
+  },
+  "observations": [
+    {
+      "id": "obs_trunk",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "tip",
+      "target_components": ["ux", "uz"]
+    },
+    {
+      "id": "obs_fruit",
+      "target_type": "fruit",
+      "target_id": "fruit_primary"
+    }
+  ]
+}

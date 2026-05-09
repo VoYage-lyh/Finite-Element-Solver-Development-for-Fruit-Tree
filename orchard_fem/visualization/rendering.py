@@ -6,6 +6,7 @@ from typing import Optional, Sequence, Tuple
 from orchard_fem.visualization.dependencies import require_plotting_dependencies
 from orchard_fem.visualization.io import build_series_map, choose_measurement_column
 from orchard_fem.visualization.model_scene import (
+    branch_polyline_points,
     build_branch_lookup,
     project_xz,
     resolve_branch_point,
@@ -35,17 +36,24 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
     branch_lookup = build_branch_lookup(model)
 
     for branch in branches:
-        start_x, start_z = project_xz(branch["start"])
-        end_x, end_z = project_xz(branch["end"])
+        polyline = branch_polyline_points(branch)
+        x_values = []
+        z_values = []
+        for point in polyline:
+            x, z = project_xz(point)
+            x_values.append(x)
+            z_values.append(z)
         level = int(branch.get("level", 0))
         color = plt.cm.YlGn(0.35 + 0.55 * (level / max_level))
         ax.plot(
-            [start_x, end_x],
-            [start_z, end_z],
+            x_values,
+            z_values,
             color=color,
             linewidth=2.8,
             solid_capstyle="round",
         )
+        end_x = x_values[-1]
+        end_z = z_values[-1]
         ax.text(end_x, end_z, branch["id"], fontsize=9, color=color, ha="left", va="bottom")
 
     for fruit in model.get("fruits", []):
