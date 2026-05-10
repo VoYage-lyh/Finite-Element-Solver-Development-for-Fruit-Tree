@@ -30,7 +30,16 @@ class EmbeddedBeamModalExperimentResult:
 
 
 def _require_supported_modal_model(model: OrchardModel) -> None:
-    del model
+    if not model.branches:
+        raise ValueError("Modal analysis requires at least one branch.")
+    if not model.clamps:
+        raise ValueError("Modal analysis requires at least one clamp boundary condition.")
+    branch_ids = {b.branch_id for b in model.branches}
+    if model.excitation.target_branch_id not in branch_ids:
+        raise ValueError(
+            f"Excitation target_branch_id '{model.excitation.target_branch_id}' "
+            "does not match any branch in the model."
+        )
 
 
 def _solve_petsc_generalized_modes(

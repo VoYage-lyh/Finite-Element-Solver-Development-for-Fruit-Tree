@@ -292,6 +292,7 @@ def augment_operators_with_gravity_prestress(
         operator_bundle,
         stiffness_matrix=stiffness_matrix,
         gravity_load_vector=gravity_load_vector,
+        gravity_static_displacement=static_displacement,
         geometric_stiffness_matrix=geometric_stiffness_matrix,
         prestress_axial_forces=prestress_axial_forces,
     )

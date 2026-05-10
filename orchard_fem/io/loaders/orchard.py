@@ -9,6 +9,7 @@ from orchard_fem.domain import (
     ClampBoundaryCondition,
     ExcitationKind,
     FruitAttachment,
+    FruitDistributionPolicy,
     HarmonicExcitation,
     JointDefinition,
     JointLawDefinition,
@@ -121,6 +122,24 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         for fruit in payload.get("fruits", [])
     ]
 
+    fruit_policy: FruitDistributionPolicy | None = None
+    policy_payload = payload.get("fruit_distribution_policy")
+    if policy_payload is not None:
+        fruit_policy = FruitDistributionPolicy(
+            total_fruit_count=int(policy_payload["total_fruit_count"]),
+            seed=int(policy_payload.get("seed", 2026)),
+            include_terminal_primary=bool(policy_payload.get("include_terminal_primary", True)),
+            detachment_displacement_m=float(policy_payload.get("detachment_displacement_m", 0.010)),
+            attachment_damping_ratio=float(policy_payload.get("attachment_damping_ratio", 0.05)),
+            attachment_component=str(policy_payload.get("attachment_component", "ux")),
+            count_weight_cv=float(policy_payload.get("count_weight_cv", 0.25)),
+            long_axis_cv=float(policy_payload.get("long_axis_cv", 0.12)),
+            short_axis_cv=float(policy_payload.get("short_axis_cv", 0.12)),
+            mass_residual_cv=float(policy_payload.get("mass_residual_cv", 0.12)),
+            detachment_force_cv=float(policy_payload.get("detachment_force_cv", 0.15)),
+            crack_probability=float(policy_payload.get("crack_probability", 0.65)),
+        )
+
     clamps = [
         ClampBoundaryCondition(
             branch_id=str(clamp["branch_id"]),
@@ -194,7 +213,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         for observation in payload.get("observations", [])
     ]
 
-    return OrchardModel(
+    model_without_policy = OrchardModel(
         metadata=metadata,
         materials=materials,
         topology=topology,
@@ -205,4 +224,14 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         excitation=excitation,
         analysis=analysis,
         observations=observations,
+        fruit_policy=fruit_policy,
     )
+
+    if fruit_policy is not None and not fruits:
+        from orchard_fem.io.fruit_distribution import generate_fruit_attachments_for_model
+
+        generated = generate_fruit_attachments_for_model(model_without_policy, fruit_policy)
+        from dataclasses import replace
+        return replace(model_without_policy, fruits=generated)
+
+    return model_without_policy

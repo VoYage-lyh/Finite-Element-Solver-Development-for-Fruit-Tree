@@ -58,7 +58,20 @@ class UflElasticOperatorBridge:
 
 
 def _require_supported_time_history_model(model: OrchardModel) -> None:
-    del model
+    if not model.branches:
+        raise ValueError("Time history analysis requires at least one branch.")
+    if not model.clamps:
+        raise ValueError("Time history analysis requires at least one clamp boundary condition.")
+    branch_ids = {b.branch_id for b in model.branches}
+    if model.excitation.target_branch_id not in branch_ids:
+        raise ValueError(
+            f"Excitation target_branch_id '{model.excitation.target_branch_id}' "
+            "does not match any branch in the model."
+        )
+    if model.analysis.time_step_seconds <= 0.0:
+        raise ValueError(
+            f"time_step_seconds must be positive, got {model.analysis.time_step_seconds}."
+        )
 
 
 def _resolve_rayleigh_coefficients(model: OrchardModel) -> tuple[float, float]:
@@ -703,8 +716,23 @@ def solve_embedded_beam_time_history_experiment(
     )
     effective_solver = _build_direct_solver(effective_matrix)
 
-    displacement = stiffness_matrix.createVecRight()
-    displacement.set(0.0)
+    gravity_static = experiment.operator_bundle.gravity_static_displacement
+    if gravity_static is not None:
+        displacement = _copy_vector(gravity_static)
+        if len(displacement.getArray(readonly=True)) < stiffness_matrix.getSize()[0]:
+            extended = stiffness_matrix.createVecRight()
+            extended.set(0.0)
+            src_size = len(gravity_static.getArray(readonly=True))
+            extended.setValues(
+                list(range(src_size)),
+                gravity_static.getValues(list(range(src_size))),
+            )
+            extended.assemblyBegin()
+            extended.assemblyEnd()
+            displacement = extended
+    else:
+        displacement = stiffness_matrix.createVecRight()
+        displacement.set(0.0)
     velocity = stiffness_matrix.createVecRight()
     velocity.set(0.0)
     acceleration = _build_initial_acceleration(

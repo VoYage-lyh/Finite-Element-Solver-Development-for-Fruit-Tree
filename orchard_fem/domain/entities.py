@@ -118,6 +118,33 @@ class AnalysisSettings:
 
 
 @dataclass(frozen=True)
+class FruitDistributionPolicy:
+    """Regression-based fruit placement policy.
+
+    When present on an OrchardModel, fruit attachments are auto-generated
+    at load time via `generate_fruit_attachments_for_model`.  Any explicit
+    `fruits` list in the JSON takes precedence over this policy.
+
+    Stiffness derivation:
+        k_total = fruit_count * mean_detachment_force_N / detachment_displacement_m
+    Damping derivation:
+        c = 2 * attachment_damping_ratio * sqrt(mass * k_total)
+    """
+    total_fruit_count: int
+    seed: int = 2026
+    include_terminal_primary: bool = True
+    detachment_displacement_m: float = 0.010
+    attachment_damping_ratio: float = 0.05
+    attachment_component: str = "ux"
+    count_weight_cv: float = 0.25
+    long_axis_cv: float = 0.12
+    short_axis_cv: float = 0.12
+    mass_residual_cv: float = 0.12
+    detachment_force_cv: float = 0.15
+    crack_probability: float = 0.65
+
+
+@dataclass(frozen=True)
 class OrchardModel:
     metadata: OrchardMetadata
     materials: list[MaterialProperties]
@@ -129,6 +156,7 @@ class OrchardModel:
     excitation: HarmonicExcitation
     analysis: AnalysisSettings
     observations: list[ObservationPoint]
+    fruit_policy: FruitDistributionPolicy | None = None
 
     def require_branch(self, branch_id: str) -> BranchDefinition:
         for branch in self.branches:

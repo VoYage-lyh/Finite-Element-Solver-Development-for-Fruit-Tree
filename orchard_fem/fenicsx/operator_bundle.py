@@ -21,6 +21,7 @@ class EmbeddedBeamOperatorBundle:
     mass_matrix: Any
     attachment_damping_matrix: Any | None = None
     gravity_load_vector: Any | None = None
+    gravity_static_displacement: Any | None = None
     geometric_stiffness_matrix: Any | None = None
     prestress_axial_forces: dict[str, list[float]] = field(default_factory=dict)
     fruit_dofs: dict[str, int] = field(default_factory=dict)

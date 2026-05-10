@@ -61,7 +61,21 @@ def _frequency_grid(analysis) -> list[float]:
 
 
 def _require_supported_frequency_response_model(model: OrchardModel) -> None:
-    del model
+    if not model.branches:
+        raise ValueError("Frequency response analysis requires at least one branch.")
+    if not model.clamps:
+        raise ValueError("Frequency response analysis requires at least one clamp boundary condition.")
+    branch_ids = {b.branch_id for b in model.branches}
+    if model.excitation.target_branch_id not in branch_ids:
+        raise ValueError(
+            f"Excitation target_branch_id '{model.excitation.target_branch_id}' "
+            "does not match any branch in the model."
+        )
+    if model.analysis.frequency_start_hz >= model.analysis.frequency_end_hz:
+        raise ValueError(
+            f"frequency_start_hz ({model.analysis.frequency_start_hz}) must be less than "
+            f"frequency_end_hz ({model.analysis.frequency_end_hz})."
+        )
 
 
 def _resolve_rayleigh_coefficients(model: OrchardModel) -> tuple[float, float]:

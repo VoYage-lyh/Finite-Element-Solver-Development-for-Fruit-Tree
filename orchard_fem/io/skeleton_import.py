@@ -122,6 +122,16 @@ def _convert_branch(branch: dict[str, Any]) -> dict[str, Any]:
     return converted
 
 
+def _infer_terminal_branch_ids(branches: list[dict[str, Any]]) -> set[str]:
+    """Return branch ids that have no children (leaf nodes in the branch tree)."""
+    parent_ids = {
+        str(branch["parent_branch_id"])
+        for branch in branches
+        if branch.get("parent_branch_id") is not None
+    }
+    return {str(branch["id"]) for branch in branches} - parent_ids
+
+
 def convert_skeleton_payload_to_orchard_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if "branches" not in payload:
         raise ValueError("Skeleton payload must contain a branches array")
@@ -130,10 +140,18 @@ def convert_skeleton_payload_to_orchard_payload(payload: dict[str, Any]) -> dict
     if "excitation" not in payload:
         raise ValueError("Skeleton payload must contain an excitation block")
 
-    return {
+    raw_branches = payload["branches"]
+    terminal_ids = _infer_terminal_branch_ids(raw_branches)
+    converted_branches = []
+    for branch in raw_branches:
+        converted = _convert_branch(branch)
+        converted["is_terminal"] = str(branch["id"]) in terminal_ids
+        converted_branches.append(converted)
+
+    result: dict[str, Any] = {
         "metadata": dict(payload.get("metadata", {})),
         "materials": [dict(material) for material in payload.get("materials", DEFAULT_MATERIALS)],
-        "branches": [_convert_branch(branch) for branch in payload["branches"]],
+        "branches": converted_branches,
         "joints": [dict(joint) for joint in payload.get("joints", [])],
         "fruits": [dict(fruit) for fruit in payload.get("fruits", [])],
         "clamps": [dict(clamp) for clamp in payload.get("clamps", [])],
@@ -141,6 +159,11 @@ def convert_skeleton_payload_to_orchard_payload(payload: dict[str, Any]) -> dict
         "analysis": dict(payload["analysis"]),
         "observations": [dict(observation) for observation in payload.get("observations", [])],
     }
+
+    if "fruit_distribution_policy" in payload:
+        result["fruit_distribution_policy"] = dict(payload["fruit_distribution_policy"])
+
+    return result
 
 
 def convert_skeleton_file(input_path: Path, output_path: Path) -> Path:
