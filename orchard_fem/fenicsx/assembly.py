@@ -16,14 +16,19 @@ from orchard_fem.fenicsx.embedded_mesh import (
     build_embedded_line_mesh_spec,
 )
 from orchard_fem.fenicsx.fields import create_embedded_beam_function_space
+from orchard_fem.fenicsx.fruits import augment_operators_with_fruits
+from orchard_fem.fenicsx.gravity import augment_operators_with_gravity_prestress
+from orchard_fem.fenicsx.joints import (
+    augment_operators_with_auto_nonlinear_links,
+    augment_operators_with_joints,
+    augment_operators_with_nonlinear_clamps,
+)
+from orchard_fem.fenicsx.mpc import build_linear_branch_connection_mpc
 from orchard_fem.fenicsx.operators import (
-    EmbeddedBeamExperimentBundle,
-    _augment_operators_with_auto_nonlinear_links,
-    _augment_operators_with_fruits,
-    _augment_operators_with_gravity_prestress,
-    _augment_operators_with_joints,
-    _augment_operators_with_nonlinear_clamps,
     assemble_embedded_beam_operators,
+)
+from orchard_fem.fenicsx.operator_bundle import (
+    EmbeddedBeamExperimentBundle,
     EmbeddedBeamOperatorBundle,
 )
 
@@ -131,14 +136,29 @@ def assemble_fenicsx_system(
         effective_bcs = ()
     stages.append(_stage("boundary_conditions", bool(effective_bcs), f"count={len(effective_bcs)}"))
 
+    branch_connection_mpc = build_linear_branch_connection_mpc(
+        model,
+        space_bundle,
+        resolved_spec,
+    )
+    stages.append(
+        _stage(
+            "branch_connection_mpc",
+            branch_connection_mpc.enabled,
+            f"branches={len(branch_connection_mpc.constrained_branch_ids)}",
+        )
+    )
+
     operator_bundle = assemble_embedded_beam_operators(
         form_bundle,
         bcs=effective_bcs,
         diag=diag,
+        mpc=branch_connection_mpc.constraint,
+        mpc_constrained_branch_ids=branch_connection_mpc.constrained_branch_ids,
     )
     stages.append(_stage("base_operators", True, f"dofs={_operator_size(operator_bundle)}"))
 
-    operator_bundle = _augment_operators_with_joints(
+    operator_bundle = augment_operators_with_joints(
         model,
         space_bundle,
         resolved_spec,
@@ -152,7 +172,7 @@ def assemble_fenicsx_system(
         )
     )
 
-    operator_bundle = _augment_operators_with_auto_nonlinear_links(
+    operator_bundle = augment_operators_with_auto_nonlinear_links(
         model,
         space_bundle,
         resolved_spec,
@@ -167,7 +187,7 @@ def assemble_fenicsx_system(
         )
     )
 
-    operator_bundle = _augment_operators_with_nonlinear_clamps(
+    operator_bundle = augment_operators_with_nonlinear_clamps(
         model,
         space_bundle,
         resolved_spec,
@@ -181,7 +201,7 @@ def assemble_fenicsx_system(
         )
     )
 
-    operator_bundle = _augment_operators_with_fruits(
+    operator_bundle = augment_operators_with_fruits(
         model,
         space_bundle,
         resolved_spec,
@@ -196,7 +216,7 @@ def assemble_fenicsx_system(
         )
     )
 
-    operator_bundle = _augment_operators_with_gravity_prestress(
+    operator_bundle = augment_operators_with_gravity_prestress(
         model,
         space_bundle,
         resolved_spec,

@@ -22,8 +22,20 @@ from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
 from orchard_fem.fenicsx.frequency_response import (
     build_embedded_rayleigh_damping_matrix,
 )
-from orchard_fem.fenicsx.operators import (
+from orchard_fem.fenicsx.mpc import (
+    apply_mpc_to_vector_in_place,
+    backsubstitute_mpc_vector,
+)
+from orchard_fem.fenicsx.operator_bundle import (
     EmbeddedBeamExperimentBundle,
+)
+from orchard_fem.fenicsx.petsc_ops import (
+    accumulate_owned_matrix_value as _accumulate_owned_matrix_value,
+    accumulate_owned_vector_value as _accumulate_owned_vector_value,
+    add_matrix_copy as _add_matrix_in_place,
+    copy_matrix_like as _extend_matrix_like,
+    create_empty_aij_matrix_like as _create_empty_aij_matrix_like,
+    extend_vector_like as _extend_vector_like,
 )
 from orchard_fem.materials.base import build_material_lookup
 from orchard_fem.numerics import require_petsc
@@ -62,21 +74,6 @@ def _resolve_rayleigh_coefficients(model: OrchardModel) -> tuple[float, float]:
     return alpha, beta
 
 
-def _add_matrix_in_place(target: Any, increment: Any) -> Any:
-    require_petsc()
-
-    from petsc4py import PETSc
-
-    updated = target.duplicate(copy=True)
-    updated.axpy(
-        1.0,
-        increment,
-        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
-    )
-    updated.assemble()
-    return updated
-
-
 def _build_direct_solver(matrix: Any) -> Any:
     require_petsc()
 
@@ -111,78 +108,6 @@ def _solve_direct_system(solver: Any, rhs_vector: Any) -> Any:
             f"(reason={solver.getConvergedReason()})."
         )
     return solution
-
-
-def _create_empty_aij_matrix_like(matrix: Any) -> Any:
-    require_petsc()
-
-    from petsc4py import PETSc
-
-    created = PETSc.Mat().createAIJ(size=matrix.getSize(), comm=matrix.getComm())
-    created.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
-    created.setUp()
-    return created
-
-
-def _copy_owned_matrix_entries_into_target(source: Any, target: Any) -> None:
-    from petsc4py import PETSc
-
-    target_rows, target_columns = target.getSize()
-    ownership_start, ownership_end = source.getOwnershipRange()
-    for row_index in range(ownership_start, ownership_end):
-        if row_index >= target_rows:
-            continue
-        columns, values = source.getRow(row_index)
-        try:
-            filtered_columns = []
-            filtered_values = []
-            for column, value in zip(columns, values):
-                if int(column) >= target_columns:
-                    continue
-                filtered_columns.append(int(column))
-                filtered_values.append(float(value))
-            if filtered_columns:
-                target.setValues(
-                    row_index,
-                    filtered_columns,
-                    filtered_values,
-                    addv=PETSc.InsertMode.ADD_VALUES,
-                )
-        finally:
-            restore_row = getattr(source, "restoreRow", None)
-            if restore_row is not None:
-                restore_row(row_index, columns, values)
-
-
-def _extend_matrix_like(template_matrix: Any, source_matrix: Any) -> Any:
-    if template_matrix.getSize() == source_matrix.getSize():
-        copied = source_matrix.duplicate(copy=True)
-        copied.assemble()
-        return copied
-
-    extended = _create_empty_aij_matrix_like(template_matrix)
-    _copy_owned_matrix_entries_into_target(source_matrix, extended)
-    extended.assemble()
-    return extended
-
-
-def _extend_vector_like(template_vector: Any, source_vector: Any) -> Any:
-    from petsc4py import PETSc
-
-    extended = template_vector.duplicate()
-    extended.set(0.0)
-    source_size = source_vector.getSize()
-    ownership_start, ownership_end = extended.getOwnershipRange()
-    for global_index in range(ownership_start, min(ownership_end, source_size)):
-        value = source_vector.getValues([global_index])[0]
-        extended.setValue(
-            global_index,
-            float(value),
-            addv=PETSc.InsertMode.INSERT_VALUES,
-        )
-    extended.assemblyBegin()
-    extended.assemblyEnd()
-    return extended
 
 
 def _set_ufl_state_from_displacement(form_bundle: Any, displacement: Any) -> None:
@@ -294,46 +219,6 @@ def _build_ufl_augmented_elastic_jacobian(
     return _add_matrix_in_place(
         _assemble_ufl_elastic_jacobian(bridge, stiffness_matrix, displacement),
         bridge.stiffness_augmentation_matrix,
-    )
-
-
-def _accumulate_owned_matrix_value(
-    matrix: Any,
-    owned_rows: tuple[int, int],
-    row: int,
-    column: int,
-    value: float,
-) -> None:
-    ownership_start, ownership_end = owned_rows
-    if not (ownership_start <= row < ownership_end):
-        return
-
-    from petsc4py import PETSc
-
-    matrix.setValue(
-        row,
-        column,
-        float(value),
-        addv=PETSc.InsertMode.ADD_VALUES,
-    )
-
-
-def _accumulate_owned_vector_value(
-    vector: Any,
-    owned_rows: tuple[int, int],
-    index: int,
-    value: float,
-) -> None:
-    ownership_start, ownership_end = owned_rows
-    if not (ownership_start <= index < ownership_end):
-        return
-
-    from petsc4py import PETSc
-
-    vector.setValue(
-        index,
-        float(value),
-        addv=PETSc.InsertMode.ADD_VALUES,
     )
 
 
@@ -511,6 +396,7 @@ def _solve_nonlinear_newmark_step_with_snes(
     damping_scale: float,
     gamma: float,
     dt: float,
+    mpc: Any | None = None,
 ) -> tuple[Any, Any, Any, TimeExcitationState]:
     require_petsc()
 
@@ -525,6 +411,7 @@ def _solve_nonlinear_newmark_step_with_snes(
         analysis=analysis,
         time_seconds=time_seconds,
     )
+    apply_mpc_to_vector_in_place(mpc, load_vector)
     residual_vector = load_vector.duplicate()
     jacobian_matrix = _build_effective_matrix(
         stiffness_matrix,
@@ -720,6 +607,7 @@ def _build_initial_acceleration(
     excitation_dof: int,
     excitation,
     analysis,
+    mpc: Any | None = None,
 ) -> Any:
     mass_solver = _build_direct_solver(_regularize_zero_diagonal_matrix(mass_matrix))
     load_vector, _ = _build_time_load_vector(
@@ -731,6 +619,7 @@ def _build_initial_acceleration(
         analysis=analysis,
         time_seconds=0.0,
     )
+    apply_mpc_to_vector_in_place(mpc, load_vector)
     return _solve_direct_system(mass_solver, load_vector)
 
 
@@ -825,6 +714,7 @@ def solve_embedded_beam_time_history_experiment(
         excitation_dof=excitation_dof,
         excitation=model.excitation,
         analysis=model.analysis,
+        mpc=experiment.operator_bundle.mpc,
     )
 
     initial_load_vector, initial_excitation_state = _build_time_load_vector(
@@ -883,8 +773,10 @@ def solve_embedded_beam_time_history_experiment(
                     damping_scale=damping_scale,
                     gamma=gamma,
                     dt=dt,
+                    mpc=experiment.operator_bundle.mpc,
                 )
             )
+            backsubstitute_mpc_vector(experiment.operator_bundle.mpc, displacement)
         else:
             rhs_vector, excitation_state = _build_time_load_vector(
                 stiffness_matrix,
@@ -895,6 +787,7 @@ def solve_embedded_beam_time_history_experiment(
                 analysis=model.analysis,
                 time_seconds=time_seconds,
             )
+            apply_mpc_to_vector_in_place(experiment.operator_bundle.mpc, rhs_vector)
 
             mass_term = rhs_vector.duplicate()
             mass_matrix.mult(displacement_predictor, mass_term)
@@ -911,6 +804,7 @@ def solve_embedded_beam_time_history_experiment(
             rhs_vector.axpy(-1.0, damping_velocity_term)
 
             displacement = _solve_direct_system(effective_solver, rhs_vector)
+            backsubstitute_mpc_vector(experiment.operator_bundle.mpc, displacement)
 
             acceleration = _copy_vector(displacement)
             acceleration.axpy(-1.0, displacement_predictor)

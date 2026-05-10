@@ -53,6 +53,7 @@ def test_fenicsx_system_assembly_reports_pipeline_stages() -> None:
         "coefficients",
         "ufl_forms",
         "boundary_conditions",
+        "branch_connection_mpc",
         "base_operators",
         "branch_joint_constraints",
         "auto_nonlinear_links",

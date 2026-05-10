@@ -11,9 +11,11 @@ from orchard_fem.fenicsx.beam_forms import (
     build_embedded_timoshenko_forms,
     create_embedded_beam_coefficient_functions,
 )
-from orchard_fem.fenicsx.operators import (
+from orchard_fem.fenicsx.operator_bundle import (
     EmbeddedBeamExperimentBundle,
     EmbeddedBeamOperatorBundle,
+)
+from orchard_fem.fenicsx.operators import (
     assemble_embedded_beam_operators,
     build_embedded_timoshenko_experiment,
 )

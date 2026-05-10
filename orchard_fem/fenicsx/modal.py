@@ -8,7 +8,7 @@ from orchard_fem.domain import OrchardModel
 from orchard_fem.fenicsx.assembly import assemble_fenicsx_system
 from orchard_fem.fenicsx.availability import require_dolfinx
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
-from orchard_fem.fenicsx.operators import (
+from orchard_fem.fenicsx.operator_bundle import (
     EmbeddedBeamExperimentBundle,
 )
 from orchard_fem.numerics import require_slepc
@@ -38,6 +38,7 @@ def _solve_petsc_generalized_modes(
     mass_matrix: Any,
     *,
     num_modes: int,
+    mpc: Any | None = None,
 ) -> list[EmbeddedBeamModalResult]:
     require_slepc()
 
@@ -83,6 +84,8 @@ def _solve_petsc_generalized_modes(
     results: list[EmbeddedBeamModalResult] = []
     for mode_index in range(converged):
         eigenvalue_raw = solver.getEigenpair(mode_index, eigenvector_real, eigenvector_imag)
+        if mpc is not None:
+            mpc.backsubstitution(eigenvector_real)
         eigenvalue = float(
             eigenvalue_raw.real if hasattr(eigenvalue_raw, "real") else eigenvalue_raw
         )
@@ -140,6 +143,7 @@ def solve_embedded_beam_modal_experiment(
         assembly.stiffness_matrix,
         assembly.mass_matrix,
         num_modes=num_modes,
+        mpc=assembly.experiment.operator_bundle.mpc,
     )
     return EmbeddedBeamModalExperimentResult(
         experiment=assembly.experiment,

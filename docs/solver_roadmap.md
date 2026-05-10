@@ -27,10 +27,9 @@ FEniCSx analysis and basic visual output. The completed baseline includes:
 - FEniCSx frequency-response execution and geometry/response visualization from the
   imported skeleton model.
 
-Non-coincident parent-child constraints without `dolfinx_mpc` remain outside this
-Phase 1 baseline. Imported linear branch connections should therefore place the
-child root on a parent branch mesh node. Non-coincident constraint handling is the
-first Phase 2 item.
+With `dolfinx_mpc` installed, non-coincident linear parent-child branch roots are
+also supported through real multi-point constraints. Explicit nonlinear joints and
+automatically nonlinear branch levels intentionally keep independent child-root DOFs.
 
 ## 1. Input Layer
 
@@ -77,6 +76,13 @@ Implemented:
 - Embedded-line UFL forms now use the physical branch-tangent derivative instead of a global-axis derivative.
 - Elastic residual forms and automatic Jacobian generation through `ufl.derivative`.
 - PETSc operator assembly entry point for the default FEniCSx beam branch.
+- Shared PETSc operator utility layer for matrix extension, accumulation, copying, and in-place/copy-on-write matrix updates.
+- FEniCSx operator data structures, branch-node DOF resolution, and fruit-attachment
+  augmentation are split into dedicated modules instead of being embedded in one
+  monolithic operator file.
+- FEniCSx gravity-prestress augmentation and joint/nonlinear-link augmentation are
+  split into dedicated modules. `operators.py` now focuses on base UFL/PETSc
+  operator assembly.
 
 ## 5. Assembly Layer
 
@@ -92,10 +98,16 @@ Implemented:
   - explicit joint gap links
   - automatic nonlinear injection by branch level
 - Gravity prestress with geometric stiffness contribution.
+- `dolfinx_mpc` hard constraints for non-coincident linear parent-child branch
+  connections, including consistent handling of hand-built gravity and excitation
+  load vectors.
 
 Partial / reduced:
 - The working system is assembled in Python matrix form and converted to PETSc at solve time, not assembled PETSc-native from the start.
-- Coincident linear FEniCSx parent-child branch roots now share mesh DOFs; non-coincident and nonlinear branch connections still use pairwise augmentation/penalty links.
+- Coincident linear FEniCSx parent-child branch roots share mesh DOFs. Non-coincident
+  linear branch roots use `dolfinx_mpc`. Nonlinear branch connections still use
+  pairwise nonlinear link augmentation because they represent compliant joints rather
+  than hard kinematic equality.
 - The native fallback and FEniCSx branch both consume direct layered-section rigidities for stiffness. The native branch remains a simpler Euler-Bernoulli fallback, while the default FEniCSx branch carries the active Timoshenko/UFL workflow.
 
 ## 6. Solver Layer
@@ -146,6 +158,7 @@ These are intentionally kept for future reduction, surrogate, and inversion work
 
 Near-term implementation order:
 
-1. Replace remaining non-coincident parent-child penalty links with a stronger FEniCSx constraint strategy.
-2. Move selected assembly paths closer to PETSc-native data structures once the FEniCSx branch can represent orchard topology cleanly.
-3. Extend the first-harmonic nonlinear frequency workflow toward higher-order harmonics only after the main FEniCSx branch is stable.
+1. Move remaining manual augmentation paths behind explicit assembly operators instead of ad-hoc loops in solver files.
+2. Review solver files for remaining PETSc helper duplication and move stable pieces into shared utilities.
+3. Extend nonlinear joint modeling beyond single-DOF cubic/gap links only where it is backed by a clear physical law.
+4. Extend the first-harmonic nonlinear frequency workflow toward higher-order harmonics only after the main FEniCSx branch is stable.

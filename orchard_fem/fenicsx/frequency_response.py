@@ -21,8 +21,18 @@ from orchard_fem.fenicsx.dofs import (
     resolve_embedded_beam_response_mapping,
 )
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
-from orchard_fem.fenicsx.operators import (
+from orchard_fem.fenicsx.operator_bundle import (
     EmbeddedBeamExperimentBundle,
+)
+from orchard_fem.fenicsx.mpc import (
+    apply_mpc_to_real_block_vector_in_place,
+    backsubstitute_mpc_real_block_vector,
+)
+from orchard_fem.fenicsx.petsc_ops import (
+    accumulate_owned_matrix_value as _accumulate_owned_matrix_value,
+    accumulate_owned_vector_value as _accumulate_owned_vector_value,
+    add_matrix_in_place as _add_matrix_in_place,
+    create_empty_aij_matrix_like as _create_empty_aij_matrix_like,
 )
 from orchard_fem.materials.base import build_material_lookup
 from orchard_fem.numerics import require_petsc
@@ -87,51 +97,6 @@ def build_embedded_rayleigh_damping_matrix(
     )
     damping_matrix.assemble()
     return damping_matrix
-
-
-def _add_matrix_in_place(target: Any, increment: Any) -> None:
-    require_petsc()
-
-    from petsc4py import PETSc
-
-    target.axpy(
-        1.0,
-        increment,
-        structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
-    )
-    target.assemble()
-
-
-def _create_empty_aij_matrix_like(matrix: Any) -> Any:
-    require_petsc()
-
-    from petsc4py import PETSc
-
-    created = PETSc.Mat().createAIJ(size=matrix.getSize(), comm=matrix.getComm())
-    created.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
-    created.setUp()
-    return created
-
-
-def _accumulate_owned_matrix_value(
-    matrix: Any,
-    owned_rows: tuple[int, int],
-    row: int,
-    column: int,
-    value: float,
-) -> None:
-    ownership_start, ownership_end = owned_rows
-    if not (ownership_start <= row < ownership_end):
-        return
-
-    from petsc4py import PETSc
-
-    matrix.setValue(
-        row,
-        column,
-        float(value),
-        addv=PETSc.InsertMode.ADD_VALUES,
-    )
 
 
 def _build_real_block_dynamic_matrix(
@@ -253,21 +218,6 @@ def _relative_complex_components(
     real_delta = first_real - second_real
     imag_delta = first_imag - second_imag
     return real_delta, imag_delta
-
-
-def _accumulate_owned_vector_value(
-    vector: Any,
-    owned_rows: tuple[int, int],
-    row: int,
-    value: float,
-) -> None:
-    ownership_start, ownership_end = owned_rows
-    if not (ownership_start <= row < ownership_end):
-        return
-
-    from petsc4py import PETSc
-
-    vector.setValue(int(row), float(value), addv=PETSc.InsertMode.ADD_VALUES)
 
 
 def _build_first_harmonic_nonlinear_vector_and_tangent(
@@ -398,6 +348,7 @@ def _solve_harmonic_balance_frequency_point(
     analysis,
     omega: float,
     initial_solution: Any | None,
+    mpc: Any | None = None,
 ) -> Any:
     require_petsc()
 
@@ -420,7 +371,19 @@ def _solve_harmonic_balance_frequency_point(
         excitation=excitation,
         omega=omega,
     )
+    apply_mpc_to_real_block_vector_in_place(
+        mpc,
+        rhs_vector,
+        system_size=stiffness_matrix.getSize()[0],
+        template_matrix=stiffness_matrix,
+    )
     linear_solution = _solve_petsc_real_block_system(block_matrix, rhs_vector)
+    linear_solution = backsubstitute_mpc_real_block_vector(
+        mpc,
+        linear_solution,
+        system_size=stiffness_matrix.getSize()[0],
+        template_matrix=stiffness_matrix,
+    )
 
     def build_residual(current_solution: Any) -> Any:
         residual = rhs_vector.duplicate()
@@ -627,12 +590,18 @@ def solve_embedded_beam_frequency_response_experiment(
                 analysis=model.analysis,
                 omega=2.0 * pi * frequency_hz,
                 initial_solution=initial_solution,
+                mpc=experiment.operator_bundle.mpc,
             ),
             _solution_relative_change,
         )
         points = [
             _extract_frequency_response_point(
-                point.state,
+                backsubstitute_mpc_real_block_vector(
+                    experiment.operator_bundle.mpc,
+                    point.state,
+                    system_size=system_size,
+                    template_matrix=experiment.operator_bundle.stiffness_matrix,
+                ),
                 frequency_hz=point.frequency_hz,
                 system_size=system_size,
                 response_mapping=response_mapping,
@@ -657,7 +626,19 @@ def solve_embedded_beam_frequency_response_experiment(
                 excitation=model.excitation,
                 omega=omega,
             )
+            apply_mpc_to_real_block_vector_in_place(
+                experiment.operator_bundle.mpc,
+                rhs_vector,
+                system_size=system_size,
+                template_matrix=experiment.operator_bundle.stiffness_matrix,
+            )
             solution = _solve_petsc_real_block_system(block_matrix, rhs_vector)
+            solution = backsubstitute_mpc_real_block_vector(
+                experiment.operator_bundle.mpc,
+                solution,
+                system_size=system_size,
+                template_matrix=experiment.operator_bundle.stiffness_matrix,
+            )
             points.append(
                 _extract_frequency_response_point(
                     solution,

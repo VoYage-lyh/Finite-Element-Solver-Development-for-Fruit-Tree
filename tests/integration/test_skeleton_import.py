@@ -159,3 +159,39 @@ def test_nonlinear_child_branch_keeps_independent_root_dof(tmp_path) -> None:
     spec = build_embedded_line_mesh_spec(model)
 
     assert spec.point_count == 8
+
+
+def test_noncoincident_linear_child_branch_uses_dolfinx_mpc(tmp_path) -> None:
+    pytest.importorskip("dolfinx")
+    pytest.importorskip("dolfinx_mpc")
+
+    from orchard_fem.fenicsx.assembly import assemble_fenicsx_system
+
+    payload = _skeleton_payload()
+    payload["analysis"]["solver_backend"] = "fenicsx"
+    payload["branches"].append(
+        {
+            "id": "lateral",
+            "parent_branch_id": "trunk",
+            "level": 1,
+            "points": [[0.05, 0.0, 1.45], [0.55, 0.0, 1.62]],
+            "outer_radius": 0.015,
+            "num_elements": 2,
+        }
+    )
+    output_payload = convert_skeleton_payload_to_orchard_payload(payload)
+    model_path = tmp_path / "noncoincident_linear_connection.json"
+    model_path.write_text(json.dumps(output_payload), encoding="utf-8")
+
+    model = load_orchard_model(str(model_path))
+    assembly = assemble_fenicsx_system(model)
+
+    assert assembly.experiment.operator_bundle.mpc is not None
+    assert (
+        "lateral"
+        in assembly.experiment.operator_bundle.mpc_constrained_branch_ids
+    )
+    assert any(
+        stage.name == "branch_connection_mpc" and stage.enabled
+        for stage in assembly.stages
+    )
