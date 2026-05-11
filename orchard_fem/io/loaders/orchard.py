@@ -199,6 +199,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
             gravity_direction.y,
             gravity_direction.z,
         ),
+        use_corotational=bool(analysis_payload.get("use_corotational", False)),
         output_csv=str(analysis_payload.get("output_csv", "frequency_response.csv")),
     )
 
