@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "Orchard FEM framework for orchard tree vibration modeling, simulation, and validation."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "scipy>=1.11",
+]
 
 [project.scripts]
 orchard-fem = "orchard_fem.cli:main"

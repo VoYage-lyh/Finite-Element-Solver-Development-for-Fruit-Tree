@@ -114,6 +114,7 @@ class AnalysisSettings:
     auto_nonlinear_cubic_scale: float = 0.0
     include_gravity_prestress: bool = False
     gravity_direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    use_corotational: bool = False
     output_csv: str = "frequency_response.csv"
 
 

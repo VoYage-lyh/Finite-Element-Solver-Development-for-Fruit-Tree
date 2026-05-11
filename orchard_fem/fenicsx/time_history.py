@@ -636,6 +636,267 @@ def _build_initial_acceleration(
     return _solve_direct_system(mass_solver, load_vector)
 
 
+def solve_corotational_time_history_experiment(
+    model: OrchardModel,
+    *,
+    polynomial_degree: int = 1,
+    spec: EmbeddedLineMeshSpec | None = None,
+    shear_correction: float = 0.4,
+    comm: object | None = None,
+    partitioner: object | None = None,
+    max_facet_to_cell_links: int = 2,
+    use_model_clamps: bool = True,
+    clamp_tolerance: float = 1.0e-8,
+    response_tolerance: float = 1.0e-8,
+    newton_max_iter: int = 12,
+    newton_tol: float = 1.0e-8,
+) -> EmbeddedBeamTimeHistoryExperimentResult:
+    """Solve large-deformation time history using the corotational beam formulation.
+
+    Replaces the UFL elastic operator with explicit element-by-element corotational
+    assembly at each Newton iteration of the Newmark-β corrector step.  Activated
+    when ``model.analysis.use_corotational is True``.
+
+    Parameters
+    ----------
+    model:
+        Orchard model.  ``model.analysis.use_corotational`` should be ``True``.
+    newton_max_iter:
+        Maximum Newton iterations per time step.
+    newton_tol:
+        Convergence criterion on the L∞ residual norm relative to the load norm.
+
+    Returns
+    -------
+    EmbeddedBeamTimeHistoryExperimentResult
+    """
+    require_dolfinx()
+    require_petsc()
+    _require_supported_time_history_model(model)
+
+    if model.analysis.time_step_seconds <= 0.0 or model.analysis.total_time_seconds <= 0.0:
+        raise RuntimeError("Time-history analysis requires positive time step and total time.")
+
+    from orchard_fem.fenicsx.corotational import (
+        assemble_corotational_internal_force,
+        assemble_corotational_tangent_stiffness,
+    )
+
+    assembly = assemble_fenicsx_system(
+        model,
+        polynomial_degree=polynomial_degree,
+        spec=spec,
+        shear_correction=shear_correction,
+        comm=comm,
+        partitioner=partitioner,
+        max_facet_to_cell_links=max_facet_to_cell_links,
+        use_model_clamps=use_model_clamps,
+        clamp_tolerance=clamp_tolerance,
+    )
+    experiment = assembly.experiment
+    response_mapping = resolve_embedded_beam_response_mapping(
+        model,
+        experiment.space_bundle,
+        fruit_dofs=experiment.fruit_dofs,
+        atol=response_tolerance,
+    )
+
+    alpha, beta_damping = _resolve_rayleigh_coefficients(model)
+    damping_matrix = build_embedded_rayleigh_damping_matrix(
+        experiment.operator_bundle.stiffness_matrix,
+        experiment.operator_bundle.mass_matrix,
+        alpha=alpha,
+        beta=beta_damping,
+    )
+    if experiment.operator_bundle.attachment_damping_matrix is not None:
+        damping_matrix = _add_matrix_in_place(
+            damping_matrix,
+            experiment.operator_bundle.attachment_damping_matrix,
+        )
+
+    dt = float(model.analysis.time_step_seconds)
+    total_steps = max(1, round(model.analysis.total_time_seconds / dt))
+    output_stride = max(model.analysis.output_stride, 1)
+    beta_newmark = 0.25
+    gamma = 0.5
+    mass_scale = 1.0 / (beta_newmark * dt * dt)
+    damping_scale = gamma / (beta_newmark * dt)
+
+    mass_matrix = experiment.operator_bundle.mass_matrix
+    excitation_dof = response_mapping.excitation_dof
+    mpc = experiment.operator_bundle.mpc
+
+    stiffness_matrix = experiment.operator_bundle.stiffness_matrix
+
+    gravity_static = experiment.operator_bundle.gravity_static_displacement
+    if gravity_static is not None:
+        displacement = _copy_vector(gravity_static)
+        if len(displacement.getArray(readonly=True)) < stiffness_matrix.getSize()[0]:
+            extended = stiffness_matrix.createVecRight()
+            extended.set(0.0)
+            src_size = len(gravity_static.getArray(readonly=True))
+            extended.setValues(
+                list(range(src_size)),
+                gravity_static.getValues(list(range(src_size))),
+            )
+            extended.assemblyBegin()
+            extended.assemblyEnd()
+            displacement = extended
+    else:
+        displacement = stiffness_matrix.createVecRight()
+        displacement.set(0.0)
+
+    velocity = stiffness_matrix.createVecRight()
+    velocity.set(0.0)
+    acceleration = _build_initial_acceleration(
+        stiffness_matrix,
+        mass_matrix,
+        damping_matrix,
+        excitation_dof=excitation_dof,
+        excitation=model.excitation,
+        analysis=model.analysis,
+        mpc=mpc,
+    )
+
+    initial_load_vector, initial_excitation_state = _build_time_load_vector(
+        stiffness_matrix,
+        mass_matrix,
+        damping_matrix,
+        excitation_dof=excitation_dof,
+        excitation=model.excitation,
+        analysis=model.analysis,
+        time_seconds=0.0,
+    )
+    del initial_load_vector
+
+    points = [
+        TimeHistoryPoint(
+            time_seconds=0.0,
+            excitation_signal_value=initial_excitation_state.signal_value,
+            excitation_load_value=initial_excitation_state.equivalent_load,
+            excitation_response_value=_vector_value(displacement, excitation_dof),
+            observation_values=[
+                _vector_value(displacement, dof)
+                for dof in response_mapping.observation_dofs
+            ],
+        )
+    ]
+
+    for step in range(1, total_steps + 1):
+        time_seconds = float(step) * dt
+
+        # Predictor
+        u_pred = _copy_vector(displacement)
+        u_pred.axpy(dt, velocity)
+        acc_term = _copy_vector(acceleration)
+        acc_term.scale(dt * dt * (0.5 - beta_newmark))
+        u_pred.axpy(1.0, acc_term)
+
+        v_pred = _copy_vector(velocity)
+        v_acc = _copy_vector(acceleration)
+        v_acc.scale(dt * (1.0 - gamma))
+        v_pred.axpy(1.0, v_acc)
+
+        f_ext, excitation_state = _build_time_load_vector(
+            stiffness_matrix,
+            mass_matrix,
+            damping_matrix,
+            excitation_dof=excitation_dof,
+            excitation=model.excitation,
+            analysis=model.analysis,
+            time_seconds=time_seconds,
+        )
+
+        # Newton corrector loop
+        u_iter = _copy_vector(u_pred)
+        for _newton_iter in range(newton_max_iter):
+            # Corotational assembly
+            K_tang = assemble_corotational_tangent_stiffness(assembly, u_iter)
+            f_int = assemble_corotational_internal_force(assembly, u_iter)
+
+            # Effective stiffness: K_eff = K_tang + mass_scale*M + damping_scale*C
+            K_eff = _build_effective_matrix(
+                K_tang,
+                mass_matrix,
+                damping_matrix,
+                None,
+                mass_scale=mass_scale,
+                damping_scale=damping_scale,
+            )
+
+            # Residual: R = mass_scale*M*(u-u_pred) + C*(damping_scale*(u-u_pred)+v_pred)
+            #              + f_int - f_ext
+            delta_u = _copy_vector(u_iter)
+            delta_u.axpy(-1.0, u_pred)          # delta_u = u_iter - u_pred
+
+            r_vec = stiffness_matrix.createVecRight()
+            r_vec.set(0.0)
+
+            mass_term = stiffness_matrix.createVecRight()
+            mass_matrix.mult(delta_u, mass_term)
+            r_vec.axpy(mass_scale, mass_term)
+
+            damp_arg = _copy_vector(delta_u)
+            damp_arg.scale(damping_scale)
+            damp_arg.axpy(1.0, v_pred)          # damping_scale*(u-u_pred) + v_pred
+            damp_term = stiffness_matrix.createVecRight()
+            damping_matrix.mult(damp_arg, damp_term)
+            r_vec.axpy(1.0, damp_term)
+
+            r_vec.axpy(1.0, f_int)              # r += f_int
+            r_vec.axpy(-1.0, f_ext)             # r -= f_ext
+
+            apply_mpc_to_vector_in_place(mpc, r_vec)
+
+            residual_norm = r_vec.norm()
+            f_ext_norm = f_ext.norm()
+            if residual_norm <= newton_tol * max(f_ext_norm, 1.0):
+                break
+
+            newton_solver = _build_direct_solver(K_eff)
+            neg_r = _copy_vector(r_vec)
+            neg_r.scale(-1.0)
+            correction = _solve_direct_system(newton_solver, neg_r)
+            u_iter.axpy(1.0, correction)
+
+        displacement = u_iter
+        backsubstitute_mpc_vector(mpc, displacement)
+
+        delta_u_final = _copy_vector(displacement)
+        delta_u_final.axpy(-1.0, u_pred)
+        acceleration = _copy_vector(delta_u_final)
+        acceleration.scale(mass_scale)
+
+        velocity = _copy_vector(v_pred)
+        gamma_dt_acc = _copy_vector(acceleration)
+        gamma_dt_acc.scale(gamma * dt)
+        velocity.axpy(1.0, gamma_dt_acc)
+
+        if step % output_stride == 0 or step == total_steps:
+            points.append(
+                TimeHistoryPoint(
+                    time_seconds=time_seconds,
+                    excitation_signal_value=excitation_state.signal_value,
+                    excitation_load_value=excitation_state.equivalent_load,
+                    excitation_response_value=_vector_value(displacement, excitation_dof),
+                    observation_values=[
+                        _vector_value(displacement, dof)
+                        for dof in response_mapping.observation_dofs
+                    ],
+                )
+            )
+
+    return EmbeddedBeamTimeHistoryExperimentResult(
+        experiment=experiment,
+        response_mapping=response_mapping,
+        damping_matrix=damping_matrix,
+        result=TimeHistoryResult(
+            observation_names=response_mapping.observation_names,
+            points=points,
+        ),
+    )
+
+
 def solve_embedded_beam_time_history_experiment(
     model: OrchardModel,
     *,
