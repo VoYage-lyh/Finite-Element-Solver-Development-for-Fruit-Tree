@@ -1,99 +1,108 @@
 # Orchard FEM
 
-Orchard FEM is a Python-based finite-element framework for orchard tree vibration analysis.  
-It is built for orchard-specific dynamics rather than general-purpose structural analysis, with a focus on branch topology, tissue-aware sections, excitation-response studies, and repeatable validation workflows.
+Finite-element tooling for orchard tree vibration modelling, simulation, and validation.
 
-## What The Project Does
+Orchard FEM focuses on fruit-tree structures rather than general structural analysis. It models
+trunk/branch/fruit topology, tissue-aware branch sections, harmonic excitation, modal response,
+frequency response, time-history response, and repeatable validation workflows.
 
-- Models hierarchical trunk-branch-fruit structures.
-- Supports tissue-partitioned branch sections such as xylem, pith, and phloem.
-- Assembles 3D Euler-Bernoulli beam systems with orchard-specific attachments and boundary conditions.
-- Runs modal, frequency-response, and time-history analyses.
-- Produces CSV outputs and report-ready plots from the same CLI workflow.
-- Ships analytical and engineering verification cases for regression control.
+## Features
 
-## Current Scope
+- Hierarchical trunk, branch, and fruit models.
+- Circular and tissue-partitioned branch sections for xylem, pith, and phloem.
+- FEniCSx/PETSc/SLEPc solver backend for modal, frequency-response, and time-history analyses.
+- Native Python beam backend for lightweight comparison and fallback runs.
+- Gravity prestress, fruit attachments, linear branch constraints, localized nonlinear links, and
+  prescribed harmonic displacement/force/acceleration excitation.
+- CSV output plus matplotlib plotting commands for frequency-response and time-history results.
+- Import tools for skeleton, topology, and TreeQSM-style branch inputs.
+- Integration and verification tests for solver behavior and regression control.
 
-The active implementation lives in the `orchard_fem` package.
+## Repository Layout
 
-Implemented today:
-- PETSc/SLEPc-backed modal analysis.
-- Frequency-response and Newmark time-history workflows.
-- Main-workflow backend selection with FEniCSx as the default solver branch and the native beam solver as an explicit fallback.
-- Skeleton-to-solver JSON import for 3D orchard centerline data, including polyline branches and default circular sections.
-- Multi-component observations and trajectory plots.
-- Gravity prestress, fruit self-weight, default circular section helpers, explicit rotational joint laws, and auto nonlinear-link injection.
-- Package-native validation and demo regeneration commands.
+```text
+orchard_fem/       Main solver package, CLI, workflows, post-processing, and visualization
+orchard_pinn/      Placeholder package for future surrogate/inverse modelling work
+examples/          Small runnable example models
+trees/             Orchard architecture examples and generated solver-ready models
+docs/              User, input-format, architecture, verification, and development notes
+config/            Conda/environment setup files and solver defaults
+tests/             Integration and verification tests
+build/             Generated local artifacts; safe to recreate
+```
 
-Current limitations:
-- Nonlinear frequency-response uses adaptive continuation with first-harmonic balance residuals; cubic and gap localized links are solved with Newton/SNES on the real-imaginary block system.
-- Nonlinear joint laws currently act on rotational root DOFs; they are available in transient analysis and nonlinear frequency continuation.
-- The default solver backbone is now the FEniCSx backend for modal, frequency-response, and time-history cases, including fruit-attachment augmentation, gravity prestress, linear joint constraints, localized nonlinear links, first-harmonic nonlinear frequency continuation, and PETSc SNES nonlinear time history with UFL elastic residual/Jacobian assembly. The older native Euler-Bernoulli beam solver is still available only through explicit `"solver_backend": "native"` or `--solver-backend native`.
+## Installation
 
-## Quick Start
+Python 3.11 or newer is expected.
 
-### Lightweight Local Setup
+### Lightweight Development Environment
+
+Use this for code inspection, importers, plotting, and tests that do not require FEniCSx.
 
 ```bash
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[ubuntu-test]"
 python -m orchard_fem doctor
 ```
 
-This lightweight environment is sufficient for code inspection and native fallback tests. The default solver path requires the PETSc/SLEPc/FEniCSx environment below.
+### FEniCSx Solver Environment
 
-### Recommended PETSc/SLEPc Environment
+Use this for the default solver backend and PETSc/SLEPc-backed analyses.
 
 ```bash
 conda env create -f config/fenicsx_pinn_environment.yml
 conda activate orchard-fenicsx
+python -m pip install -e ".[ubuntu-test]"
 python -m orchard_fem doctor
 ```
 
-## First Run
-
-Frequency-response demo:
+If the environments already exist, typical local usage is:
 
 ```bash
-python -m orchard_fem run examples/demo_orchard.json --output-csv build/demo_frequency_response.csv
-python -m orchard_fem visualize examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
+conda run -n orchard-dev python -m pytest -q tests/integration
+conda run -n orchard-fenicsx python -m orchard_fem --help
 ```
 
-To force the older native fallback path for a comparison run, use `--solver-backend native` or set `"solver_backend": "native"` inside the model `analysis` block.
+## Quick Start
 
-Time-history demo:
+Run the frequency-response demo:
 
 ```bash
-python -m orchard_fem run examples/demo_orchard_time_history.json --output-csv build/demo_time_history.csv
-python -m orchard_fem visualize examples/demo_orchard_time_history.json build/demo_time_history.csv --output-prefix build/demo_time_history
+python -m orchard_fem run examples/demo_orchard.json \
+  --output-csv build/demo_frequency_response.csv
+
+python -m orchard_fem plot-frequency-response build/demo_frequency_response.csv \
+  --no-show --output build/demo_frequency_response.png
 ```
 
-## Validation
-
-Fast package-level validation:
+Run the time-history demo:
 
 ```bash
-python -m orchard_fem verify
+python -m orchard_fem run examples/demo_orchard_time_history.json \
+  --output-csv build/demo_time_history.csv
+
+python -m orchard_fem plot-time-history build/demo_time_history.csv \
+  --no-show --output build/demo_time_history.png
 ```
 
-Multi-environment validation:
+Run the open-vase tree model:
 
 ```bash
-python -m orchard_fem full-validate
+python -m orchard_fem run trees/tree_1_open_vase_model.json \
+  --output-csv build/results/tree_1_open_vase/time_history.csv
+
+python -m orchard_fem plot-time-history \
+  build/results/tree_1_open_vase/time_history.csv \
+  --no-show \
+  --output build/results/tree_1_open_vase/time_history.png
 ```
 
-Recommended PETSc/SLEPc verification command:
+The time-history plotter writes one excitation figure plus one figure per branch when an output path
+is provided.
 
-```bash
-conda run -n orchard-fenicsx python -m pytest -q \
-  tests/verification/test_python_beam_benchmarks.py \
-  tests/verification/test_python_dynamic_benchmarks.py \
-  tests/integration/test_gravity_prestress.py::test_gravity_prestress_adds_load_and_reduces_first_mode
-```
-
-## CLI Surface
+## CLI
 
 The primary entry point is:
 
@@ -101,42 +110,101 @@ The primary entry point is:
 python -m orchard_fem --help
 ```
 
-Available commands:
-- `run`: execute the analysis configured in a model JSON.
-- `modal`: export modal frequencies and summary data.
-- `visualize`: generate geometry, response, and trajectory figures.
-- `plot-frequency-response`: plot a frequency-response CSV directly.
-- `import-skeleton`: convert a 3D orchard skeleton JSON into solver-ready Orchard FEM JSON.
-- `demo-suite`: regenerate standard FEniCSx demo CSV and figure artifacts.
-- `verify`: run validation in the current environment.
-- `full-validate`: orchestrate `orchard-dev` and `orchard-fenicsx` validation flows.
-- `doctor`: audit the active Python environment.
-
-After editable install, the console script alias is also available:
+Editable installs also provide:
 
 ```bash
 orchard-fem --help
 ```
 
-## Repository Map
+Common commands:
 
-- `orchard_fem/`: active solver, CLI, workflow, and visualization package.
-- `orchard_pinn/`: reserved surface for future surrogate and inversion work.
-- `examples/`: runnable JSON models.
-- `tests/`: integration and verification coverage.
-- `docs/`: user, developer, architecture, and roadmap documentation.
-- `config/`: environment files and setup guides.
+| Command | Purpose |
+| --- | --- |
+| `run` | Execute the analysis configured in a model JSON and write a response CSV. |
+| `modal` | Solve modal frequencies and write a modal summary CSV. |
+| `batch-run` | Run several frequency-response excitation specs against one model. |
+| `plot-frequency-response` | Plot a frequency-response CSV. |
+| `plot-time-history` | Plot acceleration time histories from a time-history CSV. |
+| `visualize` | Generate geometry, response, and trajectory figures from a model and CSV. |
+| `import-skeleton` | Convert 3D branch skeleton JSON into solver-ready Orchard FEM JSON. |
+| `import-topology` | Convert length/diameter/attachment topology JSON into solver-ready JSON. |
+| `import-treeqsm` | Convert TreeQSM-style branch data into solver-ready JSON. |
+| `calibrate` | Calibrate material Young's moduli against measured modal frequencies. |
+| `harvest` | Estimate fruit detachment response and harvest-frequency candidates. |
+| `compare-frf` | Compare measured and simulated FRF data. |
+| `demo-suite` | Regenerate standard demo CSV and figure artifacts. |
+| `verify` | Run validation in the active environment. |
+| `full-validate` | Orchestrate multi-environment validation. |
+| `doctor` | Report missing runtime dependencies in the active environment. |
+
+Backend selection can be set in the model JSON through `analysis.solver_backend`, or overridden from
+the CLI where supported:
+
+```bash
+python -m orchard_fem run examples/demo_orchard.json --solver-backend native
+python -m orchard_fem modal trees/tree_1_open_vase_model.json --solver-backend fenicsx
+```
+
+## Inputs And Outputs
+
+Model input is JSON. The most useful starting points are:
+
+- `examples/demo_orchard.json`: compact frequency-response model.
+- `examples/demo_orchard_time_history.json`: compact time-history model.
+- `trees/tree_1_open_vase_model.json`: generated open-vase architecture model.
+- `trees/tree_2_central_leader_model.json`, `trees/tree_3_espalier_model.json`,
+  `trees/tree_4_y_shape_model.json`, `trees/tree_5_spindle_model.json`: additional architecture
+  examples.
+
+Solver outputs are CSV files. Plot commands write PNG figures when `--output` is provided. Generated
+files are usually written under `build/` or `results/`.
+
+See [docs/input_format.md](docs/input_format.md) for the model schema.
+
+## Testing And Validation
+
+Fast tests in the lightweight environment:
+
+```bash
+conda run -n orchard-dev python -m pytest -q tests/integration
+```
+
+FEniCSx/PETSc/SLEPc tests:
+
+```bash
+ORCHARD_RUN_DOLFINX_TESTS=1 \
+conda run -n orchard-fenicsx python -m pytest -q \
+  tests/integration/test_fenicsx_time_history.py \
+  tests/integration/test_fenicsx_modal.py \
+  tests/integration/test_fenicsx_frequency_response.py
+```
+
+Project validation commands:
+
+```bash
+python -m orchard_fem verify
+python -m orchard_fem full-validate
+```
 
 ## Documentation
 
 - [docs/README.md](docs/README.md): documentation index.
-- [docs/getting_started.md](docs/getting_started.md): installation, first runs, and validation basics.
-- [docs/development.md](docs/development.md): developer workflow and repository conventions.
-- [docs/orchard_fem_architecture.md](docs/orchard_fem_architecture.md): active package architecture.
-- [docs/solver_roadmap.md](docs/solver_roadmap.md): implementation status against the current solver roadmap.
+- [docs/getting_started.md](docs/getting_started.md): installation and first runs.
 - [docs/input_format.md](docs/input_format.md): model JSON reference.
+- [docs/orchard_fem_architecture.md](docs/orchard_fem_architecture.md): package architecture.
 - [docs/verification.md](docs/verification.md): verification strategy and benchmark coverage.
+- [docs/development.md](docs/development.md): developer workflow.
+- [docs/solver_roadmap.md](docs/solver_roadmap.md): solver roadmap and implementation status.
+
+## Current Scope
+
+The default production path is the FEniCSx backend. The native backend remains useful for lightweight
+checks and comparison runs, but not every advanced feature is implemented there.
+
+Nonlinear frequency response and nonlinear transient workflows are available for localized link
+models, but they should be treated as active solver-development surfaces. Prefer the verification
+commands above after changing material models, joints, prestress, fruit coupling, or time integration.
 
 ## Contributing
 
-Contribution guidelines live in [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
