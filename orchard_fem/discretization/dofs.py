@@ -31,6 +31,8 @@ def resolve_node_index(nodes, target_node: str) -> int:
         return 0
     if target_node == "tip":
         return len(nodes) - 1
+    if target_node == "mid":
+        return (len(nodes) - 1) // 2
 
     node_index = int(target_node)
     if node_index < 0 or node_index >= len(nodes):

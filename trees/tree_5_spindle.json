@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "name": "tree_5_spindle",
+    "training_system": "slender spindle / 自由纺锤形",
+    "typical_crop": "苹果（高密度果园矮砧）",
+    "notes": "细长主干2.2m + 8根短一级枝螺旋分布；不分二级枝。"
+  },
+  "materials_ref": "shared_materials.json",
+  "trunk": {
+    "length": 2.2,
+    "diameter_root": 0.058,
+    "diameter_tip": 0.030,
+    "target_element_length": 0.30
+  },
+  "branches": [
+    {"id": "primary_1", "parent": "trunk", "level": 1, "location_distance": 0.80, "length": 0.70, "diameter_root": 0.024, "diameter_tip": 0.013, "inclination_deg": 75, "azimuth_deg": 0,   "curve_deg": 30, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "primary_2", "parent": "trunk", "level": 1, "location_distance": 1.00, "length": 0.65, "diameter_root": 0.022, "diameter_tip": 0.012, "inclination_deg": 75, "azimuth_deg": 45,  "curve_deg": 28, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "primary_3", "parent": "trunk", "level": 1, "location_distance": 1.20, "length": 0.60, "diameter_root": 0.020, "diameter_tip": 0.011, "inclination_deg": 77, "azimuth_deg": 90,  "curve_deg": 26, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "primary_4", "parent": "trunk", "level": 1, "location_distance": 1.40, "length": 0.55, "diameter_root": 0.018, "diameter_tip": 0.010, "inclination_deg": 77, "azimuth_deg": 135, "curve_deg": 25, "n_curve_segments": 3, "target_element_length": 0.14},
+    {"id": "primary_5", "parent": "trunk", "level": 1, "location_distance": 1.60, "length": 0.50, "diameter_root": 0.016, "diameter_tip": 0.009, "inclination_deg": 79, "azimuth_deg": 180, "curve_deg": 23, "n_curve_segments": 3, "target_element_length": 0.14},
+    {"id": "primary_6", "parent": "trunk", "level": 1, "location_distance": 1.80, "length": 0.45, "diameter_root": 0.014, "diameter_tip": 0.008, "inclination_deg": 80, "azimuth_deg": 225, "curve_deg": 22, "n_curve_segments": 3, "target_element_length": 0.14},
+    {"id": "primary_7", "parent": "trunk", "level": 1, "location_distance": 2.00, "length": 0.40, "diameter_root": 0.012, "diameter_tip": 0.007, "inclination_deg": 82, "azimuth_deg": 270, "curve_deg": 20, "n_curve_segments": 3, "target_element_length": 0.14},
+    {"id": "primary_8", "parent": "trunk", "level": 1, "location_distance": 2.15, "length": 0.35, "diameter_root": 0.010, "diameter_tip": 0.006, "inclination_deg": 84, "azimuth_deg": 315, "curve_deg": 18, "n_curve_segments": 3, "target_element_length": 0.12}
+  ],
+  "analysis": {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 30.0,
+    "frequency_steps": 30,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 1.0e-4,
+    "include_gravity_prestress": true,
+    "output_csv": "results/tree_5_spindle/frf.csv"
+  }
+}

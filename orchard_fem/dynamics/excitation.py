@@ -13,10 +13,32 @@ class TimeExcitationState:
     equivalent_load: float
 
 
+@dataclass(frozen=True)
+class HarmonicKinematics:
+    displacement: float
+    velocity: float
+    acceleration: float
+
+
 def default_driving_frequency_hz(excitation, analysis) -> float:
     if excitation.driving_frequency_hz > 0.0:
         return excitation.driving_frequency_hz
     return max(analysis.frequency_start_hz, 0.1)
+
+
+def build_harmonic_kinematics(
+    excitation,
+    analysis,
+    time_seconds: float,
+) -> HarmonicKinematics:
+    phase_radians = excitation.phase_degrees * (pi / 180.0)
+    omega = 2.0 * pi * default_driving_frequency_hz(excitation, analysis)
+    angle = (omega * time_seconds) + phase_radians
+    return HarmonicKinematics(
+        displacement=excitation.amplitude * sin(angle),
+        velocity=excitation.amplitude * omega * cos(angle),
+        acceleration=-excitation.amplitude * omega * omega * sin(angle),
+    )
 
 
 def build_time_excitation_state(
@@ -26,27 +48,34 @@ def build_time_excitation_state(
     time_seconds: float,
 ) -> TimeExcitationState:
     excitation_dof = assembled.excitation_dof
-    phase_radians = excitation.phase_degrees * (pi / 180.0)
-    omega = 2.0 * pi * default_driving_frequency_hz(excitation, analysis)
-    angle = (omega * time_seconds) + phase_radians
-    displacement = excitation.amplitude * sin(angle)
-    velocity = excitation.amplitude * omega * cos(angle)
-    acceleration = -excitation.amplitude * omega * omega * sin(angle)
+    kinematics = build_harmonic_kinematics(excitation, analysis, time_seconds)
 
     if excitation.kind == ExcitationKind.HARMONIC_FORCE:
-        return TimeExcitationState(signal_value=displacement, equivalent_load=displacement)
+        return TimeExcitationState(
+            signal_value=kinematics.displacement,
+            equivalent_load=kinematics.displacement,
+        )
 
     if excitation.kind == ExcitationKind.HARMONIC_DISPLACEMENT:
         equivalent_load = (
-            (assembled.stiffness_matrix[excitation_dof][excitation_dof] * displacement)
-            + (assembled.damping_matrix[excitation_dof][excitation_dof] * velocity)
-            + (assembled.mass_matrix[excitation_dof][excitation_dof] * acceleration)
+            (assembled.stiffness_matrix[excitation_dof][excitation_dof] * kinematics.displacement)
+            + (assembled.damping_matrix[excitation_dof][excitation_dof] * kinematics.velocity)
+            + (assembled.mass_matrix[excitation_dof][excitation_dof] * kinematics.acceleration)
         )
-        return TimeExcitationState(signal_value=displacement, equivalent_load=equivalent_load)
+        return TimeExcitationState(
+            signal_value=kinematics.displacement,
+            equivalent_load=equivalent_load,
+        )
 
     if excitation.kind == ExcitationKind.HARMONIC_ACCELERATION:
-        equivalent_load = assembled.mass_matrix[excitation_dof][excitation_dof] * acceleration
-        return TimeExcitationState(signal_value=acceleration, equivalent_load=equivalent_load)
+        equivalent_load = (
+            assembled.mass_matrix[excitation_dof][excitation_dof]
+            * kinematics.acceleration
+        )
+        return TimeExcitationState(
+            signal_value=kinematics.acceleration,
+            equivalent_load=equivalent_load,
+        )
 
     raise ValueError(f"Unsupported excitation kind: {excitation.kind}")
 

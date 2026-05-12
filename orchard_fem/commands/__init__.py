@@ -11,9 +11,11 @@ from orchard_fem.commands.full_validate import register_full_validate_command
 from orchard_fem.commands.batch_run import register_batch_run_command
 from orchard_fem.commands.harvest import register_harvest_command
 from orchard_fem.commands.import_skeleton import register_import_skeleton_command
+from orchard_fem.commands.import_topology import register_import_topology_command
 from orchard_fem.commands.import_treeqsm import register_import_treeqsm_command
 from orchard_fem.commands.modal import register_modal_command
 from orchard_fem.commands.plot_frequency_response import register_plot_frequency_response_command
+from orchard_fem.commands.plot_time_history import register_plot_time_history_command
 from orchard_fem.commands.run import register_run_command
 from orchard_fem.commands.verify import register_verify_command
 from orchard_fem.commands.visualize import register_visualize_command
@@ -31,7 +33,9 @@ def register_all_commands(
     register_compare_frf_command(subparsers, application)
     register_visualize_command(subparsers, application)
     register_plot_frequency_response_command(subparsers, application)
+    register_plot_time_history_command(subparsers, application)
     register_import_skeleton_command(subparsers, application)
+    register_import_topology_command(subparsers, application)
     register_import_treeqsm_command(subparsers, application)
     register_demo_suite_command(subparsers, application)
     register_verify_command(subparsers, application)

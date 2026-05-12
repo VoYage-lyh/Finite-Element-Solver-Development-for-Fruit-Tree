@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "name": "tree_3_espalier",
+    "training_system": "espalier / 篱壁形",
+    "typical_crop": "苹果、梨（集约果园铁丝架）",
+    "notes": "全部分枝在一个平面内（南北平面），4根近水平一级枝两两对称；每根带1根向上二级枝。"
+  },
+  "materials_ref": "shared_materials.json",
+  "trunk": {
+    "length": 1.8,
+    "diameter_root": 0.070,
+    "diameter_tip": 0.040,
+    "target_element_length": 0.30
+  },
+  "branches": [
+    {"id": "primary_w1", "parent": "trunk", "level": 1, "location_distance": 0.80, "length": 0.95, "diameter_root": 0.030, "diameter_tip": 0.018, "inclination_deg": 85, "azimuth_deg": 90,  "curve_deg": 12, "n_curve_segments": 3, "target_element_length": 0.18},
+    {"id": "primary_e1", "parent": "trunk", "level": 1, "location_distance": 0.80, "length": 0.95, "diameter_root": 0.030, "diameter_tip": 0.018, "inclination_deg": 85, "azimuth_deg": 270, "curve_deg": 12, "n_curve_segments": 3, "target_element_length": 0.18},
+    {"id": "primary_w2", "parent": "trunk", "level": 1, "location_distance": 1.50, "length": 0.85, "diameter_root": 0.026, "diameter_tip": 0.016, "inclination_deg": 87, "azimuth_deg": 90,  "curve_deg": 10, "n_curve_segments": 3, "target_element_length": 0.18},
+    {"id": "primary_e2", "parent": "trunk", "level": 1, "location_distance": 1.50, "length": 0.85, "diameter_root": 0.026, "diameter_tip": 0.016, "inclination_deg": 87, "azimuth_deg": 270, "curve_deg": 10, "n_curve_segments": 3, "target_element_length": 0.18},
+    {"id": "secondary_w1u", "parent": "primary_w1", "level": 2, "location_distance": 0.55, "length": 0.40, "diameter_root": 0.014, "diameter_tip": 0.008, "inclination_deg": 80, "azimuth_deg": 180, "curve_deg": 15, "n_curve_segments": 3, "target_element_length": 0.12},
+    {"id": "secondary_e1u", "parent": "primary_e1", "level": 2, "location_distance": 0.55, "length": 0.40, "diameter_root": 0.014, "diameter_tip": 0.008, "inclination_deg": 80, "azimuth_deg": 180, "curve_deg": 15, "n_curve_segments": 3, "target_element_length": 0.12},
+    {"id": "secondary_w2u", "parent": "primary_w2", "level": 2, "location_distance": 0.50, "length": 0.35, "diameter_root": 0.012, "diameter_tip": 0.007, "inclination_deg": 82, "azimuth_deg": 180, "curve_deg": 12, "n_curve_segments": 3, "target_element_length": 0.12},
+    {"id": "secondary_e2u", "parent": "primary_e2", "level": 2, "location_distance": 0.50, "length": 0.35, "diameter_root": 0.012, "diameter_tip": 0.007, "inclination_deg": 82, "azimuth_deg": 180, "curve_deg": 12, "n_curve_segments": 3, "target_element_length": 0.12}
+  ],
+  "analysis": {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 25.0,
+    "frequency_steps": 25,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 1.0e-4,
+    "include_gravity_prestress": true,
+    "output_csv": "results/tree_3_espalier/frf.csv"
+  }
+}

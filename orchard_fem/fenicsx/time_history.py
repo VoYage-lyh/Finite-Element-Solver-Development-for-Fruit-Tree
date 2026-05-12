@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, pi, sin
+from math import pi
 from typing import Any
 
 from orchard_fem.discretization.damping import compute_default_damping_ratio
@@ -9,6 +9,7 @@ from orchard_fem.dynamics.nonlinear import nonlinear_force, nonlinear_tangent
 from orchard_fem.domain import ExcitationKind, OrchardModel
 from orchard_fem.dynamics.excitation import (
     TimeExcitationState,
+    build_harmonic_kinematics,
     default_driving_frequency_hz,
 )
 from orchard_fem.dynamics.time_history import TimeHistoryPoint, TimeHistoryResult
@@ -81,7 +82,10 @@ def _resolve_rayleigh_coefficients(model: OrchardModel) -> tuple[float, float]:
     if abs(alpha) < 1.0e-14 and abs(beta) < 1.0e-14:
         material_lookup = build_material_lookup(model.materials)
         zeta = compute_default_damping_ratio(model, material_lookup)
-        omega_ref = 2.0 * pi * max(default_driving_frequency_hz(model.excitation, model.analysis), 0.1)
+        omega_ref = 2.0 * pi * max(
+            default_driving_frequency_hz(model.excitation, model.analysis),
+            0.1,
+        )
         beta = (2.0 * zeta / omega_ref) if omega_ref > 0.0 else 0.0
 
     return alpha, beta
@@ -107,9 +111,44 @@ def _copy_vector(vector: Any) -> Any:
     return copied
 
 
+def _copy_backsubstituted_vector(mpc: Any | None, vector: Any) -> Any:
+    copied = _copy_vector(vector)
+    backsubstitute_mpc_vector(mpc, copied)
+    return copied
+
+
 def _vector_value(vector: Any, global_index: int) -> float:
     values = vector.getValues([int(global_index)])
     return float(values[0])
+
+
+def _build_time_history_point(
+    *,
+    mpc: Any | None,
+    time_seconds: float,
+    excitation_state: TimeExcitationState,
+    displacement: Any,
+    acceleration: Any,
+    excitation_dof: int,
+    observation_dofs: list[int],
+) -> TimeHistoryPoint:
+    output_displacement = _copy_backsubstituted_vector(mpc, displacement)
+    output_acceleration = _copy_backsubstituted_vector(mpc, acceleration)
+    return TimeHistoryPoint(
+        time_seconds=time_seconds,
+        excitation_signal_value=excitation_state.signal_value,
+        excitation_load_value=excitation_state.equivalent_load,
+        excitation_response_value=_vector_value(output_displacement, excitation_dof),
+        observation_values=[
+            _vector_value(output_displacement, dof)
+            for dof in observation_dofs
+        ],
+        excitation_acceleration_value=_vector_value(output_acceleration, excitation_dof),
+        observation_acceleration_values=[
+            _vector_value(output_acceleration, dof)
+            for dof in observation_dofs
+        ],
+    )
 
 
 def _solve_direct_system(solver: Any, rhs_vector: Any) -> Any:
@@ -360,6 +399,12 @@ def _assign_vector(target: Any, source: Any) -> None:
     target.axpy(1.0, source)
 
 
+def _set_vector_value(vector: Any, index: int, value: float) -> None:
+    vector.setValue(int(index), float(value))
+    vector.assemblyBegin()
+    vector.assemblyEnd()
+
+
 def _assign_matrix(target: Any, source: Any) -> None:
     from petsc4py import PETSc
 
@@ -463,6 +508,7 @@ def _solve_nonlinear_newmark_step_with_snes(
             nonlinear_force_vector,
             load_vector,
         )
+        apply_mpc_to_vector_in_place(mpc, computed_residual)
         _assign_vector(residual, computed_residual)
 
     def assemble_jacobian(_snes, current_displacement, jacobian, preconditioner) -> None:
@@ -532,33 +578,31 @@ def _build_time_excitation_state(
     analysis,
     time_seconds: float,
 ) -> TimeExcitationState:
-    phase_radians = excitation.phase_degrees * (pi / 180.0)
-    omega = 2.0 * pi * default_driving_frequency_hz(excitation, analysis)
-    angle = (omega * time_seconds) + phase_radians
-    displacement = excitation.amplitude * sin(angle)
-    velocity = excitation.amplitude * omega * cos(angle)
-    acceleration = -excitation.amplitude * omega * omega * sin(angle)
+    kinematics = build_harmonic_kinematics(excitation, analysis, time_seconds)
 
     diagonal_stiffness = _vector_value(stiffness_matrix.getDiagonal(), excitation_dof)
     diagonal_mass = _vector_value(mass_matrix.getDiagonal(), excitation_dof)
     diagonal_damping = _vector_value(damping_matrix.getDiagonal(), excitation_dof)
 
     if excitation.kind == ExcitationKind.HARMONIC_FORCE:
-        return TimeExcitationState(signal_value=displacement, equivalent_load=displacement)
+        return TimeExcitationState(
+            signal_value=kinematics.displacement,
+            equivalent_load=kinematics.displacement,
+        )
     if excitation.kind == ExcitationKind.HARMONIC_DISPLACEMENT:
         equivalent_load = (
-            (diagonal_stiffness * displacement)
-            + (diagonal_damping * velocity)
-            + (diagonal_mass * acceleration)
+            (diagonal_stiffness * kinematics.displacement)
+            + (diagonal_damping * kinematics.velocity)
+            + (diagonal_mass * kinematics.acceleration)
         )
         return TimeExcitationState(
-            signal_value=displacement,
+            signal_value=kinematics.displacement,
             equivalent_load=equivalent_load,
         )
     if excitation.kind == ExcitationKind.HARMONIC_ACCELERATION:
         return TimeExcitationState(
-            signal_value=acceleration,
-            equivalent_load=diagonal_mass * acceleration,
+            signal_value=kinematics.acceleration,
+            equivalent_load=diagonal_mass * kinematics.acceleration,
         )
 
     raise ValueError(f"Unsupported excitation kind: {excitation.kind}")
@@ -634,6 +678,23 @@ def _build_initial_acceleration(
     )
     apply_mpc_to_vector_in_place(mpc, load_vector)
     return _solve_direct_system(mass_solver, load_vector)
+
+
+def _build_dirichlet_excitation_system(
+    effective_matrix: Any,
+    excitation_dof: int,
+) -> Any:
+    """Build Dirichlet-enforced solver for prescribed-displacement excitation.
+
+    Zeros row excitation_dof and sets diagonal to 1.  The matrix column is
+    intentionally kept intact so that K_eff[i, excitation_dof] * u_prescribed
+    is handled implicitly through the matrix–vector product during the solve
+    (no separate column-correction step needed).
+    """
+    dirichlet_matrix = effective_matrix.copy()
+    dirichlet_matrix.zeroRows([int(excitation_dof)], diag=1.0)
+    dirichlet_matrix.assemble()
+    return _build_direct_solver(dirichlet_matrix)
 
 
 def solve_corotational_time_history_experiment(
@@ -728,23 +789,10 @@ def solve_corotational_time_history_experiment(
 
     stiffness_matrix = experiment.operator_bundle.stiffness_matrix
 
-    gravity_static = experiment.operator_bundle.gravity_static_displacement
-    if gravity_static is not None:
-        displacement = _copy_vector(gravity_static)
-        if len(displacement.getArray(readonly=True)) < stiffness_matrix.getSize()[0]:
-            extended = stiffness_matrix.createVecRight()
-            extended.set(0.0)
-            src_size = len(gravity_static.getArray(readonly=True))
-            extended.setValues(
-                list(range(src_size)),
-                gravity_static.getValues(list(range(src_size))),
-            )
-            extended.assemblyBegin()
-            extended.assemblyEnd()
-            displacement = extended
-    else:
-        displacement = stiffness_matrix.createVecRight()
-        displacement.set(0.0)
+    # Gravity prestress is already folded into the tangent/geometric stiffness.
+    # The transient unknown is an increment about that prestressed equilibrium.
+    displacement = stiffness_matrix.createVecRight()
+    displacement.set(0.0)
 
     velocity = stiffness_matrix.createVecRight()
     velocity.set(0.0)
@@ -757,7 +805,6 @@ def solve_corotational_time_history_experiment(
         analysis=model.analysis,
         mpc=mpc,
     )
-
     initial_load_vector, initial_excitation_state = _build_time_load_vector(
         stiffness_matrix,
         mass_matrix,
@@ -770,15 +817,14 @@ def solve_corotational_time_history_experiment(
     del initial_load_vector
 
     points = [
-        TimeHistoryPoint(
+        _build_time_history_point(
+            mpc=mpc,
             time_seconds=0.0,
-            excitation_signal_value=initial_excitation_state.signal_value,
-            excitation_load_value=initial_excitation_state.equivalent_load,
-            excitation_response_value=_vector_value(displacement, excitation_dof),
-            observation_values=[
-                _vector_value(displacement, dof)
-                for dof in response_mapping.observation_dofs
-            ],
+            excitation_state=initial_excitation_state,
+            displacement=displacement,
+            acceleration=acceleration,
+            excitation_dof=excitation_dof,
+            observation_dofs=response_mapping.observation_dofs,
         )
     ]
 
@@ -860,7 +906,6 @@ def solve_corotational_time_history_experiment(
             u_iter.axpy(1.0, correction)
 
         displacement = u_iter
-        backsubstitute_mpc_vector(mpc, displacement)
 
         delta_u_final = _copy_vector(displacement)
         delta_u_final.axpy(-1.0, u_pred)
@@ -874,15 +919,14 @@ def solve_corotational_time_history_experiment(
 
         if step % output_stride == 0 or step == total_steps:
             points.append(
-                TimeHistoryPoint(
+                _build_time_history_point(
+                    mpc=mpc,
                     time_seconds=time_seconds,
-                    excitation_signal_value=excitation_state.signal_value,
-                    excitation_load_value=excitation_state.equivalent_load,
-                    excitation_response_value=_vector_value(displacement, excitation_dof),
-                    observation_values=[
-                        _vector_value(displacement, dof)
-                        for dof in response_mapping.observation_dofs
-                    ],
+                    excitation_state=excitation_state,
+                    displacement=displacement,
+                    acceleration=acceleration,
+                    excitation_dof=excitation_dof,
+                    observation_dofs=response_mapping.observation_dofs,
                 )
             )
 
@@ -977,56 +1021,63 @@ def solve_embedded_beam_time_history_experiment(
     )
     effective_solver = _build_direct_solver(effective_matrix)
 
-    gravity_static = experiment.operator_bundle.gravity_static_displacement
-    if gravity_static is not None:
-        displacement = _copy_vector(gravity_static)
-        if len(displacement.getArray(readonly=True)) < stiffness_matrix.getSize()[0]:
-            extended = stiffness_matrix.createVecRight()
-            extended.set(0.0)
-            src_size = len(gravity_static.getArray(readonly=True))
-            extended.setValues(
-                list(range(src_size)),
-                gravity_static.getValues(list(range(src_size))),
-            )
-            extended.assemblyBegin()
-            extended.assemblyEnd()
-            displacement = extended
-    else:
-        displacement = stiffness_matrix.createVecRight()
-        displacement.set(0.0)
+    dirichlet_solver: Any | None = None
+    if model.excitation.kind == ExcitationKind.HARMONIC_DISPLACEMENT:
+        dirichlet_solver = _build_dirichlet_excitation_system(
+            effective_matrix, excitation_dof
+        )
+
+    # Gravity prestress is already folded into the tangent/geometric stiffness.
+    # The transient unknown is an increment about that prestressed equilibrium.
+    displacement = stiffness_matrix.createVecRight()
+    displacement.set(0.0)
     velocity = stiffness_matrix.createVecRight()
     velocity.set(0.0)
-    acceleration = _build_initial_acceleration(
-        stiffness_matrix,
-        mass_matrix,
-        damping_matrix,
-        excitation_dof=excitation_dof,
-        excitation=model.excitation,
-        analysis=model.analysis,
-        mpc=experiment.operator_bundle.mpc,
-    )
+    if model.excitation.kind == ExcitationKind.HARMONIC_DISPLACEMENT:
+        initial_kinematics = build_harmonic_kinematics(model.excitation, model.analysis, 0.0)
+        _set_vector_value(
+            displacement,
+            excitation_dof,
+            initial_kinematics.displacement,
+        )
+        _set_vector_value(velocity, excitation_dof, initial_kinematics.velocity)
+        acceleration = stiffness_matrix.createVecRight()
+        acceleration.set(0.0)
+        _set_vector_value(acceleration, excitation_dof, initial_kinematics.acceleration)
+        initial_excitation_state = TimeExcitationState(
+            signal_value=initial_kinematics.displacement,
+            equivalent_load=initial_kinematics.displacement,
+        )
+    else:
+        acceleration = _build_initial_acceleration(
+            stiffness_matrix,
+            mass_matrix,
+            damping_matrix,
+            excitation_dof=excitation_dof,
+            excitation=model.excitation,
+            analysis=model.analysis,
+            mpc=experiment.operator_bundle.mpc,
+        )
 
-    initial_load_vector, initial_excitation_state = _build_time_load_vector(
-        stiffness_matrix,
-        mass_matrix,
-        damping_matrix,
-        excitation_dof=excitation_dof,
-        excitation=model.excitation,
-        analysis=model.analysis,
-        time_seconds=0.0,
-    )
-    del initial_load_vector
-
-    points = [
-        TimeHistoryPoint(
+        initial_load_vector, initial_excitation_state = _build_time_load_vector(
+            stiffness_matrix,
+            mass_matrix,
+            damping_matrix,
+            excitation_dof=excitation_dof,
+            excitation=model.excitation,
+            analysis=model.analysis,
             time_seconds=0.0,
-            excitation_signal_value=initial_excitation_state.signal_value,
-            excitation_load_value=initial_excitation_state.equivalent_load,
-            excitation_response_value=_vector_value(displacement, excitation_dof),
-            observation_values=[
-                _vector_value(displacement, dof)
-                for dof in response_mapping.observation_dofs
-            ],
+        )
+        del initial_load_vector
+    points = [
+        _build_time_history_point(
+            mpc=experiment.operator_bundle.mpc,
+            time_seconds=0.0,
+            excitation_state=initial_excitation_state,
+            displacement=displacement,
+            acceleration=acceleration,
+            excitation_dof=excitation_dof,
+            observation_dofs=response_mapping.observation_dofs,
         )
     ]
 
@@ -1065,7 +1116,67 @@ def solve_embedded_beam_time_history_experiment(
                     mpc=experiment.operator_bundle.mpc,
                 )
             )
-            backsubstitute_mpc_vector(experiment.operator_bundle.mpc, displacement)
+        elif dirichlet_solver is not None:
+            # Prescribed displacement is an increment about the prestressed equilibrium.
+            # Row excitation_dof in dirichlet_matrix is [0...1...0]; the column is
+            # kept intact so K_eff[i, excitation_dof]·u_prescribed is handled
+            # implicitly by the matrix-vector product, so no separate column
+            # correction needed (which would double-count the coupling).
+            kinematics = build_harmonic_kinematics(
+                model.excitation,
+                model.analysis,
+                time_seconds,
+            )
+            u_prescribed = float(kinematics.displacement)
+            v_prescribed = float(kinematics.velocity)
+            a_prescribed = float(kinematics.acceleration)
+            excitation_state = TimeExcitationState(
+                signal_value=kinematics.displacement,
+                equivalent_load=u_prescribed,
+            )
+
+            rhs_vector = stiffness_matrix.createVecRight()
+            rhs_vector.set(0.0)
+
+            mass_term = rhs_vector.duplicate()
+            mass_matrix.mult(displacement_predictor, mass_term)
+            mass_term.scale(mass_scale)
+            rhs_vector.axpy(1.0, mass_term)
+
+            damping_predictor_term = rhs_vector.duplicate()
+            damping_matrix.mult(displacement_predictor, damping_predictor_term)
+            damping_predictor_term.scale(damping_scale)
+            rhs_vector.axpy(1.0, damping_predictor_term)
+
+            damping_velocity_term = rhs_vector.duplicate()
+            damping_matrix.mult(velocity_predictor, damping_velocity_term)
+            rhs_vector.axpy(-1.0, damping_velocity_term)
+
+            # Enforce Dirichlet: row equation → u[excitation_dof] = u_prescribed
+            rhs_vector.setValue(int(excitation_dof), u_prescribed)
+            rhs_vector.assemblyBegin()
+            rhs_vector.assemblyEnd()
+
+            displacement = _solve_direct_system(dirichlet_solver, rhs_vector)
+
+            acceleration = _copy_vector(displacement)
+            acceleration.axpy(-1.0, displacement_predictor)
+            acceleration.scale(mass_scale)
+
+            velocity = _copy_vector(velocity_predictor)
+            gamma_dt_acc = _copy_vector(acceleration)
+            gamma_dt_acc.scale(gamma * dt)
+            velocity.axpy(1.0, gamma_dt_acc)
+
+            # Enforce prescribed v and a at excitation DOF so the Newmark
+            # predictor (u_pred = u + dt·v + dt²·a) stays accurate next step.
+            velocity.setValue(int(excitation_dof), v_prescribed)
+            velocity.assemblyBegin()
+            velocity.assemblyEnd()
+            acceleration.setValue(int(excitation_dof), a_prescribed)
+            acceleration.assemblyBegin()
+            acceleration.assemblyEnd()
+
         else:
             rhs_vector, excitation_state = _build_time_load_vector(
                 stiffness_matrix,
@@ -1093,7 +1204,6 @@ def solve_embedded_beam_time_history_experiment(
             rhs_vector.axpy(-1.0, damping_velocity_term)
 
             displacement = _solve_direct_system(effective_solver, rhs_vector)
-            backsubstitute_mpc_vector(experiment.operator_bundle.mpc, displacement)
 
             acceleration = _copy_vector(displacement)
             acceleration.axpy(-1.0, displacement_predictor)
@@ -1106,15 +1216,14 @@ def solve_embedded_beam_time_history_experiment(
 
         if step % output_stride == 0 or step == total_steps:
             points.append(
-                TimeHistoryPoint(
+                _build_time_history_point(
+                    mpc=experiment.operator_bundle.mpc,
                     time_seconds=time_seconds,
-                    excitation_signal_value=excitation_state.signal_value,
-                    excitation_load_value=excitation_state.equivalent_load,
-                    excitation_response_value=_vector_value(displacement, excitation_dof),
-                    observation_values=[
-                        _vector_value(displacement, dof)
-                        for dof in response_mapping.observation_dofs
-                    ],
+                    excitation_state=excitation_state,
+                    displacement=displacement,
+                    acceleration=acceleration,
+                    excitation_dof=excitation_dof,
+                    observation_dofs=response_mapping.observation_dofs,
                 )
             )
 

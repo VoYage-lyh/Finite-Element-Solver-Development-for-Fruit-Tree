@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 
 import pytest
@@ -225,6 +226,141 @@ def _auto_and_clamp_nonlinear_payload() -> dict:
     return payload
 
 
+def _branched_gravity_fruit_displacement_payload() -> dict:
+    payload = _cantilever_payload()
+    payload["metadata"]["name"] = "fenicsx_branched_gravity_fruit_displacement"
+    payload["materials"] = [
+        {
+            "id": "xylem_default",
+            "tissue": "xylem",
+            "model": "linear",
+            "density": 750.0,
+            "youngs_modulus": 1.0e10,
+            "poisson_ratio": 0.30,
+            "damping_ratio": 0.01,
+        },
+        {
+            "id": "pith_default",
+            "tissue": "pith",
+            "model": "linear",
+            "density": 180.0,
+            "youngs_modulus": 3.0e8,
+            "poisson_ratio": 0.25,
+            "damping_ratio": 0.04,
+        },
+        {
+            "id": "phloem_default",
+            "tissue": "phloem",
+            "model": "linear",
+            "density": 900.0,
+            "youngs_modulus": 1.0e8,
+            "poisson_ratio": 0.35,
+            "damping_ratio": 0.06,
+        },
+    ]
+    payload["branches"] = [
+        {
+            "id": "trunk",
+            "parent_branch_id": None,
+            "level": 0,
+            "start": [0.0, 0.0, 0.0],
+            "end": [0.0, 0.0, 0.8],
+            "discretization": {"num_elements": 2, "hotspot": False},
+            "stations": [
+                {"s": 0.0, "shorthand": "circular", "outer_radius": 0.03},
+                {"s": 1.0, "shorthand": "circular", "outer_radius": 0.02},
+            ],
+        },
+        {
+            "id": "primary_a",
+            "parent_branch_id": "trunk",
+            "level": 1,
+            "start": [0.0, 0.0, 0.8],
+            "end": [0.0, 0.5, 1.0],
+            "discretization": {"num_elements": 3, "hotspot": False},
+            "stations": [
+                {"s": 0.0, "shorthand": "circular", "outer_radius": 0.015},
+                {"s": 1.0, "shorthand": "circular", "outer_radius": 0.008},
+            ],
+        },
+        {
+            "id": "primary_b",
+            "parent_branch_id": "trunk",
+            "level": 1,
+            "start": [0.0, 0.0, 0.8],
+            "end": [0.433, -0.25, 1.0],
+            "discretization": {"num_elements": 3, "hotspot": False},
+            "stations": [
+                {"s": 0.0, "shorthand": "circular", "outer_radius": 0.015},
+                {"s": 1.0, "shorthand": "circular", "outer_radius": 0.008},
+            ],
+        },
+        {
+            "id": "primary_c",
+            "parent_branch_id": "trunk",
+            "level": 1,
+            "start": [0.0, 0.0, 0.8],
+            "end": [-0.433, -0.25, 1.0],
+            "discretization": {"num_elements": 3, "hotspot": False},
+            "stations": [
+                {"s": 0.0, "shorthand": "circular", "outer_radius": 0.015},
+                {"s": 1.0, "shorthand": "circular", "outer_radius": 0.008},
+            ],
+        },
+    ]
+    payload["joints"] = []
+    payload["fruits"] = [
+        {
+            "id": f"fruit_{branch_id}",
+            "branch_id": branch_id,
+            "location_s": 1.0,
+            "mass": 0.08,
+            "stiffness": 3500.0,
+            "damping": 1.0,
+            "target_component": "uz",
+        }
+        for branch_id in ("primary_a", "primary_b", "primary_c")
+    ]
+    payload["clamps"] = [
+        {
+            "branch_id": "trunk",
+            "support_stiffness": 1.0,
+            "support_damping": 0.0,
+            "cubic_stiffness": 0.0,
+        }
+    ]
+    payload["excitation"] = {
+        "kind": "harmonic_displacement",
+        "target_branch_id": "trunk",
+        "target_node": "tip",
+        "target_component": "ux",
+        "amplitude": 0.005,
+        "phase_degrees": 0.0,
+        "driving_frequency_hz": 3.0,
+    }
+    payload["analysis"] = {
+        "mode": "time_history",
+        "time_step_seconds": 0.005,
+        "total_time_seconds": 0.05,
+        "output_stride": 1,
+        "rayleigh_alpha": 0.2,
+        "rayleigh_beta": 1.0e-4,
+        "include_gravity_prestress": True,
+        "output_csv": "unused.csv",
+    }
+    payload["observations"] = [
+        {
+            "id": f"{branch_id}_tip",
+            "target_type": "branch",
+            "target_id": branch_id,
+            "target_node": "tip",
+            "target_components": ["ux", "uy", "uz"],
+        }
+        for branch_id in ("primary_a", "primary_b", "primary_c")
+    ]
+    return payload
+
+
 def test_embedded_beam_time_history_experiment_smoke(tmp_path) -> None:
     if os.environ.get("ORCHARD_RUN_DOLFINX_TESTS") != "1":
         pytest.skip("Set ORCHARD_RUN_DOLFINX_TESTS=1 to run DOLFINx time-history tests")
@@ -291,3 +427,30 @@ def test_embedded_beam_time_history_supports_auto_and_clamp_nonlinear_links(tmp_
     assert "auto_joint:branch_1" in link_labels
     assert "clamp:trunk" in link_labels
     assert len(result.result.points) >= 2
+
+
+def test_branched_gravity_fruit_displacement_time_history_stays_finite(tmp_path) -> None:
+    if os.environ.get("ORCHARD_RUN_DOLFINX_TESTS") != "1":
+        pytest.skip("Set ORCHARD_RUN_DOLFINX_TESTS=1 to run DOLFINx time-history tests")
+
+    model_path = tmp_path / "fenicsx_branched_gravity_fruit_displacement.json"
+    model_path.write_text(
+        json.dumps(_branched_gravity_fruit_displacement_payload()),
+        encoding="utf-8",
+    )
+    model = load_orchard_model(str(model_path))
+
+    result = solve_embedded_beam_time_history_experiment(
+        model,
+        polynomial_degree=1,
+        use_model_clamps=True,
+    )
+
+    accelerations = [
+        value
+        for point in result.result.points
+        for value in point.observation_acceleration_values
+    ]
+    assert accelerations
+    assert all(math.isfinite(value) for value in accelerations)
+    assert max(abs(value) for value in accelerations) < 1.0e5

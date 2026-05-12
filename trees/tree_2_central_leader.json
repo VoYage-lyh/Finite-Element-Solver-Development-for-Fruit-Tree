@@ -1,0 +1,34 @@
+{
+  "metadata": {
+    "name": "tree_2_central_leader",
+    "training_system": "central leader / 中央领导干形",
+    "typical_crop": "苹果、梨（传统标准果园）",
+    "notes": "高主干2.5m，6根一级枝螺旋上升均布；不分二级枝。"
+  },
+  "materials_ref": "shared_materials.json",
+  "trunk": {
+    "length": 2.5,
+    "diameter_root": 0.100,
+    "diameter_tip": 0.040,
+    "target_element_length": 0.30
+  },
+  "branches": [
+    {"id": "primary_1", "parent": "trunk", "level": 1, "location_distance": 1.30, "length": 0.85, "diameter_root": 0.040, "diameter_tip": 0.022, "inclination_deg": 70, "azimuth_deg": 0,   "curve_deg": 25, "n_curve_segments": 3, "target_element_length": 0.18},
+    {"id": "primary_2", "parent": "trunk", "level": 1, "location_distance": 1.55, "length": 0.78, "diameter_root": 0.036, "diameter_tip": 0.020, "inclination_deg": 70, "azimuth_deg": 60,  "curve_deg": 25, "n_curve_segments": 3, "target_element_length": 0.18},
+    {"id": "primary_3", "parent": "trunk", "level": 1, "location_distance": 1.80, "length": 0.70, "diameter_root": 0.032, "diameter_tip": 0.018, "inclination_deg": 72, "azimuth_deg": 120, "curve_deg": 25, "n_curve_segments": 3, "target_element_length": 0.18},
+    {"id": "primary_4", "parent": "trunk", "level": 1, "location_distance": 2.05, "length": 0.62, "diameter_root": 0.028, "diameter_tip": 0.016, "inclination_deg": 72, "azimuth_deg": 180, "curve_deg": 25, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "primary_5", "parent": "trunk", "level": 1, "location_distance": 2.25, "length": 0.55, "diameter_root": 0.024, "diameter_tip": 0.014, "inclination_deg": 74, "azimuth_deg": 240, "curve_deg": 22, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "primary_6", "parent": "trunk", "level": 1, "location_distance": 2.42, "length": 0.45, "diameter_root": 0.020, "diameter_tip": 0.012, "inclination_deg": 76, "azimuth_deg": 300, "curve_deg": 20, "n_curve_segments": 3, "target_element_length": 0.15}
+  ],
+  "analysis": {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 25.0,
+    "frequency_steps": 25,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 1.0e-4,
+    "include_gravity_prestress": true,
+    "output_csv": "results/tree_2_central_leader/frf.csv"
+  }
+}

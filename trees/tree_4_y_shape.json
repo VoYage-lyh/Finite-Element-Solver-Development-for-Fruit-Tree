@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "name": "tree_4_y_shape",
+    "training_system": "Y-shape / Tatura trellis / Y字形",
+    "typical_crop": "桃、油桃、杏（现代核果架式）",
+    "notes": "极短主干 + 2根强支架枝Y形展开 + 每支架带3根二级枝。"
+  },
+  "materials_ref": "shared_materials.json",
+  "trunk": {
+    "length": 0.55,
+    "diameter_root": 0.100,
+    "diameter_tip": 0.075,
+    "target_element_length": 0.20
+  },
+  "branches": [
+    {"id": "scaffold_n", "parent": "trunk", "level": 1, "location_distance": 0.50, "length": 1.90, "diameter_root": 0.070, "diameter_tip": 0.025, "inclination_deg": 35, "azimuth_deg": 90,  "curve_deg": 18, "n_curve_segments": 4, "target_element_length": 0.22},
+    {"id": "scaffold_s", "parent": "trunk", "level": 1, "location_distance": 0.50, "length": 1.90, "diameter_root": 0.070, "diameter_tip": 0.025, "inclination_deg": 35, "azimuth_deg": 270, "curve_deg": 18, "n_curve_segments": 4, "target_element_length": 0.22},
+    {"id": "secondary_n1", "parent": "scaffold_n", "level": 2, "location_distance": 0.60, "length": 0.50, "diameter_root": 0.020, "diameter_tip": 0.010, "inclination_deg": 30, "azimuth_deg": 60,  "curve_deg": 22, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "secondary_n2", "parent": "scaffold_n", "level": 2, "location_distance": 1.05, "length": 0.45, "diameter_root": 0.018, "diameter_tip": 0.009, "inclination_deg": 28, "azimuth_deg": 60,  "curve_deg": 22, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "secondary_n3", "parent": "scaffold_n", "level": 2, "location_distance": 1.50, "length": 0.40, "diameter_root": 0.016, "diameter_tip": 0.008, "inclination_deg": 26, "azimuth_deg": 60,  "curve_deg": 20, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "secondary_s1", "parent": "scaffold_s", "level": 2, "location_distance": 0.60, "length": 0.50, "diameter_root": 0.020, "diameter_tip": 0.010, "inclination_deg": 30, "azimuth_deg": 60,  "curve_deg": 22, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "secondary_s2", "parent": "scaffold_s", "level": 2, "location_distance": 1.05, "length": 0.45, "diameter_root": 0.018, "diameter_tip": 0.009, "inclination_deg": 28, "azimuth_deg": 60,  "curve_deg": 22, "n_curve_segments": 3, "target_element_length": 0.15},
+    {"id": "secondary_s3", "parent": "scaffold_s", "level": 2, "location_distance": 1.50, "length": 0.40, "diameter_root": 0.016, "diameter_tip": 0.008, "inclination_deg": 26, "azimuth_deg": 60,  "curve_deg": 20, "n_curve_segments": 3, "target_element_length": 0.15}
+  ],
+  "analysis": {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 25.0,
+    "frequency_steps": 25,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 1.0e-4,
+    "include_gravity_prestress": true,
+    "output_csv": "results/tree_4_y_shape/frf.csv"
+  }
+}

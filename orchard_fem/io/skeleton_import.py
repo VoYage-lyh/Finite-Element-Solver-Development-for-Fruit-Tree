@@ -6,6 +6,27 @@ from pathlib import Path
 from typing import Any
 
 
+DEFAULT_ANALYSIS = {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 25.0,
+    "frequency_steps": 25,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 1.0e-4,
+    "include_gravity_prestress": True,
+    "output_csv": "frequency_response.csv",
+}
+
+DEFAULT_FRUIT_POLICY = {
+    "total_fruit_count": 20,
+    "seed": 2026,
+    "include_terminal_primary": False,
+    "detachment_displacement_m": 0.010,
+    "attachment_damping_ratio": 0.05,
+    "attachment_component": "uz",
+}
+
 DEFAULT_MATERIALS = [
     {
         "id": "pith_default",
@@ -123,7 +144,6 @@ def _convert_branch(branch: dict[str, Any]) -> dict[str, Any]:
 
 
 def _infer_terminal_branch_ids(branches: list[dict[str, Any]]) -> set[str]:
-    """Return branch ids that have no children (leaf nodes in the branch tree)."""
     parent_ids = {
         str(branch["parent_branch_id"])
         for branch in branches
@@ -132,36 +152,136 @@ def _infer_terminal_branch_ids(branches: list[dict[str, Any]]) -> set[str]:
     return {str(branch["id"]) for branch in branches} - parent_ids
 
 
+def _root_branch_id(branches: list[dict[str, Any]]) -> str:
+    for branch in branches:
+        if branch.get("parent_branch_id") is None:
+            return str(branch["id"])
+    return str(branches[0]["id"])
+
+
+def _auto_joints(_branches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Branch-to-branch connections are handled automatically by the FEniCSx assembly:
+    - Coincident endpoints → mesh point deduplication (shared DOFs, rigid)
+    - Non-coincident endpoints → dolfinx_mpc rigid constraint (auto-detected)
+    No explicit joint entries are needed unless the user wants a spring / nonlinear law.
+    """
+    return []
+
+
+def _auto_clamps(root_id: str) -> list[dict[str, Any]]:
+    return [{
+        "branch_id": root_id,
+        "support_stiffness": 40000.0,
+        "support_damping": 35.0,
+    }]
+
+
+def _auto_excitation(root_id: str) -> dict[str, Any]:
+    return {
+        "kind": "harmonic_force",
+        "target_branch_id": root_id,
+        "target_node": "tip",
+        "target_component": "ux",
+        "amplitude": 10.0,
+        "phase_degrees": 0.0,
+        "driving_frequency_hz": 5.0,
+    }
+
+
+def _auto_observations(converted_branches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Root / mid / tip observation at every branch — covers full structural response."""
+    observations = []
+    for branch in converted_branches:
+        for position in ("root", "mid", "tip"):
+            observations.append({
+                "id": f"obs_{branch['id']}_{position}",
+                "target_type": "branch",
+                "target_id": branch["id"],
+                "target_node": position,
+                "target_components": ["ux", "uy", "uz"],
+            })
+    return observations
+
+
 def convert_skeleton_payload_to_orchard_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if "branches" not in payload:
         raise ValueError("Skeleton payload must contain a branches array")
-    if "analysis" not in payload:
-        raise ValueError("Skeleton payload must contain an analysis block")
-    if "excitation" not in payload:
-        raise ValueError("Skeleton payload must contain an excitation block")
 
     raw_branches = payload["branches"]
     terminal_ids = _infer_terminal_branch_ids(raw_branches)
+    root_id = _root_branch_id(raw_branches)
+
     converted_branches = []
     for branch in raw_branches:
         converted = _convert_branch(branch)
         converted["is_terminal"] = str(branch["id"]) in terminal_ids
         converted_branches.append(converted)
 
+    # joints: use provided or auto-generate from topology
+    joints = payload.get("joints")
+    if joints is None:
+        joints = _auto_joints(raw_branches)
+    else:
+        joints = [dict(j) for j in joints]
+
+    # clamps: use provided or auto-generate for root branch
+    clamps = payload.get("clamps")
+    if clamps is None:
+        clamps = _auto_clamps(root_id)
+    else:
+        clamps = [dict(c) for c in clamps]
+
+    # excitation: use provided or auto-generate at root tip
+    excitation = payload.get("excitation")
+    if excitation is None:
+        excitation = _auto_excitation(root_id)
+    else:
+        excitation = dict(excitation)
+
+    # analysis: use provided or use defaults
+    analysis = payload.get("analysis")
+    if analysis is None:
+        analysis = dict(DEFAULT_ANALYSIS)
+    else:
+        # fill missing keys with defaults
+        merged = dict(DEFAULT_ANALYSIS)
+        merged.update(analysis)
+        analysis = merged
+
+    # observations: use provided or auto-generate at all branch tips
+    observations = payload.get("observations")
+    if observations is None:
+        observations = _auto_observations(converted_branches)
+    else:
+        observations = [dict(o) for o in observations]
+
+    # fruits / fruit_distribution_policy
+    fruits = [dict(f) for f in payload.get("fruits", [])]
+    fruit_policy = payload.get("fruit_distribution_policy")
+    if not fruits and fruit_policy is None:
+        # Only add default policy when fruit-bearing branches exist (level >= 2,
+        # or level == 1 for terminal primary branches).
+        max_level = max((int(b.get("level", 0)) for b in raw_branches), default=0)
+        if max_level >= 2:
+            fruit_policy = dict(DEFAULT_FRUIT_POLICY)
+        elif max_level >= 1:
+            policy = dict(DEFAULT_FRUIT_POLICY)
+            policy["include_terminal_primary"] = True
+            fruit_policy = policy
+
     result: dict[str, Any] = {
         "metadata": dict(payload.get("metadata", {})),
-        "materials": [dict(material) for material in payload.get("materials", DEFAULT_MATERIALS)],
+        "materials": [dict(m) for m in payload.get("materials", DEFAULT_MATERIALS)],
         "branches": converted_branches,
-        "joints": [dict(joint) for joint in payload.get("joints", [])],
-        "fruits": [dict(fruit) for fruit in payload.get("fruits", [])],
-        "clamps": [dict(clamp) for clamp in payload.get("clamps", [])],
-        "excitation": dict(payload["excitation"]),
-        "analysis": dict(payload["analysis"]),
-        "observations": [dict(observation) for observation in payload.get("observations", [])],
+        "joints": joints,
+        "fruits": fruits,
+        "clamps": clamps,
+        "excitation": excitation,
+        "analysis": analysis,
+        "observations": observations,
     }
-
-    if "fruit_distribution_policy" in payload:
-        result["fruit_distribution_policy"] = dict(payload["fruit_distribution_policy"])
+    if fruit_policy is not None:
+        result["fruit_distribution_policy"] = dict(fruit_policy)
 
     return result
 

@@ -100,6 +100,7 @@ def build_linear_branch_connection_mpc(
     owners: list[int] = []
     offsets: list[int] = [0]
     constrained_branch_ids: set[str] = set()
+    constrained_slave_dofs: set[int] = set()
 
     for branch in candidate_branches:
         assert branch.parent_branch_id is not None
@@ -125,12 +126,15 @@ def build_linear_branch_connection_mpc(
             )
             if slave_dof == master_dof:
                 continue
+            if slave_dof in constrained_slave_dofs:
+                continue
 
             master_global_dof, master_owner = _local_dof_to_global_owner(
                 space_bundle.mixed_space,
                 master_dof,
             )
             slaves.append(int(slave_dof))
+            constrained_slave_dofs.add(int(slave_dof))
             masters.append(master_global_dof)
             owners.append(master_owner)
             coeffs.append(1.0)

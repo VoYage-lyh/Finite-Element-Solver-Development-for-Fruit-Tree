@@ -144,50 +144,127 @@ def _solve_static_prestress_displacement(
     return solution
 
 
+def _dot(left: Vec3, right: Vec3) -> float:
+    return (left.x * right.x) + (left.y * right.y) + (left.z * right.z)
+
+
+def _sum_vectors(vectors: list[Vec3]) -> Vec3:
+    total = Vec3(0.0, 0.0, 0.0)
+    for vector in vectors:
+        total = total + vector
+    return total
+
+
+def _branch_station_of_point(branch, point: Vec3) -> float:
+    points = branch.path.points()
+    total_length = branch.path.length()
+    if total_length <= 1.0e-12:
+        return 0.0
+
+    best_distance_squared = float("inf")
+    best_length = 0.0
+    traversed = 0.0
+    for index in range(len(points) - 1):
+        first = points[index]
+        second = points[index + 1]
+        segment = second - first
+        segment_length_squared = _dot(segment, segment)
+        if segment_length_squared <= 1.0e-24:
+            continue
+        alpha = _dot(point - first, segment) / segment_length_squared
+        alpha = max(0.0, min(1.0, alpha))
+        closest = first + segment.scale(alpha)
+        offset = point - closest
+        distance_squared = _dot(offset, offset)
+        if distance_squared < best_distance_squared:
+            best_distance_squared = distance_squared
+            best_length = traversed + sqrt(segment_length_squared) * alpha
+        traversed += sqrt(segment_length_squared)
+
+    return max(0.0, min(1.0, best_length / total_length))
+
+
+def _element_tangent_and_length(branch, local_index: int, num_elements: int) -> tuple[Vec3, float]:
+    start_point = branch.path.point_at(local_index / num_elements)
+    end_point = branch.path.point_at((local_index + 1) / num_elements)
+    tangent = Vec3(
+        end_point.x - start_point.x,
+        end_point.y - start_point.y,
+        end_point.z - start_point.z,
+    )
+    length = sqrt((tangent.x**2) + (tangent.y**2) + (tangent.z**2))
+    if length <= 1.0e-12:
+        raise ValueError(
+            f"Degenerate branch element on '{branch.branch_id}' at index {local_index}"
+        )
+    return Vec3(tangent.x / length, tangent.y / length, tangent.z / length), length
+
+
 def _build_prestress_axial_forces(
     model: OrchardModel,
     cell_data: EmbeddedBeamCellData,
     mesh_spec: EmbeddedLineMeshSpec,
-    branch_node_dofs: BranchNodeDofMap,
-    static_displacement: Any,
 ) -> dict[str, list[float]]:
-    displacement_values = static_displacement.getArray(readonly=True)
+    gravity_direction = _normalize_gravity_direction(model.analysis.gravity_direction)
+    gravity_force_per_mass = gravity_direction.scale(9.81)
+
+    def mass_force(mass: float) -> Vec3:
+        return gravity_force_per_mass.scale(max(float(mass), 0.0))
+
+    children_by_parent: dict[str, list[str]] = {}
+    for branch in model.branches:
+        if branch.parent_branch_id is not None:
+            children_by_parent.setdefault(branch.parent_branch_id, []).append(branch.branch_id)
+
+    element_forces: dict[str, list[Vec3]] = {}
+    for branch in model.branches:
+        cell_indices = mesh_spec.cells_for_branch(branch.branch_id)
+        num_elements = max(branch.discretization.num_elements, 1)
+        forces: list[Vec3] = []
+        for local_index, cell_index in enumerate(cell_indices):
+            _, length = _element_tangent_and_length(branch, local_index, num_elements)
+            forces.append(mass_force(cell_data.mass_per_length[cell_index] * length))
+        element_forces[branch.branch_id] = forces
+
+    subtree_force_cache: dict[str, Vec3] = {}
+
+    def subtree_force(branch_id: str) -> Vec3:
+        cached = subtree_force_cache.get(branch_id)
+        if cached is not None:
+            return cached
+        total = _sum_vectors(element_forces[branch_id])
+        for child_branch_id in children_by_parent.get(branch_id, []):
+            total = total + subtree_force(child_branch_id)
+        subtree_force_cache[branch_id] = total
+        return total
+
+    child_attachment_station: dict[tuple[str, str], float] = {}
+    for branch in model.branches:
+        if branch.parent_branch_id is None:
+            continue
+        parent = model.require_branch(branch.parent_branch_id)
+        child_attachment_station[(parent.branch_id, branch.branch_id)] = _branch_station_of_point(
+            parent,
+            branch.path.point_at(0.0),
+        )
+
     axial_forces: dict[str, list[float]] = {}
 
     for branch in model.branches:
-        cell_indices = mesh_spec.cells_for_branch(branch.branch_id)
-        node_dofs = branch_node_dofs[branch.branch_id]
         num_elements = max(branch.discretization.num_elements, 1)
         branch_forces: list[float] = []
-        for local_index, cell_index in enumerate(cell_indices):
-            start_point = branch.path.point_at(local_index / num_elements)
-            end_point = branch.path.point_at((local_index + 1) / num_elements)
-            tangent = Vec3(
-                end_point.x - start_point.x,
-                end_point.y - start_point.y,
-                end_point.z - start_point.z,
+        for local_index in range(num_elements):
+            midpoint_station = (local_index + 0.5) / num_elements
+            tangent, _ = _element_tangent_and_length(branch, local_index, num_elements)
+            distal_load = element_forces[branch.branch_id][local_index].scale(0.5)
+            distal_load = distal_load + _sum_vectors(
+                element_forces[branch.branch_id][local_index + 1 :]
             )
-            length = sqrt(
-                (tangent.x**2) + (tangent.y**2) + (tangent.z**2)
-            )
-            tangent = Vec3(tangent.x / length, tangent.y / length, tangent.z / length)
-
-            first_dofs = node_dofs[local_index]
-            second_dofs = node_dofs[local_index + 1]
-            first_axial = (
-                displacement_values[first_dofs[0]] * tangent.x
-                + displacement_values[first_dofs[1]] * tangent.y
-                + displacement_values[first_dofs[2]] * tangent.z
-            )
-            second_axial = (
-                displacement_values[second_dofs[0]] * tangent.x
-                + displacement_values[second_dofs[1]] * tangent.y
-                + displacement_values[second_dofs[2]] * tangent.z
-            )
-            branch_forces.append(
-                cell_data.axial_rigidity[cell_index]
-                * ((second_axial - first_axial) / length)
-            )
+            for child_branch_id in children_by_parent.get(branch.branch_id, []):
+                station = child_attachment_station[(branch.branch_id, child_branch_id)]
+                if station >= midpoint_station:
+                    distal_load = distal_load + subtree_force(child_branch_id)
+            branch_forces.append(_dot(distal_load, tangent))
         axial_forces[branch.branch_id] = branch_forces
     return axial_forces
 
@@ -199,6 +276,34 @@ def _build_geometric_stiffness_matrix(
     branch_node_dofs: BranchNodeDofMap,
     axial_forces: dict[str, list[float]],
 ) -> Any:
+    fixed_dofs: set[int] = set()
+    for clamp in model.clamps:
+        fixed_dofs.update(int(dof) for dof in branch_node_dofs[clamp.branch_id][0])
+
+    mpc = operator_bundle.mpc
+    if mpc is None:
+        slave_dofs: frozenset[int] = frozenset()
+        mpc_coefficients = None
+        mpc_offsets = None
+    else:
+        slave_dofs = frozenset(int(slave) for slave in mpc.slaves)
+        mpc_coefficients, mpc_offsets = mpc.coefficients()
+
+    def constrained_terms(dof: int) -> tuple[tuple[int, float], ...]:
+        if int(dof) in fixed_dofs:
+            return ()
+        if mpc is None or dof not in slave_dofs:
+            return ((int(dof), 1.0),)
+
+        assert mpc_coefficients is not None
+        assert mpc_offsets is not None
+        masters = mpc.masters.links(int(dof))
+        coefficients = mpc_coefficients[mpc_offsets[dof] : mpc_offsets[dof + 1]]
+        return tuple(
+            (int(master), float(coefficient))
+            for master, coefficient in zip(masters, coefficients)
+        )
+
     geometric_matrix = create_empty_aij_matrix_like(
         operator_bundle.stiffness_matrix,
         operator_bundle.stiffness_matrix.getSize()[0],
@@ -217,25 +322,25 @@ def _build_geometric_stiffness_matrix(
                 + ((end_point.z - start_point.z) ** 2)
             )
             transformation = build_transformation_matrix(start_point, end_point)
-            # FEniCSx static preload reports compression with the opposite sign
-            # convention from the legacy 12x12 geometric-stiffness helper.
-            local_geometric = build_local_geometric_stiffness_matrix(-axial_force, length)
+            local_geometric = build_local_geometric_stiffness_matrix(axial_force, length)
             global_geometric = transform_to_global(local_geometric, transformation)
             element_dofs = list(node_dofs[local_index]) + list(node_dofs[local_index + 1])
             for local_row, global_row in enumerate(element_dofs):
                 row_values = global_geometric[local_row]
-                ownership_start, ownership_end = owned_rows
-                if not (ownership_start <= global_row < ownership_end):
-                    continue
-                columns = []
-                values = []
+                row_terms = constrained_terms(global_row)
                 for local_col, value in enumerate(row_values):
                     if abs(value) <= 1.0e-14:
                         continue
-                    columns.append(element_dofs[local_col])
-                    values.append(float(value))
-                if columns:
-                    geometric_matrix.setValues(global_row, columns, values)
+                    column_terms = constrained_terms(element_dofs[local_col])
+                    for resolved_row, row_coefficient in row_terms:
+                        for resolved_column, column_coefficient in column_terms:
+                            accumulate_owned_matrix_value(
+                                geometric_matrix,
+                                owned_rows,
+                                resolved_row,
+                                resolved_column,
+                                float(value) * row_coefficient * column_coefficient,
+                            )
 
     geometric_matrix.assemble()
     return geometric_matrix
@@ -273,8 +378,6 @@ def augment_operators_with_gravity_prestress(
         model,
         cell_data,
         mesh_spec,
-        branch_node_dofs,
-        static_displacement,
     )
     geometric_stiffness_matrix = _build_geometric_stiffness_matrix(
         model,

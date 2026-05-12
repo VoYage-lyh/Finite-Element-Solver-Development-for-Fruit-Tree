@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -19,6 +19,8 @@ class TimeHistoryRow:
     excitation_load: float
     excitation_response: float
     observation_values: list[float]
+    excitation_acceleration: float = 0.0
+    observation_acceleration_values: list[float] = field(default_factory=list)
 
 
 def write_frequency_response_csv(
@@ -40,6 +42,7 @@ def write_time_history_csv(
     rows: list[TimeHistoryRow],
 ) -> None:
     path = Path(file_path)
+    accel_names = [f"{n}_accel_ms2" for n in observation_names]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(
@@ -47,8 +50,10 @@ def write_time_history_csv(
                 "time_s",
                 "excitation_signal",
                 "excitation_load",
-                "excitation_response",
+                "excitation_response_disp_m",
                 *observation_names,
+                "excitation_accel_ms2",
+                *accel_names,
             ]
         )
         for row in rows:
@@ -59,5 +64,7 @@ def write_time_history_csv(
                     row.excitation_load,
                     row.excitation_response,
                     *row.observation_values,
+                    row.excitation_acceleration,
+                    *row.observation_acceleration_values,
                 ]
             )

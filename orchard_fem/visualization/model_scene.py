@@ -16,6 +16,8 @@ def resolve_branch_station(branch: dict, target_node) -> float:
         return 1.0
     if target_node == "root":
         return 0.0
+    if target_node == "mid":
+        return 0.5
 
     node_index = int(target_node)
     return max(0.0, min(1.0, node_index / branch_num_elements(branch)))

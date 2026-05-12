@@ -6,7 +6,7 @@ from typing import Sequence
 from orchard_fem.automation import FullValidationConfig, FullValidationOutputs, run_full_validation
 from orchard_fem.domain import SolverBackendKind
 from orchard_fem.environment import run_environment_audit
-from orchard_fem.postprocess import plot_frequency_response_csv
+from orchard_fem.postprocess import plot_frequency_response_csv, plot_time_history_csv
 from orchard_fem.visualization import VisualizationOutputs, visualize_analysis
 from orchard_fem.workflows import (
     AnalysisRunOutputs,
@@ -110,6 +110,14 @@ class OrchardApplication:
 
     def plot_frequency_response(self, response_csv: Path, show: bool = True) -> None:
         plot_frequency_response_csv(response_csv, show=show)
+
+    def plot_time_history(
+        self,
+        response_csv: Path,
+        show: bool = True,
+        output_path: Path | None = None,
+    ) -> None:
+        plot_time_history_csv(response_csv, show=show, output_path=output_path)
 
     def full_validate(self, config: FullValidationConfig) -> FullValidationOutputs:
         return run_full_validation(config)

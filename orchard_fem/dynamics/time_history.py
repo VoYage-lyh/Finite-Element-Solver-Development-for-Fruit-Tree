@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from orchard_fem.discretization import LinearDynamicAssemblyResult, OrchardSystemAssembler
 from orchard_fem.dynamics.excitation import (
@@ -31,6 +31,8 @@ class TimeHistoryPoint:
     excitation_load_value: float
     excitation_response_value: float
     observation_values: list[float]
+    excitation_acceleration_value: float = 0.0
+    observation_acceleration_values: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,8 @@ class TimeHistoryResult:
                     excitation_load=point.excitation_load_value,
                     excitation_response=point.excitation_response_value,
                     observation_values=point.observation_values,
+                    excitation_acceleration=point.excitation_acceleration_value,
+                    observation_acceleration_values=point.observation_acceleration_values,
                 )
                 for point in self.points
             ],
@@ -184,6 +188,8 @@ def _solve_time_history_execution(
             excitation_load_value=initial_excitation_state.equivalent_load,
             excitation_response_value=displacement[assembled.excitation_dof],
             observation_values=[displacement[dof] for dof in assembled.observation_dofs],
+            excitation_acceleration_value=acceleration[assembled.excitation_dof],
+            observation_acceleration_values=[acceleration[dof] for dof in assembled.observation_dofs],
         )
     ]
 
@@ -296,6 +302,10 @@ def _solve_time_history_execution(
                     excitation_response_value=displacement[assembled.excitation_dof],
                     observation_values=[
                         displacement[dof] for dof in assembled.observation_dofs
+                    ],
+                    excitation_acceleration_value=acceleration[assembled.excitation_dof],
+                    observation_acceleration_values=[
+                        acceleration[dof] for dof in assembled.observation_dofs
                     ],
                 )
             )

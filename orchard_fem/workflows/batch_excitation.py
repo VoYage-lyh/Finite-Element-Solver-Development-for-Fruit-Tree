@@ -272,3 +272,46 @@ def run_batch_frequency_response(
             excitation_specs, excitation_dofs, spec_points
         )
     ]
+
+
+def build_full_tree_excitation_specs(
+    model: OrchardModel,
+    *,
+    node: str = "mid",
+    component: str = "ux",
+    amplitude: float = 1.0,
+    skip_levels: list[int] | None = None,
+) -> list[ExcitationSpec]:
+    """Build one ExcitationSpec per branch, all at the same node position.
+
+    Parameters
+    ----------
+    model:
+        Loaded OrchardModel.
+    node:
+        Node designator for every spec: ``"root"``, ``"mid"``, ``"tip"``, or
+        an integer string.  Defaults to ``"mid"`` (branch midpoint).
+    component:
+        Force component applied at every excitation point (default ``"ux"``).
+    amplitude:
+        Force amplitude [N] (default 1.0).
+    skip_levels:
+        Branch levels to exclude, e.g. ``[0]`` to skip the trunk.
+        Defaults to ``None`` (all branches included).
+
+    Returns
+    -------
+    list[ExcitationSpec]
+        One spec per branch in model.branches order.
+    """
+    excluded = set(skip_levels or [])
+    return [
+        ExcitationSpec(
+            branch_id=branch.branch_id,
+            node=node,
+            component=component,
+            amplitude=amplitude,
+        )
+        for branch in model.branches
+        if branch.level not in excluded
+    ]
