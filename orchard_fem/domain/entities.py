@@ -94,6 +94,7 @@ class HarmonicExcitation:
     target_node: str = "tip"
     target_component: str = "ux"
     driving_frequency_hz: float = 0.0
+    target_s: float | None = None   # 0..1 normalized arc-length; overrides target_node when set
 
 
 @dataclass(frozen=True)

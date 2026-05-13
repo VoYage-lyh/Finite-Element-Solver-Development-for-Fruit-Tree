@@ -17,6 +17,7 @@ from orchard_fem.visualization.rendering import (
     plot_time_frequency,
     plot_trajectory,
 )
+from orchard_fem.visualization.scene3d import plot_tree_3d
 
 __all__ = [
     "MissingDependencyError",
@@ -32,5 +33,6 @@ __all__ = [
     "plot_geometry",
     "plot_time_frequency",
     "plot_trajectory",
+    "plot_tree_3d",
     "visualize_analysis",
 ]

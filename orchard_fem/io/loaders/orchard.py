@@ -151,6 +151,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
     ]
 
     excitation_payload = payload["excitation"]
+    _exc_target_s_raw = excitation_payload.get("target_s")
     excitation = HarmonicExcitation(
         kind=ExcitationKind(excitation_payload["kind"]),
         target_branch_id=str(excitation_payload["target_branch_id"]),
@@ -159,6 +160,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         amplitude=float(excitation_payload["amplitude"]),
         phase_degrees=float(excitation_payload["phase_degrees"]),
         driving_frequency_hz=float(excitation_payload.get("driving_frequency_hz", 0.0)),
+        target_s=float(_exc_target_s_raw) if _exc_target_s_raw is not None else None,
     )
 
     analysis_payload = payload["analysis"]
@@ -203,16 +205,17 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         output_csv=str(analysis_payload.get("output_csv", "frequency_response.csv")),
     )
 
-    observations = [
-        ObservationPoint(
+    observations = []
+    for observation in payload.get("observations", []):
+        _obs_target_s_raw = observation.get("target_s")
+        observations.append(ObservationPoint(
             observation_id=str(observation["id"]),
             target_type=str(observation["target_type"]),
             target_id=str(observation["target_id"]),
             target_node=str(observation.get("target_node", "tip")),
             target_components=_parse_observation_target_components(observation),
-        )
-        for observation in payload.get("observations", [])
-    ]
+            target_s=float(_obs_target_s_raw) if _obs_target_s_raw is not None else None,
+        ))
 
     model_without_policy = OrchardModel(
         metadata=metadata,

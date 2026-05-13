@@ -7,6 +7,7 @@ from orchard_fem.automation import FullValidationConfig, FullValidationOutputs, 
 from orchard_fem.domain import SolverBackendKind
 from orchard_fem.environment import run_environment_audit
 from orchard_fem.postprocess import plot_frequency_response_csv, plot_time_history_csv
+from orchard_fem.visualization.scene3d import plot_tree_3d
 from orchard_fem.visualization import VisualizationOutputs, visualize_analysis
 from orchard_fem.workflows import (
     AnalysisRunOutputs,
@@ -118,6 +119,18 @@ class OrchardApplication:
         output_path: Path | None = None,
     ) -> None:
         plot_time_history_csv(response_csv, show=show, output_path=output_path)
+
+    def view_tree(
+        self,
+        model_json: Path,
+        show: bool = True,
+        output_path: Path | None = None,
+    ) -> None:
+        import json
+
+        with open(model_json, encoding="utf-8") as fh:
+            model_data = json.load(fh)
+        plot_tree_3d(model_data, show=show, output_path=output_path)
 
     def full_validate(self, config: FullValidationConfig) -> FullValidationOutputs:
         return run_full_validation(config)

@@ -24,6 +24,24 @@ class DOFManager:
         return len(self._labels)
 
 
+def resolve_node_index_from_s(nodes, s: float) -> int:
+    """Return the index of the node whose arc-length position is nearest to *s* (0..1)."""
+    if not nodes:
+        raise ValueError("Branch has no discretized nodes")
+    n = len(nodes)
+    if n == 1:
+        return 0
+    best = 0
+    best_dist = abs(s - 0.0)
+    for i in range(1, n):
+        pos = i / (n - 1)
+        dist = abs(s - pos)
+        if dist < best_dist:
+            best_dist = dist
+            best = i
+    return best
+
+
 def resolve_node_index(nodes, target_node: str) -> int:
     if not nodes:
         raise ValueError("Branch has no discretized nodes")
@@ -48,4 +66,4 @@ def branch_dof(nodes, node_index: int, component: str) -> int:
     return nodes[node_index].dofs[component_index]
 
 
-__all__ = ["DOFManager", "branch_dof", "resolve_node_index"]
+__all__ = ["DOFManager", "branch_dof", "resolve_node_index", "resolve_node_index_from_s"]

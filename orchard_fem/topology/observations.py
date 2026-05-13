@@ -10,6 +10,7 @@ class ObservationPoint:
     target_id: str
     target_node: str = "tip"
     target_components: list[str] = field(default_factory=lambda: ["ux"])
+    target_s: float | None = None   # 0..1 normalized arc-length; overrides target_node when set
 
     def __post_init__(self) -> None:
         normalized = [str(component) for component in self.target_components] or ["ux"]

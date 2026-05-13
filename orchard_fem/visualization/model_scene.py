@@ -114,7 +114,10 @@ def resolve_observation_point(model: dict, observation: dict) -> Tuple[list[floa
 def resolve_excitation_point(model: dict) -> Tuple[list[float], str]:
     excitation = model["excitation"]
     branch = build_branch_lookup(model)[excitation["target_branch_id"]]
-    station = resolve_branch_station(branch, excitation.get("target_node", "tip"))
+    if excitation.get("target_s") is not None:
+        station = float(excitation["target_s"])
+    else:
+        station = resolve_branch_station(branch, excitation.get("target_node", "tip"))
     point = resolve_branch_point(branch, station)
     label = "excitation ({0})".format(excitation.get("target_component", "ux"))
     return point, label

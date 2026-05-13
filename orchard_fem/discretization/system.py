@@ -10,7 +10,7 @@ from orchard_fem.discretization.beam_element import (
     transform_to_global,
 )
 from orchard_fem.discretization.damping import apply_rayleigh_damping
-from orchard_fem.discretization.dofs import DOFManager, branch_dof, resolve_node_index
+from orchard_fem.discretization.dofs import DOFManager, branch_dof, resolve_node_index, resolve_node_index_from_s
 from orchard_fem.discretization.matrix_ops import add_pair_penalty, scatter, zero_matrix
 from orchard_fem.discretization.types import (
     COMPONENT_LABELS,
@@ -385,9 +385,13 @@ class OrchardSystemAssembler:
         apply_rayleigh_damping(model, mass, stiffness, damping, material_lookup)
 
         excitation_nodes = branch_nodes[model.excitation.target_branch_id]
+        if model.excitation.target_s is not None:
+            _exc_node_idx = resolve_node_index_from_s(excitation_nodes, model.excitation.target_s)
+        else:
+            _exc_node_idx = resolve_node_index(excitation_nodes, model.excitation.target_node)
         excitation_dof = branch_dof(
             excitation_nodes,
-            resolve_node_index(excitation_nodes, model.excitation.target_node),
+            _exc_node_idx,
             model.excitation.target_component,
         )
 
@@ -396,7 +400,10 @@ class OrchardSystemAssembler:
         for observation in model.observations:
             if observation.target_type == "branch":
                 nodes = branch_nodes[observation.target_id]
-                node_index = resolve_node_index(nodes, observation.target_node)
+                if observation.target_s is not None:
+                    node_index = resolve_node_index_from_s(nodes, observation.target_s)
+                else:
+                    node_index = resolve_node_index(nodes, observation.target_node)
                 if len(observation.target_components) == 1:
                     observation_names.append(observation.observation_id)
                     observation_dofs.append(
