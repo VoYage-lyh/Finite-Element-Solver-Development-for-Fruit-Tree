@@ -14,6 +14,43 @@ from orchard_fem.visualization.model_scene import (
 )
 
 
+def _apply_publication_style(plt) -> None:
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "mathtext.fontset": "stix",
+    })
+
+
+def _compact_label(label: str) -> str:
+    replacements = {
+        "primary": "P",
+        "secondary": "S",
+        "scaffold": "Scaf",
+        "leader": "Lead",
+        "trunk": "Trunk",
+        "inner": "in",
+        "outer": "out",
+        "center": "C",
+        "central": "C",
+        "left": "L",
+        "right": "R",
+        "lower": "low",
+        "upper": "up",
+        "upright": "up",
+        "terminal": "term",
+        "fruiting": "fruit",
+        "axis": "axis",
+        "arch": "arch",
+        "spray": "spray",
+        "top": "top",
+        "mid": "mid",
+        "root": "root",
+        "tip": "tip",
+    }
+    return " ".join(replacements.get(part, part) for part in label.split("_"))
+
+
 def _extract_outer_radius(station: dict) -> float:
     if station.get("shorthand") == "circular":
         return float(station["outer_radius"])
@@ -102,18 +139,35 @@ def plot_tree_3d(
     plt, np = require_plotting_dependencies(show)
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-    # Times New Roman throughout
-    plt.rcParams.update({
-        "font.family": "serif",
-        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
-        "mathtext.fontset": "stix",
-    })
+    _apply_publication_style(plt)
 
     branches = model_data.get("branches", [])
     if not branches:
         raise ValueError("Model JSON contains no branches")
 
     max_level = max(int(b.get("level", 0)) for b in branches) or 1
+    branch_polylines = {
+        branch["id"]: branch_polyline_points(branch)
+        for branch in branches
+    }
+    all_pts = [
+        point
+        for polyline in branch_polylines.values()
+        for point in polyline
+    ]
+    xs = [p[0] for p in all_pts]
+    ys = [p[1] for p in all_pts]
+    zs = [p[2] for p in all_pts]
+    span = max(
+        max(xs) - min(xs),
+        max(ys) - min(ys),
+        max(zs) - min(zs),
+        0.1,
+    ) * 0.55
+    mid_x = (max(xs) + min(xs)) / 2.0
+    mid_y = (max(ys) + min(ys)) / 2.0
+    mid_z = (max(zs) + min(zs)) / 2.0
+    label_offset = max(span * 0.055, 0.055)
 
     # Clean scientific palette — blue / red / green (ColorBrewer Set1 spirit)
     _LEVEL_PALETTE = [
@@ -132,13 +186,11 @@ def plot_tree_3d(
     ax = fig.add_subplot(111, projection="3d")
 
     branch_lookup = build_branch_lookup(model_data)
-    all_pts: list[list[float]] = []
 
     for branch in branches:
         level = int(branch.get("level", 0))
         color = level_colors[level]
-        polyline = branch_polyline_points(branch)
-        all_pts.extend(polyline)
+        polyline = branch_polylines[branch["id"]]
         s_vals = _branch_arc_s(polyline)
 
         for seg in range(len(polyline) - 1):
@@ -151,12 +203,30 @@ def plot_tree_3d(
             X, Y, Z = result
             ax.plot_surface(X, Y, Z, color=color, alpha=0.92, linewidth=0, antialiased=True)
 
-        # Label at the midpoint of the branch axis
-        mid = resolve_branch_point(branch, 0.5)
+        label_anchor = np.asarray(resolve_branch_point(branch, 0.58), dtype=float)
+        radial = np.array([label_anchor[0] - mid_x, label_anchor[1] - mid_y, 0.0])
+        radial_norm = float(np.linalg.norm(radial))
+        if radial_norm > 1.0e-12:
+            radial /= radial_norm
+        label_pos = label_anchor + radial * label_offset + np.array(
+            [0.0, 0.0, label_offset * 1.15]
+        )
+        ax.plot(
+            [label_anchor[0], label_pos[0]],
+            [label_anchor[1], label_pos[1]],
+            [label_anchor[2], label_pos[2]],
+            color="#666666",
+            linewidth=0.7,
+            alpha=0.55,
+            zorder=20,
+        )
         ax.text(
-            mid[0], mid[1], mid[2],
-            branch["id"],
-            fontsize=10, color="#111111",
+            label_pos[0],
+            label_pos[1],
+            label_pos[2],
+            _compact_label(branch["id"]),
+            fontsize=8,
+            color="#111111",
             ha="center", va="center",
             zorder=30,
             bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=color, linewidth=1.2, alpha=0.92),
@@ -188,7 +258,7 @@ def plot_tree_3d(
         ax.scatter(
             exc_pt[0], exc_pt[1], exc_pt[2],
             s=250, c="crimson", marker="*", zorder=10,
-            label=f"Excitation",
+            label="Excitation",
         )
     except (KeyError, RuntimeError):
         pass
@@ -207,31 +277,16 @@ def plot_tree_3d(
         except (KeyError, RuntimeError):
             pass
 
-    # Equal aspect ratio
-    if all_pts:
-        xs = [p[0] for p in all_pts]
-        ys = [p[1] for p in all_pts]
-        zs = [p[2] for p in all_pts]
-        span = max(
-            max(xs) - min(xs),
-            max(ys) - min(ys),
-            max(zs) - min(zs),
-            0.1,
-        ) * 0.55
-        mid_x = (max(xs) + min(xs)) / 2.0
-        mid_y = (max(ys) + min(ys)) / 2.0
-        mid_z = (max(zs) + min(zs)) / 2.0
-        ax.set_xlim(mid_x - span, mid_x + span)
-        ax.set_ylim(mid_y - span, mid_y + span)
-        ax.set_zlim(mid_z - span, mid_z + span)
+    ax.set_xlim(mid_x - span, mid_x + span)
+    ax.set_ylim(mid_y - span, mid_y + span)
+    ax.set_zlim(mid_z - span, mid_z + span)
 
-    model_name = model_data.get("metadata", {}).get("name", "")
-    title = f"Tree 3D Structure — {model_name}" if model_name else "Tree 3D Structure"
-    ax.set_title(title, fontsize=14, pad=10)
+    ax.set_title("3D View", fontsize=14, pad=10)
     ax.set_xlabel("X (m)", fontsize=11, labelpad=8)
     ax.set_ylabel("Y (m)", fontsize=11, labelpad=8)
     ax.set_zlabel("Z (m)", fontsize=11, labelpad=8)
     ax.tick_params(labelsize=9)
+    ax.view_init(elev=24, azim=-58)
 
     for level in range(max_level + 1):
         ax.plot([], [], [], color=level_colors[level], linewidth=4, label=f"Level {level}")

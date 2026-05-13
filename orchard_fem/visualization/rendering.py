@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Tuple
 
 from orchard_fem.visualization.dependencies import require_plotting_dependencies
 from orchard_fem.visualization.io import build_series_map, choose_measurement_column
@@ -15,6 +15,43 @@ from orchard_fem.visualization.model_scene import (
 )
 
 
+def _apply_publication_style(plt) -> None:
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "mathtext.fontset": "stix",
+    })
+
+
+def _compact_label(label: str) -> str:
+    replacements = {
+        "primary": "P",
+        "secondary": "S",
+        "scaffold": "Scaf",
+        "leader": "Lead",
+        "trunk": "Trunk",
+        "inner": "in",
+        "outer": "out",
+        "center": "C",
+        "central": "C",
+        "left": "L",
+        "right": "R",
+        "lower": "low",
+        "upper": "up",
+        "upright": "up",
+        "terminal": "term",
+        "fruiting": "fruit",
+        "axis": "axis",
+        "arch": "arch",
+        "spray": "spray",
+        "top": "top",
+        "mid": "mid",
+        "root": "root",
+        "tip": "tip",
+    }
+    return " ".join(replacements.get(part, part) for part in label.split("_"))
+
+
 def _save_figure(fig, output_path: Path, show: bool) -> None:
     plt, _ = require_plotting_dependencies(show)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -26,6 +63,7 @@ def _save_figure(fig, output_path: Path, show: bool) -> None:
 
 def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
     plt, _ = require_plotting_dependencies(show)
+    _apply_publication_style(plt)
     fig, ax = plt.subplots(figsize=(8.0, 8.0))
 
     branches = model.get("branches", [])
@@ -54,14 +92,40 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
         )
         end_x = x_values[-1]
         end_z = z_values[-1]
-        ax.text(end_x, end_z, branch["id"], fontsize=9, color=color, ha="left", va="bottom")
+        ax.annotate(
+            _compact_label(branch["id"]),
+            xy=(end_x, end_z),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=8,
+            color=color,
+            ha="left",
+            va="bottom",
+            bbox={
+                "boxstyle": "round,pad=0.16",
+                "fc": "white",
+                "ec": color,
+                "lw": 0.6,
+                "alpha": 0.82,
+            },
+        )
 
+    fruit_count = 0
     for fruit in model.get("fruits", []):
         branch = branch_lookup[fruit["branch_id"]]
         point = resolve_branch_point(branch, float(fruit["location_s"]))
         x, z = project_xz(point)
-        ax.scatter([x], [z], s=70.0, color="#f28e2b", edgecolors="black", linewidths=0.6, zorder=4)
-        ax.text(x, z, fruit["id"], fontsize=8, ha="left", va="bottom", color="#8c510a")
+        ax.scatter(
+            [x],
+            [z],
+            s=52.0,
+            color="#f28e2b",
+            edgecolors="black",
+            linewidths=0.5,
+            zorder=4,
+            label="Fruit" if fruit_count == 0 else "_nolegend_",
+        )
+        fruit_count += 1
 
     excitation_point, excitation_label = resolve_excitation_point(model)
     excitation_x, excitation_z = project_xz(excitation_point)
@@ -74,19 +138,22 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
         edgecolors="black",
         linewidths=0.8,
         zorder=5,
+        label="Excitation",
     )
-    ax.text(
-        excitation_x,
-        excitation_z,
-        excitation_label,
-        fontsize=9,
+    ax.annotate(
+        excitation_label.replace("excitation", "Excitation"),
+        xy=(excitation_x, excitation_z),
+        xytext=(6, 6),
+        textcoords="offset points",
+        fontsize=8,
         ha="left",
         va="bottom",
         color="#d62728",
     )
 
+    observation_count = 0
     for observation in model.get("observations", []):
-        point, label = resolve_observation_point(model, observation)
+        point, _label = resolve_observation_point(model, observation)
         x, z = project_xz(point)
         ax.scatter(
             [x],
@@ -97,14 +164,17 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
             edgecolors="black",
             linewidths=0.6,
             zorder=4,
+            label="Observation" if observation_count == 0 else "_nolegend_",
         )
-        ax.text(x, z, label, fontsize=8, ha="left", va="top", color="#1f77b4")
+        observation_count += 1
 
-    ax.set_title("Orchard Geometry (x-z Projection)")
+    ax.set_title("2D View")
     ax.set_xlabel("x (m)")
     ax.set_ylabel("z (m)")
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.25)
+    if fruit_count or observation_count:
+        ax.legend(loc="upper left", fontsize=8, framealpha=0.92)
     fig.tight_layout()
     _save_figure(fig, output_path, show)
 
@@ -116,6 +186,7 @@ def plot_frequency_response(
     show: bool,
 ) -> None:
     plt, np = require_plotting_dependencies(show)
+    _apply_publication_style(plt)
     series = build_series_map(headers, rows)
     if "frequency_hz" not in series:
         raise RuntimeError("Frequency-response CSV must contain a frequency_hz column")
@@ -125,17 +196,46 @@ def plot_frequency_response(
     plotted_headers = [header for header in headers if header not in reserved]
 
     fig, ax = plt.subplots(figsize=(11.0, 6.0))
+    response_count = sum(header != "excitation_response" for header in plotted_headers)
+    use_grouped_legend = response_count > 10
+    response_label_used = False
     for header in plotted_headers:
         values = np.asarray(series[header], dtype=float)
-        linewidth = 2.5 if header == "excitation_response" else 1.6
-        alpha = 1.0 if header == "excitation_response" else 0.9
-        ax.plot(frequency, values, linewidth=linewidth, alpha=alpha, label=header)
+        if header == "excitation_response":
+            ax.plot(
+                frequency,
+                values,
+                linewidth=2.8,
+                alpha=1.0,
+                color="#111111",
+                label="Excitation response",
+            )
+            continue
+
+        if use_grouped_legend:
+            label = f"Observation responses ({response_count})" if not response_label_used else "_nolegend_"
+            response_label_used = True
+        else:
+            label = _compact_label(header.removeprefix("obs_"))
+        ax.plot(frequency, values, linewidth=1.25, alpha=0.58, label=label)
 
     ax.set_title("Orchard Frequency Response")
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("Response magnitude")
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="best", fontsize=9)
+
+    ax.legend(loc="upper right", fontsize=9, framealpha=0.92)
+    if use_grouped_legend:
+        ax.text(
+            0.99,
+            0.01,
+            f"{response_count} observation series plotted",
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=8,
+            color="#555555",
+        )
     fig.tight_layout()
     _save_figure(fig, output_path, show)
 
@@ -221,6 +321,7 @@ def plot_trajectory(
     show: bool,
 ) -> None:
     plt, np = require_plotting_dependencies(show)
+    _apply_publication_style(plt)
     series = build_series_map(headers, rows)
     if "time_s" not in series:
         raise RuntimeError("Trajectory plots require a time-history CSV with a time_s column")
@@ -280,6 +381,7 @@ def plot_time_frequency(
     show: bool,
 ) -> None:
     plt, np = require_plotting_dependencies(show)
+    _apply_publication_style(plt)
     series = build_series_map(headers, rows)
     if "time_s" not in series:
         raise RuntimeError("Time-history CSV must contain a time_s column")

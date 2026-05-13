@@ -90,13 +90,22 @@ python -m orchard_fem plot-time-history build/demo_time_history.csv \
 Run the open-vase tree model:
 
 ```bash
-python -m orchard_fem run trees/tree_1_open_vase_model.json \
-  --output-csv build/results/tree_1_open_vase/time_history.csv
+python -m orchard_fem run trees/tree_1_multi_stem_open_crown.json \
+  --output-csv build/results/tree_1_multi_stem_open_crown/frf.csv
 
-python -m orchard_fem plot-time-history \
-  build/results/tree_1_open_vase/time_history.csv \
+python -m orchard_fem plot-frequency-response \
+  build/results/tree_1_multi_stem_open_crown/frf.csv \
+  --no-show
+
+python -m orchard_fem visualize \
+  trees/tree_1_multi_stem_open_crown.json \
+  build/results/tree_1_multi_stem_open_crown/frf.csv \
+  --output-prefix build/results/tree_1_multi_stem_open_crown/visual
+
+python -m orchard_fem view-tree \
+  trees/tree_1_multi_stem_open_crown.json \
   --no-show \
-  --output build/results/tree_1_open_vase/time_history.png
+  --output build/results/tree_1_multi_stem_open_crown/tree_3d.png
 ```
 
 The time-history plotter writes one excitation figure plus one figure per branch when an output path
@@ -142,7 +151,7 @@ the CLI where supported:
 
 ```bash
 python -m orchard_fem run examples/demo_orchard.json --solver-backend native
-python -m orchard_fem modal trees/tree_1_open_vase_model.json --solver-backend fenicsx
+python -m orchard_fem modal trees/tree_1_multi_stem_open_crown.json --solver-backend fenicsx
 ```
 
 ## Inputs And Outputs
@@ -151,9 +160,9 @@ Model input is JSON. The most useful starting points are:
 
 - `examples/demo_orchard.json`: compact frequency-response model.
 - `examples/demo_orchard_time_history.json`: compact time-history model.
-- `trees/tree_1_open_vase_model.json`: generated open-vase architecture model.
-- `trees/tree_2_central_leader_model.json`, `trees/tree_3_espalier_model.json`,
-  `trees/tree_4_y_shape_model.json`, `trees/tree_5_spindle_model.json`: additional architecture
+- `trees/tree_1_multi_stem_open_crown.json`: image-derived multi-stem open-crown model.
+- `trees/tree_2_asymmetric_multi_leader.json`, `trees/tree_3_broad_vase_multi_leader.json`,
+  `trees/tree_4_y_fan_canopy.json`, `trees/tree_5_rounded_two_leader.json`: additional architecture
   examples.
 
 Solver outputs are CSV files. Plot commands write PNG figures when `--output` is provided. Generated
