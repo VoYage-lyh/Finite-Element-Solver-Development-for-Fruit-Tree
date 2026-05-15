@@ -134,3 +134,76 @@ class OrchardApplication:
 
     def full_validate(self, config: FullValidationConfig) -> FullValidationOutputs:
         return run_full_validation(config)
+
+    # ────────────────────────────────────────────────────────────────────
+    #  Bridges for the `recommend` command (Bayesian → Pareto → Sobol).
+    #  These wire the abstract analysis modules to the actual FEM solver.
+    #  Default implementations are stubs that raise — projects that ship
+    #  a custom FEM backend override these in a subclass.
+    # ────────────────────────────────────────────────────────────────────
+    def build_recommend_forward_operator(self, model, frf_frequencies_hz):
+        """Return ``params_dict -> ForwardResult`` for Bayesian calibration.
+
+        Default implementation uses
+        :func:`orchard_fem.calibration.fenicsx_bridge.build_fenicsx_forward_operator`,
+        averaging over every observation whose ID contains "target". To use a
+        different aggregation, override this method or call the bridge
+        directly with explicit ``target_observation_ids``.
+        """
+        from orchard_fem.calibration.fenicsx_bridge import (
+            build_fenicsx_forward_operator,
+        )
+        target_ids = self._resolve_target_observation_ids(model)
+        return build_fenicsx_forward_operator(
+            model, frf_frequencies_hz,
+            target_observation_ids=target_ids,
+        )
+
+    def build_pareto_evaluator(self, model, forward_operator):
+        """Return ``(params, f, A, clamp) -> HarvestObjective``.
+
+        Default implementation delegates to
+        :func:`orchard_fem.calibration.fenicsx_bridge.build_fenicsx_pareto_evaluator`,
+        which auto-augments the model's observations with one fruit
+        observation per :attr:`OrchardModel.fruits` entry plus two trunk
+        rotation observations for stress computation. No observation-ID
+        naming convention is required.
+        """
+        from orchard_fem.calibration.fenicsx_bridge import (
+            build_fenicsx_pareto_evaluator,
+        )
+        return build_fenicsx_pareto_evaluator(model)
+
+    def build_sobol_inputs(self, model, priors):
+        """Return the list of SobolInputDef matching the calibrated params + geometry."""
+        from orchard_fem.sensitivity import SobolInputDef
+
+        inputs = []
+        for p in priors:
+            log_scale = p.kind == "loguniform"
+            inputs.append(SobolInputDef(
+                name=p.name, bounds=p.bounds, log_scale=log_scale,
+            ))
+        return inputs
+
+    def build_sobol_forward(self, model, evaluator, f_grid, A_grid, *,
+                             clamp_label: str, constraints: dict):
+        """Return ``params -> recommended_freq`` for Sobol sensitivity.
+
+        Default implementation: for each Saltelli sample, build a one-sample
+        posterior set, propagate to Pareto, take the median knee frequency.
+        """
+        from orchard_fem.recommendation import propagate_posterior_to_pareto
+
+        def sobol_forward(params: dict) -> float:
+            try:
+                rec = propagate_posterior_to_pareto(
+                    [params], clamp_label, f_grid, A_grid, evaluator,
+                    credible_alpha=0.50,
+                    coverage_min=constraints.get("coverage_min"),
+                    stress_max=constraints.get("stress_max"),
+                )
+                return rec.frequency_hz_median
+            except Exception:
+                return float("nan")
+        return sobol_forward

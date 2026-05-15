@@ -339,15 +339,18 @@ def _extract_frequency_response_point(
     excitation_magnitude = (excitation_real**2 + excitation_imag**2) ** 0.5
 
     observation_magnitudes: list[float] = []
+    observation_complex: list[complex] = []
     for dof in response_mapping.observation_dofs:
         real_value = _vector_value(solution, dof)
         imag_value = _vector_value(solution, system_size + dof)
         observation_magnitudes.append((real_value**2 + imag_value**2) ** 0.5)
+        observation_complex.append(complex(real_value, imag_value))
 
     return FrequencyResponsePoint(
         frequency_hz=frequency_hz,
         excitation_response_magnitude=excitation_magnitude,
         observation_magnitudes=observation_magnitudes,
+        observation_complex=tuple(observation_complex),
     )
 
 

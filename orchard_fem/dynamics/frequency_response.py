@@ -27,6 +27,11 @@ class FrequencyResponsePoint:
     frequency_hz: float
     excitation_response_magnitude: float
     observation_magnitudes: list[float]
+    # Optional complex amplitudes (real + j·imag) per observation, in the same
+    # order as ``observation_magnitudes``. Filled by solvers that retain phase
+    # information (FEniCSx FRF); left as ``None`` by legacy code paths that
+    # only compute magnitudes. Required for curvature / stress post-processing.
+    observation_complex: tuple[complex, ...] | None = None
 
 
 @dataclass(frozen=True)

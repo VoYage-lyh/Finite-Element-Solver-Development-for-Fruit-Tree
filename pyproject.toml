@@ -34,6 +34,13 @@ ml = [
   "torch>=2.2",
   "h5py>=3.10",
 ]
+uq = [
+  # Uncertainty-quantification stack used by the `recommend` workflow:
+  # Bayesian calibration (emcee), Sobol sensitivity (SALib), progress bars.
+  "emcee>=3.1",
+  "SALib>=1.5",
+  "tqdm>=4.66",
+]
 ubuntu-test = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
