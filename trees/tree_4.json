@@ -1,9 +1,9 @@
 {
   "metadata": {
-    "name": "tree_2_asymmetric_multi_leader",
-    "training_system": "image-derived upright multi-leader open crown / 图片拓扑直立多领导枝开冠形",
+    "name": "tree_4_y_fan_canopy",
+    "training_system": "image-derived asymmetric fan canopy / 图片拓扑偏心扇形冠",
     "typical_crop": "苹果、梨、桃等果树",
-    "notes": "根据用户提供的 tree2 图像重写：单一长主干在冠层下方分成左、中、右三条直立主轴；左主轴上部有一条横向左伸骨干枝，右主轴带一条强斜伸右侧骨干枝和一条近水平右侧枝，顶部由多根结果枝组成。"
+    "notes": "根据用户提供的 tree4 图像重写：长直主干上部形成多根左/中直立主轴，左侧冠层较密；右侧从较低位置伸出一根长拱形近水平骨干枝，并在右端形成结果枝群。"
   },
   "materials": [
     {
@@ -45,24 +45,24 @@
         0.0
       ],
       "end": [
-        0.01,
+        -0.02,
         0.0,
-        1.08
+        0.6
       ],
       "discretization": {
-        "num_elements": 5,
+        "num_elements": 6,
         "hotspot": false
       },
       "stations": [
         {
           "s": 0.0,
           "shorthand": "circular",
-          "outer_radius": 0.044
+          "outer_radius": 0.045
         },
         {
           "s": 1.0,
           "shorthand": "circular",
-          "outer_radius": 0.03
+          "outer_radius": 0.029
         }
       ],
       "points": [
@@ -72,34 +72,162 @@
           0.0
         ],
         [
-          0.02,
+          -0.01,
           0.0,
-          0.55
+          0.3
         ],
         [
-          0.01,
+          -0.02,
           0.0,
-          1.08
+          0.6
         ]
       ],
       "is_terminal": false
     },
     {
-      "id": "left_leader",
+      "id": "left_main_leader",
       "parent_branch_id": "trunk",
       "level": 1,
       "start": [
-        0.01,
+        -0.02,
         0.0,
-        0.98
+        0.6
       ],
       "end": [
-        -0.3,
-        0.03,
-        2.1
+        -0.52,
+        0.04,
+        2.48
       ],
       "discretization": {
-        "num_elements": 7,
+        "num_elements": 9,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.029
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.012
+        }
+      ],
+      "points": [
+        [
+          -0.02,
+          0.0,
+          0.6
+        ],
+        [
+          -0.1,
+          0.01,
+          0.95
+        ],
+        [
+          -0.2,
+          0.03,
+          1.35
+        ],
+        [
+          -0.32,
+          0.04,
+          1.8
+        ],
+        [
+          -0.42,
+          0.04,
+          2.15
+        ],
+        [
+          -0.52,
+          0.04,
+          2.48
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "inner_left_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "end": [
+        -0.34,
+        0.06,
+        2.35
+      ],
+      "discretization": {
+        "num_elements": 8,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.025
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.011
+        }
+      ],
+      "points": [
+        [
+          -0.02,
+          0.0,
+          0.6
+        ],
+        [
+          -0.08,
+          0.02,
+          0.95
+        ],
+        [
+          -0.15,
+          0.04,
+          1.3
+        ],
+        [
+          -0.22,
+          0.05,
+          1.7
+        ],
+        [
+          -0.3,
+          0.06,
+          2.1
+        ],
+        [
+          -0.34,
+          0.06,
+          2.35
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "center_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "end": [
+        0.08,
+        0.06,
+        2.58
+      ],
+      "discretization": {
+        "num_elements": 9,
         "hotspot": false
       },
       "stations": [
@@ -111,46 +239,56 @@
         {
           "s": 1.0,
           "shorthand": "circular",
-          "outer_radius": 0.013
+          "outer_radius": 0.011
         }
       ],
       "points": [
         [
-          0.01,
+          -0.02,
           0.0,
-          0.98
+          0.6
         ],
         [
-          -0.1,
+          -0.01,
           0.02,
-          1.35
+          0.95
         ],
         [
-          -0.22,
+          0.0,
           0.03,
-          1.72
+          1.25
         ],
         [
-          -0.3,
           0.03,
+          0.05,
+          1.65
+        ],
+        [
+          0.06,
+          0.06,
           2.1
+        ],
+        [
+          0.08,
+          0.06,
+          2.58
         ]
       ],
       "is_terminal": false
     },
     {
-      "id": "center_leader",
+      "id": "right_inner_leader",
       "parent_branch_id": "trunk",
       "level": 1,
       "start": [
-        0.01,
+        -0.02,
         0.0,
-        1.02
+        0.6
       ],
       "end": [
-        0.05,
-        0.06,
-        2.34
+        0.44,
+        -0.03,
+        2.36
       ],
       "discretization": {
         "num_elements": 8,
@@ -165,110 +303,66 @@
         {
           "s": 1.0,
           "shorthand": "circular",
-          "outer_radius": 0.011
+          "outer_radius": 0.01
         }
       ],
       "points": [
         [
-          0.01,
+          -0.02,
           0.0,
-          1.02
-        ],
-        [
-          0.0,
-          0.05,
-          1.42
-        ],
-        [
-          0.03,
-          0.06,
-          1.86
+          0.6
         ],
         [
           0.05,
-          0.06,
-          2.34
-        ]
-      ],
-      "is_terminal": false
-    },
-    {
-      "id": "right_leader",
-      "parent_branch_id": "trunk",
-      "level": 1,
-      "start": [
-        0.02,
-        0.0,
-        0.92
-      ],
-      "end": [
-        0.42,
-        -0.03,
-        2.1
-      ],
-      "discretization": {
-        "num_elements": 7,
-        "hotspot": false
-      },
-      "stations": [
-        {
-          "s": 0.0,
-          "shorthand": "circular",
-          "outer_radius": 0.026
-        },
-        {
-          "s": 1.0,
-          "shorthand": "circular",
-          "outer_radius": 0.012
-        }
-      ],
-      "points": [
-        [
-          0.02,
-          0.0,
-          0.92
+          -0.01,
+          0.95
         ],
         [
-          0.18,
-          -0.03,
+          0.12,
+          -0.02,
           1.3
         ],
         [
-          0.32,
-          -0.04,
+          0.22,
+          -0.03,
           1.7
         ],
         [
-          0.42,
+          0.34,
+          -0.04,
+          2.05
+        ],
+        [
+          0.44,
           -0.03,
-          2.1
+          2.36
         ]
       ],
       "is_terminal": false
     },
     {
-      "id": "inner_left_stem",
+      "id": "right_low_arch",
       "parent_branch_id": "trunk",
       "level": 1,
       "start": [
+        -0.02,
         0.0,
-        0.02,
-        0.82
+        0.6
       ],
       "end": [
-        -0.16,
-        0.04,
-        1.55
+        1.18,
+        -0.1,
+        1.52
       ],
       "discretization": {
-        "num_elements": 5,
+        "num_elements": 8,
         "hotspot": false
       },
       "stations": [
         {
           "s": 0.0,
           "shorthand": "circular",
-          "outer_radius": 0.02
+          "outer_radius": 0.023
         },
         {
           "s": 1.0,
@@ -278,36 +372,51 @@
       ],
       "points": [
         [
+          -0.02,
           0.0,
-          0.02,
-          0.82
+          0.6
         ],
         [
+          0.12,
+          -0.05,
+          0.85
+        ],
+        [
+          0.35,
           -0.1,
-          0.04,
-          1.18
+          1.05
         ],
         [
-          -0.16,
-          0.04,
-          1.55
+          0.65,
+          -0.12,
+          1.25
+        ],
+        [
+          0.95,
+          -0.11,
+          1.4
+        ],
+        [
+          1.18,
+          -0.1,
+          1.52
         ]
       ],
-      "is_terminal": true
+      "is_terminal": false
     },
     {
-      "id": "left_upper_shelf",
-      "parent_branch_id": "left_leader",
+      "id": "left_lower_lateral",
+      "parent_branch_id": "left_main_leader",
       "level": 2,
       "start": [
-        -0.22,
-        0.03,
-        1.72
+        -0.3015,
+        0.0385,
+        1.7307
       ],
       "end": [
-        -1.04,
-        0.01,
-        1.82
+        -1.18,
+        -0.02,
+        1.88
       ],
       "discretization": {
         "num_elements": 6,
@@ -327,90 +436,41 @@
       ],
       "points": [
         [
-          -0.22,
-          0.03,
+          -0.3015,
+          0.0385,
+          1.7307
+        ],
+        [
+          -0.62,
+          0.02,
           1.72
         ],
         [
-          -0.48,
-          0.03,
-          1.84
+          -0.92,
+          0.0,
+          1.74
         ],
         [
-          -0.78,
-          0.02,
-          1.87
-        ],
-        [
-          -1.04,
-          0.01,
-          1.82
-        ]
-      ],
-      "is_terminal": false
-    },
-    {
-      "id": "left_outer_top",
-      "parent_branch_id": "left_leader",
-      "level": 2,
-      "start": [
-        -0.3,
-        0.03,
-        2.1
-      ],
-      "end": [
-        -0.72,
-        0.03,
-        2.44
-      ],
-      "discretization": {
-        "num_elements": 5,
-        "hotspot": false
-      },
-      "stations": [
-        {
-          "s": 0.0,
-          "shorthand": "circular",
-          "outer_radius": 0.011
-        },
-        {
-          "s": 1.0,
-          "shorthand": "circular",
-          "outer_radius": 0.005
-        }
-      ],
-      "points": [
-        [
-          -0.3,
-          0.03,
-          2.1
-        ],
-        [
-          -0.52,
-          0.04,
-          2.3
-        ],
-        [
-          -0.72,
-          0.03,
-          2.44
+          -1.18,
+          -0.02,
+          1.88
         ]
       ],
       "is_terminal": true
     },
     {
-      "id": "left_inner_top",
-      "parent_branch_id": "left_leader",
+      "id": "left_outer_top",
+      "parent_branch_id": "left_main_leader",
       "level": 2,
       "start": [
-        -0.16,
-        0.03,
-        1.58
+        -0.4373,
+        0.04,
+        2.2072
       ],
       "end": [
-        -0.08,
-        0.04,
-        2.26
+        -0.92,
+        0.03,
+        2.66
       ],
       "discretization": {
         "num_elements": 6,
@@ -430,36 +490,36 @@
       ],
       "points": [
         [
-          -0.16,
+          -0.4373,
+          0.04,
+          2.2072
+        ],
+        [
+          -0.72,
+          0.04,
+          2.44
+        ],
+        [
+          -0.92,
           0.03,
-          1.58
-        ],
-        [
-          -0.12,
-          0.04,
-          1.94
-        ],
-        [
-          -0.08,
-          0.04,
-          2.26
+          2.66
         ]
       ],
       "is_terminal": true
     },
     {
-      "id": "left_shelf_tip_spray",
-      "parent_branch_id": "left_upper_shelf",
-      "level": 3,
+      "id": "left_terminal",
+      "parent_branch_id": "left_main_leader",
+      "level": 2,
       "start": [
-        -0.78,
-        0.02,
-        1.87
+        -0.4736,
+        0.04,
+        2.3268
       ],
       "end": [
-        -1.14,
-        0.02,
-        2.2
+        -0.54,
+        0.05,
+        2.92
       ],
       "discretization": {
         "num_elements": 5,
@@ -469,29 +529,78 @@
         {
           "s": 0.0,
           "shorthand": "circular",
-          "outer_radius": 0.007
+          "outer_radius": 0.01
         },
         {
           "s": 1.0,
           "shorthand": "circular",
-          "outer_radius": 0.0035
+          "outer_radius": 0.004
         }
       ],
       "points": [
         [
-          -0.78,
-          0.02,
-          1.87
+          -0.4736,
+          0.04,
+          2.3268
         ],
         [
-          -0.98,
-          0.02,
-          2.04
+          -0.54,
+          0.05,
+          2.66
         ],
         [
-          -1.14,
-          0.02,
-          2.2
+          -0.54,
+          0.05,
+          2.92
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "inner_left_top",
+      "parent_branch_id": "inner_left_leader",
+      "level": 2,
+      "start": [
+        -0.2646,
+        0.0556,
+        1.923
+      ],
+      "end": [
+        -0.1,
+        0.09,
+        2.62
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          -0.2646,
+          0.0556,
+          1.923
+        ],
+        [
+          -0.18,
+          0.09,
+          2.28
+        ],
+        [
+          -0.1,
+          0.09,
+          2.62
         ]
       ],
       "is_terminal": true
@@ -501,17 +610,218 @@
       "parent_branch_id": "center_leader",
       "level": 2,
       "start": [
-        0.04,
-        0.06,
-        2.05
+        0.0587,
+        0.0596,
+        2.0802
       ],
       "end": [
-        0.0,
+        0.12,
         0.07,
-        2.6
+        2.72
       ],
       "discretization": {
         "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.0587,
+          0.0596,
+          2.0802
+        ],
+        [
+          0.1,
+          0.07,
+          2.42
+        ],
+        [
+          0.12,
+          0.07,
+          2.72
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "center_left_shoot",
+      "parent_branch_id": "center_leader",
+      "level": 2,
+      "start": [
+        0.0386,
+        0.0529,
+        1.7785
+      ],
+      "end": [
+        -0.24,
+        0.08,
+        2.44
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.0386,
+          0.0529,
+          1.7785
+        ],
+        [
+          -0.12,
+          0.08,
+          2.12
+        ],
+        [
+          -0.24,
+          0.08,
+          2.44
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_upper_scaffold",
+      "parent_branch_id": "right_inner_leader",
+      "level": 2,
+      "start": [
+        0.2511,
+        -0.0326,
+        1.7907
+      ],
+      "end": [
+        1.04,
+        -0.06,
+        2.28
+      ],
+      "discretization": {
+        "num_elements": 7,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.013
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0055
+        }
+      ],
+      "points": [
+        [
+          0.2511,
+          -0.0326,
+          1.7907
+        ],
+        [
+          0.56,
+          -0.06,
+          1.96
+        ],
+        [
+          0.82,
+          -0.06,
+          2.12
+        ],
+        [
+          1.04,
+          -0.06,
+          2.28
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "right_upright_shoot",
+      "parent_branch_id": "right_inner_leader",
+      "level": 2,
+      "start": [
+        0.3389,
+        -0.0399,
+        2.0468
+      ],
+      "end": [
+        0.68,
+        -0.02,
+        2.62
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.3389,
+          -0.0399,
+          2.0468
+        ],
+        [
+          0.54,
+          -0.02,
+          2.32
+        ],
+        [
+          0.68,
+          -0.02,
+          2.62
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_arch_lower_spray",
+      "parent_branch_id": "right_low_arch",
+      "level": 2,
+      "start": [
+        0.6281,
+        -0.1185,
+        1.2354
+      ],
+      "end": [
+        1.36,
+        -0.18,
+        1.42
+      ],
+      "discretization": {
+        "num_elements": 7,
         "hotspot": false
       },
       "stations": [
@@ -528,193 +838,41 @@
       ],
       "points": [
         [
-          0.04,
-          0.06,
-          2.05
+          0.6281,
+          -0.1185,
+          1.2354
         ],
         [
-          0.02,
-          0.07,
-          2.36
-        ],
-        [
-          0.0,
-          0.07,
-          2.6
-        ]
-      ],
-      "is_terminal": true
-    },
-    {
-      "id": "center_left_shoot",
-      "parent_branch_id": "center_leader",
-      "level": 2,
-      "start": [
-        0.01,
-        0.05,
-        1.7
-      ],
-      "end": [
-        -0.3,
-        0.08,
-        2.22
-      ],
-      "discretization": {
-        "num_elements": 5,
-        "hotspot": false
-      },
-      "stations": [
-        {
-          "s": 0.0,
-          "shorthand": "circular",
-          "outer_radius": 0.009
-        },
-        {
-          "s": 1.0,
-          "shorthand": "circular",
-          "outer_radius": 0.004
-        }
-      ],
-      "points": [
-        [
-          0.01,
-          0.05,
-          1.7
-        ],
-        [
+          0.82,
           -0.16,
-          0.08,
-          1.96
+          1.18
         ],
         [
-          -0.3,
-          0.08,
-          2.22
+          1.1,
+          -0.18,
+          1.26
+        ],
+        [
+          1.36,
+          -0.18,
+          1.42
         ]
       ],
       "is_terminal": true
     },
     {
-      "id": "right_diagonal_scaffold",
-      "parent_branch_id": "right_leader",
+      "id": "right_arch_terminal_spray",
+      "parent_branch_id": "right_low_arch",
       "level": 2,
       "start": [
-        0.2,
-        -0.03,
-        1.34
+        0.951,
+        -0.11,
+        1.4005
       ],
       "end": [
-        0.88,
-        -0.1,
-        2.1
-      ],
-      "discretization": {
-        "num_elements": 7,
-        "hotspot": false
-      },
-      "stations": [
-        {
-          "s": 0.0,
-          "shorthand": "circular",
-          "outer_radius": 0.015
-        },
-        {
-          "s": 1.0,
-          "shorthand": "circular",
-          "outer_radius": 0.006
-        }
-      ],
-      "points": [
-        [
-          0.2,
-          -0.03,
-          1.34
-        ],
-        [
-          0.42,
-          -0.07,
-          1.58
-        ],
-        [
-          0.66,
-          -0.09,
-          1.82
-        ],
-        [
-          0.88,
-          -0.1,
-          2.1
-        ]
-      ],
-      "is_terminal": false
-    },
-    {
-      "id": "right_mid_horizontal",
-      "parent_branch_id": "right_leader",
-      "level": 2,
-      "start": [
-        0.34,
-        -0.04,
-        1.72
-      ],
-      "end": [
-        1.16,
-        -0.08,
-        1.92
-      ],
-      "discretization": {
-        "num_elements": 6,
-        "hotspot": false
-      },
-      "stations": [
-        {
-          "s": 0.0,
-          "shorthand": "circular",
-          "outer_radius": 0.012
-        },
-        {
-          "s": 1.0,
-          "shorthand": "circular",
-          "outer_radius": 0.0055
-        }
-      ],
-      "points": [
-        [
-          0.34,
-          -0.04,
-          1.72
-        ],
-        [
-          0.62,
-          -0.07,
-          1.78
-        ],
-        [
-          0.92,
-          -0.08,
-          1.78
-        ],
-        [
-          1.16,
-          -0.08,
-          1.92
-        ]
-      ],
-      "is_terminal": false
-    },
-    {
-      "id": "right_inner_top",
-      "parent_branch_id": "right_leader",
-      "level": 2,
-      "start": [
-        0.36,
-        -0.03,
-        1.92
-      ],
-      "end": [
-        0.62,
-        -0.02,
-        2.48
+        1.42,
+        -0.12,
+        1.76
       ],
       "discretization": {
         "num_elements": 5,
@@ -734,88 +892,39 @@
       ],
       "points": [
         [
-          0.36,
-          -0.03,
-          1.92
+          0.951,
+          -0.11,
+          1.4005
         ],
         [
-          0.5,
-          -0.02,
-          2.2
-        ],
-        [
-          0.62,
-          -0.02,
-          2.48
-        ]
-      ],
-      "is_terminal": true
-    },
-    {
-      "id": "right_outer_top",
-      "parent_branch_id": "right_diagonal_scaffold",
-      "level": 3,
-      "start": [
-        0.66,
-        -0.09,
-        1.82
-      ],
-      "end": [
-        1.12,
-        -0.13,
-        2.22
-      ],
-      "discretization": {
-        "num_elements": 6,
-        "hotspot": false
-      },
-      "stations": [
-        {
-          "s": 0.0,
-          "shorthand": "circular",
-          "outer_radius": 0.0075
-        },
-        {
-          "s": 1.0,
-          "shorthand": "circular",
-          "outer_radius": 0.0035
-        }
-      ],
-      "points": [
-        [
-          0.66,
-          -0.09,
-          1.82
-        ],
-        [
-          0.92,
+          1.18,
           -0.12,
-          2.02
+          1.62
         ],
         [
-          1.12,
-          -0.13,
-          2.22
+          1.42,
+          -0.12,
+          1.76
         ]
       ],
       "is_terminal": true
     },
     {
-      "id": "right_mid_tip_spray",
-      "parent_branch_id": "right_mid_horizontal",
+      "id": "right_upper_tip_spray",
+      "parent_branch_id": "right_upper_scaffold",
       "level": 3,
       "start": [
-        0.92,
-        -0.08,
-        1.78
+        0.82,
+        -0.06,
+        2.12
       ],
       "end": [
-        1.32,
-        -0.1,
-        1.98
+        1.2,
+        -0.08,
+        2.56
       ],
       "discretization": {
-        "num_elements": 4,
+        "num_elements": 5,
         "hotspot": false
       },
       "stations": [
@@ -832,19 +941,19 @@
       ],
       "points": [
         [
-          0.92,
+          0.82,
+          -0.06,
+          2.12
+        ],
+        [
+          1.04,
           -0.08,
-          1.78
+          2.36
         ],
         [
-          1.16,
-          -0.1,
-          1.82
-        ],
-        [
-          1.32,
-          -0.1,
-          1.98
+          1.2,
+          -0.08,
+          2.56
         ]
       ],
       "is_terminal": true
@@ -877,7 +986,7 @@
     "rayleigh_alpha": 0.0,
     "rayleigh_beta": 0.0001,
     "include_gravity_prestress": true,
-    "output_csv": "results/tree_2_asymmetric_multi_leader/frf.csv"
+    "output_csv": "results/tree_4_y_fan_canopy/frf.csv"
   },
   "observations": [
     {
@@ -914,9 +1023,9 @@
       ]
     },
     {
-      "id": "obs_left_leader_root",
+      "id": "obs_left_main_leader_root",
       "target_type": "branch",
-      "target_id": "left_leader",
+      "target_id": "left_main_leader",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -925,9 +1034,9 @@
       ]
     },
     {
-      "id": "obs_left_leader_mid",
+      "id": "obs_left_main_leader_mid",
       "target_type": "branch",
-      "target_id": "left_leader",
+      "target_id": "left_main_leader",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -936,9 +1045,42 @@
       ]
     },
     {
-      "id": "obs_left_leader_tip",
+      "id": "obs_left_main_leader_tip",
       "target_type": "branch",
-      "target_id": "left_leader",
+      "target_id": "left_main_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_leader_root",
+      "target_type": "branch",
+      "target_id": "inner_left_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_leader_mid",
+      "target_type": "branch",
+      "target_id": "inner_left_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_leader_tip",
+      "target_type": "branch",
+      "target_id": "inner_left_leader",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -980,9 +1122,9 @@
       ]
     },
     {
-      "id": "obs_right_leader_root",
+      "id": "obs_right_inner_leader_root",
       "target_type": "branch",
-      "target_id": "right_leader",
+      "target_id": "right_inner_leader",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -991,9 +1133,9 @@
       ]
     },
     {
-      "id": "obs_right_leader_mid",
+      "id": "obs_right_inner_leader_mid",
       "target_type": "branch",
-      "target_id": "right_leader",
+      "target_id": "right_inner_leader",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1002,9 +1144,9 @@
       ]
     },
     {
-      "id": "obs_right_leader_tip",
+      "id": "obs_right_inner_leader_tip",
       "target_type": "branch",
-      "target_id": "right_leader",
+      "target_id": "right_inner_leader",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1013,9 +1155,9 @@
       ]
     },
     {
-      "id": "obs_inner_left_stem_root",
+      "id": "obs_right_low_arch_root",
       "target_type": "branch",
-      "target_id": "inner_left_stem",
+      "target_id": "right_low_arch",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1024,9 +1166,9 @@
       ]
     },
     {
-      "id": "obs_inner_left_stem_mid",
+      "id": "obs_right_low_arch_mid",
       "target_type": "branch",
-      "target_id": "inner_left_stem",
+      "target_id": "right_low_arch",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1035,9 +1177,9 @@
       ]
     },
     {
-      "id": "obs_inner_left_stem_tip",
+      "id": "obs_right_low_arch_tip",
       "target_type": "branch",
-      "target_id": "inner_left_stem",
+      "target_id": "right_low_arch",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1046,9 +1188,9 @@
       ]
     },
     {
-      "id": "obs_left_upper_shelf_root",
+      "id": "obs_left_lower_lateral_root",
       "target_type": "branch",
-      "target_id": "left_upper_shelf",
+      "target_id": "left_lower_lateral",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1057,9 +1199,9 @@
       ]
     },
     {
-      "id": "obs_left_upper_shelf_mid",
+      "id": "obs_left_lower_lateral_mid",
       "target_type": "branch",
-      "target_id": "left_upper_shelf",
+      "target_id": "left_lower_lateral",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1068,9 +1210,9 @@
       ]
     },
     {
-      "id": "obs_left_upper_shelf_tip",
+      "id": "obs_left_lower_lateral_tip",
       "target_type": "branch",
-      "target_id": "left_upper_shelf",
+      "target_id": "left_lower_lateral",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1112,9 +1254,9 @@
       ]
     },
     {
-      "id": "obs_left_inner_top_root",
+      "id": "obs_left_terminal_root",
       "target_type": "branch",
-      "target_id": "left_inner_top",
+      "target_id": "left_terminal",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1123,9 +1265,9 @@
       ]
     },
     {
-      "id": "obs_left_inner_top_mid",
+      "id": "obs_left_terminal_mid",
       "target_type": "branch",
-      "target_id": "left_inner_top",
+      "target_id": "left_terminal",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1134,9 +1276,9 @@
       ]
     },
     {
-      "id": "obs_left_inner_top_tip",
+      "id": "obs_left_terminal_tip",
       "target_type": "branch",
-      "target_id": "left_inner_top",
+      "target_id": "left_terminal",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1145,9 +1287,9 @@
       ]
     },
     {
-      "id": "obs_left_shelf_tip_spray_root",
+      "id": "obs_inner_left_top_root",
       "target_type": "branch",
-      "target_id": "left_shelf_tip_spray",
+      "target_id": "inner_left_top",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1156,9 +1298,9 @@
       ]
     },
     {
-      "id": "obs_left_shelf_tip_spray_mid",
+      "id": "obs_inner_left_top_mid",
       "target_type": "branch",
-      "target_id": "left_shelf_tip_spray",
+      "target_id": "inner_left_top",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1167,9 +1309,9 @@
       ]
     },
     {
-      "id": "obs_left_shelf_tip_spray_tip",
+      "id": "obs_inner_left_top_tip",
       "target_type": "branch",
-      "target_id": "left_shelf_tip_spray",
+      "target_id": "inner_left_top",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1244,9 +1386,9 @@
       ]
     },
     {
-      "id": "obs_right_diagonal_scaffold_root",
+      "id": "obs_right_upper_scaffold_root",
       "target_type": "branch",
-      "target_id": "right_diagonal_scaffold",
+      "target_id": "right_upper_scaffold",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1255,9 +1397,9 @@
       ]
     },
     {
-      "id": "obs_right_diagonal_scaffold_mid",
+      "id": "obs_right_upper_scaffold_mid",
       "target_type": "branch",
-      "target_id": "right_diagonal_scaffold",
+      "target_id": "right_upper_scaffold",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1266,9 +1408,9 @@
       ]
     },
     {
-      "id": "obs_right_diagonal_scaffold_tip",
+      "id": "obs_right_upper_scaffold_tip",
       "target_type": "branch",
-      "target_id": "right_diagonal_scaffold",
+      "target_id": "right_upper_scaffold",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1277,9 +1419,9 @@
       ]
     },
     {
-      "id": "obs_right_mid_horizontal_root",
+      "id": "obs_right_upright_shoot_root",
       "target_type": "branch",
-      "target_id": "right_mid_horizontal",
+      "target_id": "right_upright_shoot",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1288,9 +1430,9 @@
       ]
     },
     {
-      "id": "obs_right_mid_horizontal_mid",
+      "id": "obs_right_upright_shoot_mid",
       "target_type": "branch",
-      "target_id": "right_mid_horizontal",
+      "target_id": "right_upright_shoot",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1299,9 +1441,9 @@
       ]
     },
     {
-      "id": "obs_right_mid_horizontal_tip",
+      "id": "obs_right_upright_shoot_tip",
       "target_type": "branch",
-      "target_id": "right_mid_horizontal",
+      "target_id": "right_upright_shoot",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1310,9 +1452,9 @@
       ]
     },
     {
-      "id": "obs_right_inner_top_root",
+      "id": "obs_right_arch_lower_spray_root",
       "target_type": "branch",
-      "target_id": "right_inner_top",
+      "target_id": "right_arch_lower_spray",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1321,9 +1463,9 @@
       ]
     },
     {
-      "id": "obs_right_inner_top_mid",
+      "id": "obs_right_arch_lower_spray_mid",
       "target_type": "branch",
-      "target_id": "right_inner_top",
+      "target_id": "right_arch_lower_spray",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1332,9 +1474,9 @@
       ]
     },
     {
-      "id": "obs_right_inner_top_tip",
+      "id": "obs_right_arch_lower_spray_tip",
       "target_type": "branch",
-      "target_id": "right_inner_top",
+      "target_id": "right_arch_lower_spray",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1343,9 +1485,9 @@
       ]
     },
     {
-      "id": "obs_right_outer_top_root",
+      "id": "obs_right_arch_terminal_spray_root",
       "target_type": "branch",
-      "target_id": "right_outer_top",
+      "target_id": "right_arch_terminal_spray",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1354,9 +1496,9 @@
       ]
     },
     {
-      "id": "obs_right_outer_top_mid",
+      "id": "obs_right_arch_terminal_spray_mid",
       "target_type": "branch",
-      "target_id": "right_outer_top",
+      "target_id": "right_arch_terminal_spray",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1365,9 +1507,9 @@
       ]
     },
     {
-      "id": "obs_right_outer_top_tip",
+      "id": "obs_right_arch_terminal_spray_tip",
       "target_type": "branch",
-      "target_id": "right_outer_top",
+      "target_id": "right_arch_terminal_spray",
       "target_node": "tip",
       "target_components": [
         "ux",
@@ -1376,9 +1518,9 @@
       ]
     },
     {
-      "id": "obs_right_mid_tip_spray_root",
+      "id": "obs_right_upper_tip_spray_root",
       "target_type": "branch",
-      "target_id": "right_mid_tip_spray",
+      "target_id": "right_upper_tip_spray",
       "target_node": "root",
       "target_components": [
         "ux",
@@ -1387,9 +1529,9 @@
       ]
     },
     {
-      "id": "obs_right_mid_tip_spray_mid",
+      "id": "obs_right_upper_tip_spray_mid",
       "target_type": "branch",
-      "target_id": "right_mid_tip_spray",
+      "target_id": "right_upper_tip_spray",
       "target_node": "mid",
       "target_components": [
         "ux",
@@ -1398,9 +1540,9 @@
       ]
     },
     {
-      "id": "obs_right_mid_tip_spray_tip",
+      "id": "obs_right_upper_tip_spray_tip",
       "target_type": "branch",
-      "target_id": "right_mid_tip_spray",
+      "target_id": "right_upper_tip_spray",
       "target_node": "tip",
       "target_components": [
         "ux",

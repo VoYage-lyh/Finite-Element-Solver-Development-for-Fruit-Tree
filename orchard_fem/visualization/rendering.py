@@ -8,6 +8,8 @@ from orchard_fem.visualization.io import build_series_map, choose_measurement_co
 from orchard_fem.visualization.model_scene import (
     branch_polyline_points,
     build_branch_lookup,
+    hierarchical_labels,
+    level_color,
     project_xz,
     resolve_branch_point,
     resolve_excitation_point,
@@ -55,7 +57,7 @@ def _compact_label(label: str) -> str:
 def _save_figure(fig, output_path: Path, show: bool) -> None:
     plt, _ = require_plotting_dependencies(show)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    fig.savefig(output_path, dpi=180, bbox_inches="tight", pad_inches=0.0)
     if show:
         plt.show()
     plt.close(fig)
@@ -72,6 +74,7 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
 
     max_level = max(int(branch.get("level", 0)) for branch in branches) or 1
     branch_lookup = build_branch_lookup(model)
+    labels = hierarchical_labels(branches)
 
     for branch in branches:
         polyline = branch_polyline_points(branch)
@@ -82,31 +85,33 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
             x_values.append(x)
             z_values.append(z)
         level = int(branch.get("level", 0))
-        color = plt.cm.YlGn(0.35 + 0.55 * (level / max_level))
+        color = level_color(level)
+        lw = max(1.4, 3.2 - level * 0.6)
         ax.plot(
             x_values,
             z_values,
             color=color,
-            linewidth=2.8,
+            linewidth=lw,
             solid_capstyle="round",
         )
         end_x = x_values[-1]
         end_z = z_values[-1]
         ax.annotate(
-            _compact_label(branch["id"]),
+            labels.get(branch["id"], _compact_label(branch["id"])),
             xy=(end_x, end_z),
-            xytext=(5, 5),
+            xytext=(6, 6),
             textcoords="offset points",
-            fontsize=8,
+            fontsize=11,
+            fontweight="bold",
             color=color,
             ha="left",
             va="bottom",
             bbox={
-                "boxstyle": "round,pad=0.16",
+                "boxstyle": "round,pad=0.2",
                 "fc": "white",
                 "ec": color,
-                "lw": 0.6,
-                "alpha": 0.82,
+                "lw": 0.8,
+                "alpha": 0.92,
             },
         )
 
@@ -151,20 +156,29 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
         color="#d62728",
     )
 
+    node_styles = {
+        "root": {"marker": "s", "color": "#1f3a93", "label": "Obs (root)"},
+        "mid":  {"marker": "^", "color": "#1f77b4", "label": "Obs (mid)"},
+        "tip":  {"marker": "o", "color": "#5eaeff", "label": "Obs (tip)"},
+    }
+    legend_seen = set()
     observation_count = 0
     for observation in model.get("observations", []):
         point, _label = resolve_observation_point(model, observation)
         x, z = project_xz(point)
+        node = observation.get("target_node", "tip")
+        style = node_styles.get(node, node_styles["tip"])
+        label = style["label"] if node not in legend_seen else "_nolegend_"
+        legend_seen.add(node)
         ax.scatter(
-            [x],
-            [z],
-            s=80.0,
-            marker="^",
-            color="#1f77b4",
+            [x], [z],
+            s=72.0,
+            marker=style["marker"],
+            color=style["color"],
             edgecolors="black",
             linewidths=0.6,
             zorder=4,
-            label="Observation" if observation_count == 0 else "_nolegend_",
+            label=label,
         )
         observation_count += 1
 

@@ -2,6 +2,50 @@ from __future__ import annotations
 
 from typing import Dict, Sequence, Tuple
 
+# Shared categorical palette — one colour per branch level.
+# Designed for publication figures: maximally distinct hues, readable in print.
+LEVEL_PALETTE: list[str] = [
+    "#2166AC",  # 0  deep blue      — trunk
+    "#B2182B",  # 1  deep crimson   — primary scaffold
+    "#1A7F3C",  # 2  forest green   — secondary
+    "#7B3F9E",  # 3  violet         — tertiary
+    "#D6600A",  # 4+ burnt orange   — fruiting / higher
+]
+
+
+def level_color(level: int) -> str:
+    return LEVEL_PALETTE[min(level, len(LEVEL_PALETTE) - 1)]
+
+
+def hierarchical_labels(branches: Sequence[dict]) -> Dict[str, str]:
+    """Derive compact topology-based labels for paper figures.
+
+    Trunk → "T"; primaries → "1", "2", … (ordered left→right by endpoint x);
+    secondaries → "1.1", "1.2", …; tertiaries → "1.1.1", "1.1.2", …
+    """
+    by_parent: Dict[str | None, list[dict]] = {}
+    for b in branches:
+        by_parent.setdefault(b.get("parent_branch_id"), []).append(b)
+
+    def _end_x(branch: dict) -> float:
+        pts = branch.get("points") or [branch["start"], branch["end"]]
+        return float(pts[-1][0])
+
+    labels: Dict[str, str] = {}
+
+    def _assign(parent_id: str | None, parent_label: str) -> None:
+        children = sorted(by_parent.get(parent_id, []), key=_end_x)
+        for i, child in enumerate(children, start=1):
+            child_label = f"{parent_label}.{i}" if parent_label else str(i)
+            labels[child["id"]] = child_label
+            _assign(child["id"], child_label)
+
+    for root in by_parent.get(None, []):
+        labels[root["id"]] = "T"
+        _assign(root["id"], "")
+
+    return labels
+
 
 def lerp(a: Sequence[float], b: Sequence[float], alpha: float) -> list[float]:
     return [a[index] + alpha * (b[index] - a[index]) for index in range(3)]
