@@ -8,6 +8,7 @@ from orchard_fem.discretization.damping import compute_default_damping_ratio
 from orchard_fem.discretization.types import NonlinearLinkDefinition
 from orchard_fem.dynamics.continuation import solve_frequency_continuation
 from orchard_fem.domain import OrchardModel
+from orchard_fem.domain.enums import ExcitationKind
 from orchard_fem.dynamics.excitation import build_frequency_excitation_load
 from orchard_fem.dynamics.frequency_response import (
     FrequencyResponsePoint,
@@ -155,6 +156,9 @@ def _matrix_diagonal_entry(matrix: Any, dof: int) -> float:
     return float(values[0][0])
 
 
+_DISPLACEMENT_PENALTY = 1.0e12  # large vs typical beam K_ii ~ 1e4–1e7
+
+
 def _build_frequency_rhs_vector(
     block_matrix: Any,
     *,
@@ -165,27 +169,95 @@ def _build_frequency_rhs_vector(
     excitation,
     omega: float,
 ) -> Any:
-    diagonal_stiffness = _matrix_diagonal_entry(stiffness_matrix, excitation_dof)
-    diagonal_mass = _matrix_diagonal_entry(mass_matrix, excitation_dof)
-    diagonal_damping = _matrix_diagonal_entry(damping_matrix, excitation_dof)
+    """RHS for the real-block frequency system.
 
-    load_real, load_imag = build_frequency_excitation_load(
-        [[diagonal_stiffness]],
-        [[diagonal_mass]],
-        [[diagonal_damping]],
-        0,
-        excitation,
-        omega,
-    )
+    For ``HARMONIC_FORCE`` the load is applied directly at the excitation DOF.
+    For ``HARMONIC_DISPLACEMENT`` / ``HARMONIC_ACCELERATION`` the RHS is left
+    zero here and the imposed-DOF condition is applied later via
+    :func:`_pin_excitation_dof_via_penalty`, which augments both the block
+    matrix and the RHS.
+    """
+    from math import cos, pi, sin
 
     size = stiffness_matrix.getSize()[0]
     rhs_vector = block_matrix.createVecRight()
     rhs_vector.set(0.0)
-    rhs_vector.setValue(int(excitation_dof), float(load_real))
-    rhs_vector.setValue(int(size + excitation_dof), float(load_imag))
+
+    if excitation.kind == ExcitationKind.HARMONIC_FORCE:
+        phase = excitation.phase_degrees * (pi / 180.0)
+        load_real = excitation.amplitude * cos(phase)
+        load_imag = excitation.amplitude * sin(phase)
+        rhs_vector.setValue(int(excitation_dof), float(load_real))
+        rhs_vector.setValue(int(size + excitation_dof), float(load_imag))
+
     rhs_vector.assemblyBegin()
     rhs_vector.assemblyEnd()
     return rhs_vector
+
+
+def _pin_excitation_dof_via_penalty(
+    block_matrix: Any,
+    rhs_vector: Any,
+    *,
+    excitation_dof: int,
+    system_size: int,
+    excitation,
+    omega: float,
+    penalty: float = _DISPLACEMENT_PENALTY,
+) -> None:
+    """Impose ``u_exc = U·e^{jφ}`` for displacement/acceleration excitation.
+
+    Adds ``penalty`` to the (exc, exc) and (size+exc, size+exc) diagonals of
+    the real-block dynamic matrix and writes ``penalty·U`` into the matching
+    RHS entries. After the linear solve the excitation DOF is pinned to the
+    imposed value with relative error of order ``K_other / penalty``, while
+    every other DOF responds through the natural off-diagonal coupling.
+
+    The function is a no-op for ``HARMONIC_FORCE`` (the RHS builder handles
+    that case directly).
+    """
+    from math import cos, pi, sin
+
+    if excitation.kind == ExcitationKind.HARMONIC_FORCE:
+        return
+
+    require_petsc()
+    from petsc4py import PETSc
+
+    if excitation.kind == ExcitationKind.HARMONIC_DISPLACEMENT:
+        u_amp = float(excitation.amplitude)
+    elif excitation.kind == ExcitationKind.HARMONIC_ACCELERATION:
+        if omega <= 0.0:
+            raise ValueError(
+                "HARMONIC_ACCELERATION requires omega > 0 to convert to an "
+                "imposed displacement (u = -a/ω²)."
+            )
+        u_amp = -float(excitation.amplitude) / (omega * omega)
+    else:
+        raise ValueError(f"Unsupported excitation kind: {excitation.kind}")
+
+    phase = excitation.phase_degrees * (pi / 180.0)
+    u_real = u_amp * cos(phase)
+    u_imag = u_amp * sin(phase)
+
+    block_matrix.setValue(
+        int(excitation_dof), int(excitation_dof),
+        float(penalty), addv=PETSc.InsertMode.ADD_VALUES,
+    )
+    block_matrix.setValue(
+        int(system_size + excitation_dof),
+        int(system_size + excitation_dof),
+        float(penalty), addv=PETSc.InsertMode.ADD_VALUES,
+    )
+    block_matrix.assemblyBegin()
+    block_matrix.assemblyEnd()
+
+    rhs_vector.setValue(int(excitation_dof), float(penalty * u_real))
+    rhs_vector.setValue(
+        int(system_size + excitation_dof), float(penalty * u_imag),
+    )
+    rhs_vector.assemblyBegin()
+    rhs_vector.assemblyEnd()
 
 
 def _solve_petsc_real_block_system(block_matrix: Any, rhs_vector: Any) -> Any:
@@ -385,6 +457,14 @@ def _solve_harmonic_balance_frequency_point(
         stiffness_matrix=stiffness_matrix,
         mass_matrix=mass_matrix,
         damping_matrix=damping_matrix,
+        excitation=excitation,
+        omega=omega,
+    )
+    _pin_excitation_dof_via_penalty(
+        block_matrix,
+        rhs_vector,
+        excitation_dof=excitation_dof,
+        system_size=stiffness_matrix.getSize()[0],
         excitation=excitation,
         omega=omega,
     )
@@ -640,6 +720,14 @@ def solve_embedded_beam_frequency_response_experiment(
                 stiffness_matrix=experiment.operator_bundle.stiffness_matrix,
                 mass_matrix=experiment.operator_bundle.mass_matrix,
                 damping_matrix=damping_matrix,
+                excitation=model.excitation,
+                omega=omega,
+            )
+            _pin_excitation_dof_via_penalty(
+                block_matrix,
+                rhs_vector,
+                excitation_dof=response_mapping.excitation_dof,
+                system_size=system_size,
                 excitation=model.excitation,
                 omega=omega,
             )

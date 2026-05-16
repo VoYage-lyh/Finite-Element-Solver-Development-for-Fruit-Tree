@@ -255,11 +255,15 @@ def _trunk_outer_radius(model, branch_id: str) -> float:
 
 
 def _trunk_first_segment_length(model, branch_id: str) -> float:
-    """Return Δs in metres between the trunk root and the first interior node."""
+    """Return Δs between trunk root (s=0) and trunk mid (s=0.5) in metres.
+
+    The downstream ``EmbeddedBeamResponseMapping`` resolver only honours the
+    ``target_node`` field on ``ObservationPoint``, not ``target_s``. So to get
+    two physically distinct evaluation points we use the named "root" and
+    "mid" nodes, which gives ``Δs = L/2``.
+    """
     branch = next(b for b in model.branches if b.branch_id == branch_id)
-    total = float(branch.path.length())
-    n_elem = max(int(branch.discretization.num_elements), 1)
-    return total / n_elem
+    return float(branch.path.length()) * 0.5
 
 
 def _augment_observations_for_evaluation(model, trunk_branch_id: str):
@@ -275,39 +279,33 @@ def _augment_observations_for_evaluation(model, trunk_branch_id: str):
     fruit_keys: list[tuple[str, str]] = []   # (obs_id, fruit_id)
     for fruit in model.fruits:
         oid = f"__pareto_fruit_{fruit.fruit_id}"
+        # Fruit augmentation produces one scalar DOF (the attachment-direction
+        # response). Only one component slot is needed.
         extra.append(ObservationPoint(
             observation_id=oid,
             target_type="fruit",
             target_id=fruit.fruit_id,
             target_node="tip",
-            target_components=["ux", "uy", "uz"],
+            target_components=[fruit.target_component],
         ))
         fruit_keys.append((oid, fruit.fruit_id))
 
-    # Trunk rotation at root (s=0) and at the first interior FE node (s=1/N)
-    n_elem = max(
-        int(next(b for b in model.branches if b.branch_id == trunk_branch_id)
-            .discretization.num_elements),
-        1,
-    )
-    s_root = 0.0
-    s_next = 1.0 / n_elem
-    trunk_keys = ("__pareto_trunk_root_rot", "__pareto_trunk_next_rot")
+    # Trunk rotation at root and mid. Use named nodes because the response
+    # mapping resolver ignores target_s on branch observations.
+    trunk_keys = ("__pareto_trunk_root_rot", "__pareto_trunk_mid_rot")
     extra.append(ObservationPoint(
         observation_id=trunk_keys[0],
         target_type="branch",
         target_id=trunk_branch_id,
         target_node="root",
         target_components=["ry", "rz"],
-        target_s=s_root,
     ))
     extra.append(ObservationPoint(
         observation_id=trunk_keys[1],
         target_type="branch",
         target_id=trunk_branch_id,
-        target_node="root",
+        target_node="mid",
         target_components=["ry", "rz"],
-        target_s=s_next,
     ))
 
     augmented = replace(model, observations=list(model.observations) + extra)
@@ -355,9 +353,10 @@ def build_fenicsx_pareto_evaluator(
     Two-objective formulation (matches the redesigned :class:`HarvestObjective`):
 
     1. **detachment_coverage** — fraction of fruits whose inertia force
-       ``m·a`` ≥ attachment force ``k_attach·d_detach``, computed by
-       observing displacement at every fruit's attachment node and converting
-       to acceleration ``a = ω²·|u|``.
+       ``m·a`` ≥ attachment force ``k_attach·d_detach``. Each fruit is
+       augmented as a single lumped-mass DOF along its attachment direction;
+       the observed scalar response ``|u|`` is converted to acceleration via
+       ``a = ω²·|u|``.
     2. **trunk_max_stress** — bending stress at the trunk root computed from
        the curvature ``|κ|`` between two adjacent trunk FE nodes (rotation
        components ``ry``, ``rz``) via ``σ = E · r_outer · |κ|``.
@@ -433,28 +432,29 @@ def build_fenicsx_pareto_evaluator(
         omega = 2.0 * np.pi * float(frequency_hz)
 
         # ── 5. Coverage from fruit inertia forces ──────────────────────────
+        # Each fruit augmentation produces ONE scalar DOF (the lumped mass
+        # along its attachment_component), so the observation appears under
+        # the bare ``obs_id`` — no component suffix.
+        d_detach = 0.010
+        if cloned.fruit_policy is not None:
+            d_detach = float(cloned.fruit_policy.detachment_displacement_m)
         n_detached = 0
         n_total = 0
         fruit_lookup = {f.fruit_id: f for f in cloned.fruits}
+        name_to_idx = {n: i for i, n in enumerate(names)}
+        cplx = point.observation_complex
+        if cplx is None:
+            cplx = tuple(complex(m, 0.0) for m in point.observation_magnitudes)
         for obs_id, fruit_id in fruit_keys:
             fruit = fruit_lookup.get(fruit_id)
             if fruit is None or fruit.mass <= 0.0 or fruit.stiffness <= 0.0:
                 continue
-            ux_uy_uz = _component_complex(
-                point, names, obs_id, ("ux", "uy", "uz"),
-            )
-            if not ux_uy_uz:
+            idx = name_to_idx.get(obs_id)
+            if idx is None:
                 continue
-            # |u| over the 3D displacement vector at the fruit attachment node
-            u_mag = float(np.sqrt(sum(abs(v) ** 2 for v in ux_uy_uz.values())))
+            u_mag = float(abs(cplx[idx]))
             a_fruit = omega * omega * u_mag                  # m/s²
             inertia = fruit.mass * a_fruit                   # N
-            # Detachment force = k_attach · d_detach. ``stiffness`` is the
-            # attachment stiffness; the detachment displacement comes from
-            # ``model.fruit_policy`` or a per-fruit override.
-            d_detach = 0.010  # m (default; will override below if available)
-            if cloned.fruit_policy is not None:
-                d_detach = float(cloned.fruit_policy.detachment_displacement_m)
             detach_force = fruit.stiffness * d_detach
             n_total += 1
             if inertia >= detach_force:
