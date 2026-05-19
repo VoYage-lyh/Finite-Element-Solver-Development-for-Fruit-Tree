@@ -23,6 +23,7 @@ Cross-tree outputs (only best-clamp knee per tree):
 """
 from __future__ import annotations
 
+import math
 import sys
 import time
 from dataclasses import dataclass, field, replace
@@ -155,6 +156,10 @@ class TreeResult:
     f_resonance: float
     clamps: list[ClampResult] = field(default_factory=list)
     best_idx: int = 0
+    # Kept for downstream visualisation (response map). Not used by Pareto.
+    model: object = None
+    theta: dict = field(default_factory=dict)
+    label_map: dict = field(default_factory=dict)
 
     @property
     def best(self) -> ClampResult:
@@ -290,12 +295,23 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
 
     print(f"\n[{label}] loading {model_path.name} …")
     model = load_orchard_model(str(model_path))
-    print(f"[{label}]   fruits={len(model.fruits)}, branches={len(model.branches)}")
 
-    model = replace(
-        model,
-        fruit_policy=replace(model.fruit_policy, detachment_displacement_m=0.002),
+    # Replace the policy-driven fruit list with a dense linear distribution:
+    # every non-trunk branch carries one fruit per 5 % of its arc length
+    # (20 fruits per branch). The attachment stiffness varies linearly along
+    # the branch — stiffer near the root (older, woodier stalks) and softer
+    # at the tip (young, easily-snapped peduncles).
+    new_policy = replace(
+        model.fruit_policy,
+        detachment_displacement_m=0.002,
     )
+    dense_fruits = _generate_linear_fruits(model, new_policy, spacing=0.05)
+    model = replace(model, fruits=dense_fruits, fruit_policy=new_policy)
+
+    fruit_branches = {f.branch_id for f in model.fruits}
+    print(f"[{label}]   fruits={len(model.fruits)} on "
+          f"{len(fruit_branches)} branches "
+          f"(linear density: every 5% of arc length)")
 
     print(f"[{label}] FRF sweep 0.5–30 Hz …")
     t0 = time.time()
@@ -377,6 +393,9 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
         f_resonance=f_resonance,
         clamps=clamps,
         best_idx=best_idx,
+        model=model,
+        theta=theta,
+        label_map=label_map,
     )
 
 
@@ -396,19 +415,351 @@ def main() -> int:
 
         _save_pareto_multi_clamp(result, out_dir / f"verify_pareto_tree_{n}")
         _save_frf(result, out_dir / f"verify_frf_tree_{n}")
+
+        # Compute per-fruit detachment at the best (clamp, f, A) and plot a
+        # side-view tree response map.
+        outcomes = _compute_fruit_outcomes_at_best(result)
+        _save_tree_response_map(
+            result, outcomes,
+            out_dir / f"verify_response_tree_{n}",
+        )
         print(f"[tree_{n}] figures → outputs/verify_pareto_tree_{n}.{{png,pdf}} "
-              f"+ verify_frf_tree_{n}.{{png,pdf}}")
+              f"+ verify_frf_tree_{n}.{{png,pdf}} + "
+              f"verify_response_tree_{n}.{{png,pdf}}")
 
     if len(results) >= 2:
         _save_all_pareto_overlay(results, out_dir / "verify_pareto_all_trees")
         _save_all_frf_overlay(results, out_dir / "verify_frf_all_trees")
         _save_knees_summary(results, out_dir / "verify_knees_summary")
+        _save_all_response_panels(results, out_dir / "verify_response_all_trees")
         print(f"\n[summary] cross-tree figures → outputs/verify_*_all_trees.{{png,pdf}} "
               f"+ verify_knees_summary.{{png,pdf}}")
 
     _print_recommendation_table(results)
     print(f"\n[done] processed {len(results)} tree(s).")
     return 0
+
+
+# ────────────────────────────────────────────────────────────────────────────
+#  Dense fruit distribution along every branch
+# ────────────────────────────────────────────────────────────────────────────
+def _generate_linear_fruits(model, policy, spacing: float = 0.05):
+    """Generate fruits at every ``spacing`` fraction of every non-trunk branch.
+
+    Mass per fruit is drawn from the policy mean ± Gaussian residual
+    (``mass_residual_cv``). The attachment stiffness varies **linearly along
+    each branch**: ``k(s) = k_mean × (1.5 − s)`` (1.5×k at the root, 0.5×k at
+    the tip), giving the physical "young tip wood snaps first" behaviour.
+
+    A trunk branch is excluded — fruit are borne on scaffolds and shoots,
+    not on the trunk itself.
+    """
+    import random
+    from orchard_fem.domain.entities import FruitAttachment
+
+    rng = random.Random(policy.seed)
+
+    # Derive per-fruit mean parameters from the policy aggregates.
+    # ``mean_detachment_force_N`` is a derived quantity exposed by the policy
+    # generator; if absent, fall back to a default fruit mass of 0.05 kg.
+    mean_mass = getattr(policy, "mean_fruit_mass_kg", None)
+    if mean_mass is None:
+        # Derive from total weight if explicit value missing.
+        mean_mass = 0.05
+    mean_detach_force = (
+        getattr(policy, "mean_detachment_force_N", None) or 5.0
+    )
+    d_detach = float(policy.detachment_displacement_m)
+    k_mean = mean_detach_force / d_detach
+    zeta = float(getattr(policy, "attachment_damping_ratio", 0.05))
+    target_component = str(
+        getattr(policy, "attachment_component", "uz")
+    )
+
+    fruits: list = []
+    fruit_idx = 0
+    n_per_branch = max(int(round(1.0 / spacing)), 1)
+
+    for branch in model.branches:
+        if branch.branch_id == "trunk":
+            continue
+        for i in range(n_per_branch):
+            s = (i + 1) * spacing                  # 0.05, 0.10, …, 1.00
+            if s > 1.0:
+                break
+            mass_jitter = rng.gauss(0.0, float(getattr(
+                policy, "mass_residual_cv", 0.10,
+            )))
+            mass = max(mean_mass * (1.0 + mass_jitter), 0.005)
+            k = max(k_mean * (1.5 - s), 0.10 * k_mean)
+            damping = 2.0 * zeta * math.sqrt(mass * k)
+            fruits.append(FruitAttachment(
+                fruit_id=f"fr_{branch.branch_id}_{int(s*100):03d}",
+                branch_id=branch.branch_id,
+                location_s=float(s),
+                mass=float(mass),
+                stiffness=float(k),
+                damping=float(damping),
+                target_component=target_component,
+            ))
+            fruit_idx += 1
+    return fruits
+
+
+# ────────────────────────────────────────────────────────────────────────────
+#  Tree response map — per-fruit detachment at the best (clamp, f, A)
+# ────────────────────────────────────────────────────────────────────────────
+def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
+    """Re-solve the FE problem at the recommended work point and return a list
+    of per-fruit dicts with detachment status and 3D position.
+    """
+    from orchard_fem.calibration.fenicsx_bridge import (
+        _apply_theta_to_model, _parse_clamp_label,
+    )
+    from orchard_fem.fenicsx.frequency_response import (
+        solve_embedded_beam_frequency_response_experiment,
+    )
+    from orchard_fem.topology import ObservationPoint
+
+    model = result.model
+    theta = result.theta
+    best = result.best
+    knee = best.knee
+
+    cloned = _apply_theta_to_model(model, theta)
+    branch_id, target_s = _parse_clamp_label(best.clamp_label)
+    cloned = replace(
+        cloned,
+        excitation=replace(
+            cloned.excitation,
+            target_branch_id=branch_id,
+            target_s=(target_s if target_s is not None
+                      else cloned.excitation.target_s),
+            amplitude=float(knee.amplitude),  # A is in N (amplitude_unit="m")
+            driving_frequency_hz=float(knee.frequency_hz),
+        ),
+        analysis=replace(
+            cloned.analysis,
+            frequency_start_hz=float(knee.frequency_hz),
+            frequency_end_hz=float(knee.frequency_hz) + 1.0e-6,
+            frequency_steps=1,
+        ),
+    )
+
+    extras: list[ObservationPoint] = []
+    fruit_keys: list[tuple[str, object]] = []
+    for fruit in cloned.fruits:
+        oid = f"__viz_fruit_{fruit.fruit_id}"
+        extras.append(ObservationPoint(
+            observation_id=oid,
+            target_type="fruit",
+            target_id=fruit.fruit_id,
+            target_node="tip",
+            target_components=[fruit.target_component],
+        ))
+        fruit_keys.append((oid, fruit))
+    cloned = replace(cloned, observations=list(cloned.observations) + extras)
+
+    exp = solve_embedded_beam_frequency_response_experiment(
+        cloned, polynomial_degree=1,
+    )
+    point = exp.result.points[0]
+    name_to_idx = {n: i for i, n in enumerate(exp.result.observation_names)}
+
+    d_detach = 0.010
+    if cloned.fruit_policy is not None:
+        d_detach = float(cloned.fruit_policy.detachment_displacement_m)
+
+    omega = 2.0 * np.pi * float(knee.frequency_hz)
+    outcomes: list[dict] = []
+    for obs_id, fruit in fruit_keys:
+        idx = name_to_idx.get(obs_id)
+        if idx is None:
+            continue
+        u_mag = float(point.observation_magnitudes[idx])
+        inertia = fruit.mass * omega * omega * u_mag
+        detach_force = fruit.stiffness * d_detach
+        branch = next(b for b in cloned.branches if b.branch_id == fruit.branch_id)
+        pos = branch.path.point_at(float(fruit.location_s))
+        outcomes.append({
+            "fruit_id": fruit.fruit_id,
+            "branch_id": fruit.branch_id,
+            "x": float(pos.x),
+            "y": float(pos.y),
+            "z": float(pos.z),
+            "detached": bool(inertia >= detach_force),
+            "inertia_N": float(inertia),
+            "detach_force_N": float(detach_force),
+        })
+    return outcomes
+
+
+def _branch_polyline_xz(branch, n: int = 30):
+    """Return (xs, zs) polyline for *branch* — side view (x-z) projection."""
+    ss = np.linspace(0.0, 1.0, n)
+    pts = [branch.path.point_at(float(s)) for s in ss]
+    xs = np.array([p.x for p in pts])
+    zs = np.array([p.z for p in pts])
+    return xs, zs
+
+
+def _draw_tree_response(
+    ax, model, outcomes, best_clamp_label, label_map,
+    *, show_branch_labels: bool = True, fontsize: float = 9,
+):
+    """Render a single side-view tree-response panel onto *ax*."""
+    from orchard_fem.calibration.fenicsx_bridge import _parse_clamp_label
+
+    activated = {o["branch_id"] for o in outcomes if o["detached"]}
+    fruit_branches = {o["branch_id"] for o in outcomes}
+
+    for branch in model.branches:
+        xs, zs = _branch_polyline_xz(branch)
+        if branch.branch_id == "trunk":
+            color, lw = "#444444", 2.6
+        elif branch.branch_id in activated:
+            color, lw = "#1B7837", 2.2
+        elif branch.branch_id in fruit_branches:
+            color, lw = "#E08214", 1.6
+        else:
+            color, lw = "#bbbbbb", 1.0
+        ax.plot(xs, zs, color=color, linewidth=lw,
+                solid_capstyle="round", zorder=2)
+
+        if show_branch_labels:
+            hier = label_map.get(branch.branch_id, "")
+            if hier == "T":
+                continue
+            if "." not in hier and hier:  # primary branches only
+                ax.text(xs[-1], zs[-1] + 0.04, f"B{hier}",
+                        color="#222222", fontsize=fontsize,
+                        ha="center", va="bottom", fontweight="bold")
+
+    for o in outcomes:
+        if o["detached"]:
+            ax.scatter([o["x"]], [o["z"]],
+                       color="#1B7837", s=55, marker="o",
+                       edgecolors="white", linewidths=0.8, zorder=4)
+        else:
+            ax.scatter([o["x"]], [o["z"]],
+                       color="#cccccc", s=26, marker="o",
+                       edgecolors="#888888", linewidths=0.5, zorder=3)
+
+    bid, s_clamp = _parse_clamp_label(best_clamp_label)
+    if s_clamp is None:
+        s_clamp = 0.5
+    branch = next(b for b in model.branches if b.branch_id == bid)
+    pos = branch.path.point_at(float(s_clamp))
+    ax.scatter([pos.x], [pos.z],
+               color="#B2182B", s=320, marker="*",
+               edgecolors="white", linewidths=1.4, zorder=10)
+
+
+def _save_tree_response_map(
+    result: TreeResult, outcomes: list[dict], stem: Path,
+) -> None:
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    fig, ax = plt.subplots(figsize=(7.6, 7.4))
+    _draw_tree_response(ax, result.model, outcomes,
+                        result.best.clamp_label, result.label_map)
+
+    n_total = len(outcomes)
+    n_det = sum(1 for o in outcomes if o["detached"])
+    fruit_branches = {o["branch_id"] for o in outcomes}
+    activated = {o["branch_id"] for o in outcomes if o["detached"]}
+    fruit_pct = 100.0 * n_det / max(n_total, 1)
+    branch_pct = 100.0 * len(activated) / max(len(fruit_branches), 1)
+
+    k = result.best.knee
+    ax.set_title(
+        f"{result.label} response — "
+        f"$f^*={k.frequency_hz:.1f}$ Hz, $A^*={k.amplitude:.0f}$ N, "
+        f"clamp: {result.best.display_label}\n"
+        f"{n_det}/{n_total} fruits detached ({fruit_pct:.0f}%)  •  "
+        f"{len(activated)}/{len(fruit_branches)} branches activated "
+        f"({branch_pct:.0f}%)",
+        fontsize=12,
+    )
+
+    handles = [
+        Line2D([], [], color="#444444", linewidth=2.6, label="Trunk"),
+        Line2D([], [], color="#1B7837", linewidth=2.2, label="Activated branch"),
+        Line2D([], [], color="#E08214", linewidth=1.6,
+               label="Fruit-bearing, not activated"),
+        Line2D([], [], color="#bbbbbb", linewidth=1.0, label="No fruit"),
+        Line2D([], [], marker="o", color="w", markerfacecolor="#1B7837",
+               markeredgecolor="white", markersize=10, label="Fruit detached"),
+        Line2D([], [], marker="o", color="w", markerfacecolor="#cccccc",
+               markeredgecolor="#888888", markersize=8, label="Fruit retained"),
+        Line2D([], [], marker="*", color="w", markerfacecolor="#B2182B",
+               markeredgecolor="white", markersize=15,
+               label=f"Clamp ({result.best.display_label})"),
+    ]
+    ax.legend(handles=handles, loc="lower right", fontsize=9, framealpha=0.95)
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("z [m] (height)")
+    ax.set_aspect("equal")
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    _save_both(fig, stem)
+    plt.close(fig)
+
+
+def _save_all_response_panels(
+    results: list[TreeResult], stem: Path,
+) -> None:
+    """5-panel side-by-side tree-response map for all trees."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    n = len(results)
+    fig, axes = plt.subplots(1, n, figsize=(4.6 * n, 5.4), squeeze=False)
+    axes = axes[0]
+    for ax, r in zip(axes, results):
+        outcomes = _compute_fruit_outcomes_at_best(r)
+        _draw_tree_response(ax, r.model, outcomes,
+                            r.best.clamp_label, r.label_map,
+                            show_branch_labels=False, fontsize=8)
+        activated = {o["branch_id"] for o in outcomes if o["detached"]}
+        fruit_branches = {o["branch_id"] for o in outcomes}
+        n_det = sum(1 for o in outcomes if o["detached"])
+        branch_pct = 100.0 * len(activated) / max(len(fruit_branches), 1)
+        ax.set_title(
+            f"{r.label}\n"
+            f"clamp: {r.best.display_label}\n"
+            f"{n_det}/{len(outcomes)} fruits, "
+            f"{len(activated)}/{len(fruit_branches)} branches "
+            f"({branch_pct:.0f}%)",
+            fontsize=10,
+        )
+        ax.set_xlabel("x [m]", fontsize=10)
+        ax.set_aspect("equal")
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=8)
+    axes[0].set_ylabel("z [m]", fontsize=10)
+
+    legend_handles = [
+        Line2D([], [], color="#1B7837", linewidth=2.2, label="Activated branch"),
+        Line2D([], [], color="#E08214", linewidth=1.6, label="Fruit, not activated"),
+        Line2D([], [], color="#bbbbbb", linewidth=1.0, label="No fruit"),
+        Line2D([], [], marker="o", color="w", markerfacecolor="#1B7837",
+               markeredgecolor="white", markersize=9, label="Fruit detached"),
+        Line2D([], [], marker="o", color="w", markerfacecolor="#cccccc",
+               markeredgecolor="#888888", markersize=7, label="Fruit retained"),
+        Line2D([], [], marker="*", color="w", markerfacecolor="#B2182B",
+               markeredgecolor="white", markersize=14, label="Best clamp"),
+    ]
+    fig.legend(handles=legend_handles, loc="lower center",
+               ncol=6, fontsize=9, frameon=True,
+               bbox_to_anchor=(0.5, -0.04))
+    fig.suptitle("Tree response under best (clamp, f, A) — side view",
+                 fontsize=13, y=1.00)
+    fig.tight_layout(rect=(0.0, 0.04, 1.0, 1.0))
+    _save_both(fig, stem)
+    plt.close(fig)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -489,7 +840,7 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
         f"Multi-clamp Pareto — {result.label} "
         f"({result.n_fruits} fruits, resonance {result.f_resonance:.1f} Hz)"
     )
-    ax.set_xlim(-0.03, max(0.75, best_cov_max * 1.10))
+    ax.set_xlim(0.0, 1.0)
     if np.isfinite(sigma_lo) and sigma_lo > 0:
         ax.set_ylim(sigma_lo * 0.5, sigma_hi * 1.5)
     ax.legend(loc="lower right", fontsize=9,
@@ -590,7 +941,7 @@ def _save_all_pareto_overlay(results: list[TreeResult], stem: Path) -> None:
     ax.set_xlabel("Branch activation (fraction of fruit-bearing branches resonating)")
     ax.set_ylabel(r"Trunk peak stress $\sigma_{\mathrm{max}}$  [MPa, log]")
     ax.set_title("Best-clamp Pareto fronts — 5 trees")
-    ax.set_xlim(-0.03, max(0.75, cov_max_all * 1.08))
+    ax.set_xlim(0.0, 1.0)
     ax.legend(loc="upper left", fontsize=9)
     ax.grid(True, which="major", linewidth=0.6, color="#d0d0d0")
     ax.grid(True, which="minor", linewidth=0.4, color="#ececec")
