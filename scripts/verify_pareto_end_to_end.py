@@ -313,7 +313,9 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
         "E": float(model.materials[0].youngs_modulus),
         "rho": float(model.materials[0].density),
     }
-    evaluator = build_fenicsx_pareto_evaluator(model, amplitude_unit="m")
+    evaluator = build_fenicsx_pareto_evaluator(
+        model, amplitude_unit="m", coverage_mode="branch",
+    )
 
     f_grid = [
         max(0.5, f_resonance - 2.0),
@@ -364,7 +366,7 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     print(f"[{label}] best clamp: {best.display_label} ({best.clamp_label})  "
           f"f*={best.knee.frequency_hz:.2f} Hz, "
           f"A*={best.knee.amplitude:.0f} N, "
-          f"coverage={best.knee.detachment_coverage:.2f}, "
+          f"activation={best.knee.detachment_coverage:.2f}, "
           f"σ={best.knee.trunk_max_stress / 1e6:.3f} MPa")
 
     return TreeResult(
@@ -465,22 +467,23 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
     ax.scatter([bx], [by], s=380, marker="o",
                facecolor="none", edgecolor="#B2182B", linewidth=2.6,
                zorder=8)
-    ax.annotate(
+    ax.text(
+        0.02, 0.98,
         f"$f^* = {bk.frequency_hz:.1f}$ Hz\n"
         f"$A^* = {bk.amplitude:.0f}$ N\n"
-        f"coverage $= {bk.detachment_coverage:.2f}$\n"
+        f"branch activation $= {bk.detachment_coverage:.2f}$\n"
         f"$\\sigma_{{\\max}} = {by:.2f}$ MPa\n"
         f"clamp: {best.display_label}",
-        xy=(bx, by),
-        xytext=(-150, -55), textcoords="offset points",
+        transform=ax.transAxes,
+        ha="left", va="top",
         fontsize=10, color="#B2182B",
-        bbox=dict(boxstyle="round,pad=0.35", fc="white",
+        bbox=dict(boxstyle="round,pad=0.4", fc="white",
                   ec="#B2182B", lw=0.8, alpha=0.95),
-        arrowprops=dict(arrowstyle="->", color="#B2182B", lw=1.0),
+        zorder=10,
     )
 
     ax.set_yscale("log")
-    ax.set_xlabel("Detachment coverage")
+    ax.set_xlabel("Branch activation (fraction of fruit-bearing branches resonating)")
     ax.set_ylabel(r"Trunk peak stress $\sigma_{\mathrm{max}}$  [MPa, log]")
     ax.set_title(
         f"Multi-clamp Pareto — {result.label} "
@@ -584,7 +587,7 @@ def _save_all_pareto_overlay(results: list[TreeResult], stem: Path) -> None:
         cov_max_all = max(cov_max_all, float(cov.max()))
 
     ax.set_yscale("log")
-    ax.set_xlabel("Detachment coverage")
+    ax.set_xlabel("Branch activation (fraction of fruit-bearing branches resonating)")
     ax.set_ylabel(r"Trunk peak stress $\sigma_{\mathrm{max}}$  [MPa, log]")
     ax.set_title("Best-clamp Pareto fronts — 5 trees")
     ax.set_xlim(-0.03, max(0.75, cov_max_all * 1.08))
@@ -648,7 +651,7 @@ def _save_knees_summary(results: list[TreeResult], stem: Path) -> None:
     for ax, values, ylabel, title in (
         (axes[0, 0], f_stars, "f* [Hz]", "Knee drive frequency"),
         (axes[0, 1], a_stars, "A* [N]",  "Knee force amplitude"),
-        (axes[1, 0], covs,    "Detachment coverage", "Knee coverage"),
+        (axes[1, 0], covs,    "Branch activation", "Knee branch activation"),
         (axes[1, 1], sigmas,  r"$\sigma_{\mathrm{max}}$ [MPa]", "Knee trunk stress"),
     ):
         bars = ax.bar(labels, values, color=colors, edgecolor="white",
@@ -688,18 +691,18 @@ def _save_knees_summary(results: list[TreeResult], stem: Path) -> None:
 def _print_recommendation_table(results: list[TreeResult]) -> None:
     if not results:
         return
-    print("\n┌────────┬─────────┬─────────────┬─────────┬────────┬──────────┬─────────────┐")
-    print("│  Tree  │ Fruits  │ Best clamp  │  f* Hz  │  A* N  │ Coverage │ σ_max [MPa] │")
-    print("├────────┼─────────┼─────────────┼─────────┼────────┼──────────┼─────────────┤")
+    print("\n┌────────┬─────────┬─────────────┬─────────┬────────┬────────────┬─────────────┐")
+    print("│  Tree  │ Fruits  │ Best clamp  │  f* Hz  │  A* N  │ Activation │ σ_max [MPa] │")
+    print("├────────┼─────────┼─────────────┼─────────┼────────┼────────────┼─────────────┤")
     for r in results:
         b = r.best
         k = b.knee
         print(
             f"│ {r.label:>6} │ {r.n_fruits:>7} │ {b.display_label:<11} │ "
             f"{k.frequency_hz:>7.2f} │ {k.amplitude:>6.0f} │ "
-            f"{k.detachment_coverage:>8.2f} │ {k.trunk_max_stress/1e6:>11.3f} │"
+            f"{k.detachment_coverage:>10.2f} │ {k.trunk_max_stress/1e6:>11.3f} │"
         )
-    print("└────────┴─────────┴─────────────┴─────────┴────────┴──────────┴─────────────┘")
+    print("└────────┴─────────┴─────────────┴─────────┴────────┴────────────┴─────────────┘")
 
 
 if __name__ == "__main__":

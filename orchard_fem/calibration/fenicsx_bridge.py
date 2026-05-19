@@ -347,16 +347,13 @@ def build_fenicsx_pareto_evaluator(
     polynomial_degree: int = 1,
     amplitude_unit: str = "mm",
     trunk_branch_id: str = "trunk",
+    coverage_mode: str = "fruit",
 ):
     """Return a Pareto-objective evaluator backed by the FEniCSx solver.
 
     Two-objective formulation (matches the redesigned :class:`HarvestObjective`):
 
-    1. **detachment_coverage** — fraction of fruits whose inertia force
-       ``m·a`` ≥ attachment force ``k_attach·d_detach``. Each fruit is
-       augmented as a single lumped-mass DOF along its attachment direction;
-       the observed scalar response ``|u|`` is converted to acceleration via
-       ``a = ω²·|u|``.
+    1. **detachment_coverage** — see ``coverage_mode``.
     2. **trunk_max_stress** — bending stress at the trunk root computed from
        the curvature ``|κ|`` between two adjacent trunk FE nodes (rotation
        components ``ry``, ``rz``) via ``σ = E · r_outer · |κ|``.
@@ -376,6 +373,16 @@ def build_fenicsx_pareto_evaluator(
         the Pareto ``A`` scalar and the ``HarmonicExcitation.amplitude`` value.
     trunk_branch_id:
         Branch ID used for stress evaluation (default ``"trunk"``).
+    coverage_mode:
+        How to aggregate detachment outcomes into the scalar coverage objective.
+
+        * ``"fruit"`` (default): ``n_detached_fruits / n_total_fruits``.
+          Rewards "cleaning out" any single branch with many fruits.
+        * ``"branch"``: ``n_activated_branches / n_branches_with_fruit``, where
+          a branch is "activated" if **at least one** of its fruits meets the
+          detachment criterion. Rewards exciting as many branches as possible
+          (a proxy for "how many branches resonate at this work point"), which
+          tracks the physical goal of orchard-wide shake-and-catch harvesting.
 
     Returns
     -------
@@ -385,6 +392,8 @@ def build_fenicsx_pareto_evaluator(
 
     if amplitude_unit not in ("mm", "m"):
         raise ValueError("amplitude_unit must be 'mm' or 'm'.")
+    if coverage_mode not in ("fruit", "branch"):
+        raise ValueError("coverage_mode must be 'fruit' or 'branch'.")
     A_scale = 1.0e-3 if amplitude_unit == "mm" else 1.0
 
     r_outer = _trunk_outer_radius(model, trunk_branch_id)
@@ -440,6 +449,8 @@ def build_fenicsx_pareto_evaluator(
             d_detach = float(cloned.fruit_policy.detachment_displacement_m)
         n_detached = 0
         n_total = 0
+        branches_with_fruit: set[str] = set()
+        activated_branches: set[str] = set()
         fruit_lookup = {f.fruit_id: f for f in cloned.fruits}
         name_to_idx = {n: i for i, n in enumerate(names)}
         cplx = point.observation_complex
@@ -457,10 +468,18 @@ def build_fenicsx_pareto_evaluator(
             inertia = fruit.mass * a_fruit                   # N
             detach_force = fruit.stiffness * d_detach
             n_total += 1
+            branches_with_fruit.add(fruit.branch_id)
             if inertia >= detach_force:
                 n_detached += 1
+                activated_branches.add(fruit.branch_id)
 
-        coverage = n_detached / n_total if n_total else 0.0
+        if coverage_mode == "branch":
+            coverage = (
+                len(activated_branches) / len(branches_with_fruit)
+                if branches_with_fruit else 0.0
+            )
+        else:  # "fruit"
+            coverage = n_detached / n_total if n_total else 0.0
 
         # ── 6. Trunk max bending stress σ = E · r · |κ| ─────────────────────
         root_rot = _component_complex(point, names, trunk_keys[0], ("ry", "rz"))
