@@ -42,6 +42,15 @@ _FEASIBLE_BAND_HZ = (3.0, 20.0)
 _TRUNK_CLAMP_S = (0.25, 0.40, 0.55, 0.70, 0.85)
 _AMPLITUDE_GRID_MM = (5.0, 10.0, 15.0, 20.0, 30.0)
 
+# Sanity ceiling on the trunk peak bending stress. Wood typically fails in
+# tension at 50–100 MPa; anything above ~100 MPa is well outside the linear
+# elastic regime our beam model assumes, and in practice tends to be the
+# fingerprint of a numerically pathological (clamp, f, A) point (e.g.
+# anti-resonance with near-singular dynamic stiffness, or penalty-Dirichlet
+# rounding artefacts amplified by sharp local resonance). Such points are
+# dropped from the feasible Pareto set so they cannot become the knee.
+_STRESS_SANITY_CEILING_PA = 100.0e6
+
 
 # ────────────────────────────────────────────────────────────────────────────
 #  Publication-grade matplotlib style
@@ -363,6 +372,7 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
         try:
             front = pareto_front_from_grid(
                 clamp_label, f_grid, A_grid, evaluator, theta,
+                stress_max=_STRESS_SANITY_CEILING_PA,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[{label}]   skip {clamp_label}: {exc}")
@@ -792,23 +802,29 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
     best_sigma_max = max(c.knee.trunk_max_stress / 1e6 for c in result.clamps)
     best_cov_max = max(c.knee.detachment_coverage for c in result.clamps)
 
+    sigma_ceiling_mpa = _STRESS_SANITY_CEILING_PA / 1.0e6
+
     sigma_lo = float("inf")
     sigma_hi = 0.0
     for i, c in enumerate(result.clamps):
         front = c.front
         cov = -front.objectives[:, 0]
         sigma = front.objectives[:, 1] / 1.0e6
+        # Display-layer guard: drop physically-impossible points (e.g.
+        # numerical artefacts from anti-resonance / near-singular solves).
+        sane_mask = sigma <= sigma_ceiling_mpa
         nd = front.non_dominated_index
-        if nd.size == 0:
+        nd_sane = np.array([k for k in nd if sane_mask[k]], dtype=int)
+        if nd_sane.size == 0:
             continue
-        order = np.argsort(cov[nd])
+        order = np.argsort(cov[nd_sane])
         color = _CLAMP_PALETTE[i % len(_CLAMP_PALETTE)]
         is_best = c is best
 
-        ax.plot(cov[nd][order], sigma[nd][order],
+        ax.plot(cov[nd_sane][order], sigma[nd_sane][order],
                 color=color, linewidth=1.6 if is_best else 1.1,
                 alpha=0.85 if is_best else 0.55, zorder=3 if is_best else 2)
-        ax.scatter(cov[nd], sigma[nd],
+        ax.scatter(cov[nd_sane], sigma[nd_sane],
                    color=color,
                    s=70 if is_best else 42,
                    edgecolors="white", linewidths=0.9,
@@ -816,11 +832,10 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
                          else c.display_label,
                    zorder=4 if is_best else 3)
 
-        # Use floor at the smallest positive sigma on each front
-        pos = sigma[nd][sigma[nd] > 0]
+        pos = sigma[nd_sane][sigma[nd_sane] > 0]
         if pos.size:
             sigma_lo = min(sigma_lo, float(pos.min()))
-        sigma_hi = max(sigma_hi, float(sigma[nd].max()))
+        sigma_hi = max(sigma_hi, float(sigma[nd_sane].max()))
 
     # Mark the best knee
     bk = best.knee
@@ -924,6 +939,7 @@ def _save_all_pareto_overlay(results: list[TreeResult], stem: Path) -> None:
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(7.4, 5.4))
+    sigma_ceiling_mpa = _STRESS_SANITY_CEILING_PA / 1.0e6
     cov_max_all = 0.0
     for i, r in enumerate(results):
         front = r.best.front
@@ -932,21 +948,26 @@ def _save_all_pareto_overlay(results: list[TreeResult], stem: Path) -> None:
         nd = front.non_dominated_index
         if nd.size == 0:
             continue
-        order = np.argsort(cov[nd])
+        sane_mask = sigma <= sigma_ceiling_mpa
+        nd_sane = np.array([k for k in nd if sane_mask[k]], dtype=int)
+        if nd_sane.size == 0:
+            continue
+        order = np.argsort(cov[nd_sane])
         color = _TREE_PALETTE[i % len(_TREE_PALETTE)]
 
-        ax.plot(cov[nd][order], sigma[nd][order],
+        ax.plot(cov[nd_sane][order], sigma[nd_sane][order],
                 color=color, linewidth=1.4, alpha=0.65, zorder=2)
-        ax.scatter(cov[nd], sigma[nd],
+        ax.scatter(cov[nd_sane], sigma[nd_sane],
                    color=color, s=68, edgecolors="white", linewidths=0.9,
                    label=f"{r.label} ({r.best.display_label}, "
                          f"resonance {r.f_resonance:.1f} Hz)", zorder=3)
         k = nd[front.knee_index]
-        ax.scatter([cov[k]], [sigma[k]],
-                   s=230, marker="o",
-                   facecolor="none", edgecolor=color, linewidth=2.0,
-                   zorder=5)
-        cov_max_all = max(cov_max_all, float(cov.max()))
+        if sane_mask[k]:
+            ax.scatter([cov[k]], [sigma[k]],
+                       s=230, marker="o",
+                       facecolor="none", edgecolor=color, linewidth=2.0,
+                       zorder=5)
+        cov_max_all = max(cov_max_all, float(cov[nd_sane].max()))
 
     ax.set_yscale("log")
     ax.set_xlabel("Branch activation (fraction of fruit-bearing branches resonating)")
