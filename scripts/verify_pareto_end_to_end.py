@@ -11,15 +11,15 @@ For each tree we:
     4. Select the **best clamp** as the one whose knee is closest to the
        ideal (coverage = 1, σ = 0) point in normalised objective space.
 
-Per-tree outputs (in ``outputs/``):
-    * ``verify_pareto_tree_<n>.{png,pdf}`` — multi-clamp Pareto overlay,
-      best knee marked in red.
-    * ``verify_frf_tree_<n>.{png,pdf}``    — FRF sweep with resonance marker.
+Outputs (in ``results/``), organised by figure type:
 
-Cross-tree outputs (only best-clamp knee per tree):
-    * ``verify_pareto_all_trees.{png,pdf}`` — best-knee per tree on log axes.
-    * ``verify_frf_all_trees.{png,pdf}``    — all 5 FRFs stacked.
-    * ``verify_knees_summary.{png,pdf}``    — best (clamp, f, A, cov, σ) per tree.
+* ``results/pareto/tree_<n>.{png,pdf}``    — multi-clamp Pareto + best knee
+* ``results/frf/tree_<n>.{png,pdf}``       — FRF sweep with resonance marker
+* ``results/response/tree_<n>.{png,pdf}``  — side-view detachment map
+* ``results/pareto/all_trees.{png,pdf}``   — best-knee Pareto per tree
+* ``results/frf/all_trees.{png,pdf}``      — all 5 FRFs stacked
+* ``results/response/all_trees.{png,pdf}`` — side-view, 5 panels
+* ``results/summary/knees.{png,pdf}``      — best (clamp, f, A, act, σ) per tree
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ sys.path.insert(0, str(REPO))
 # ────────────────────────────────────────────────────────────────────────────
 _FEASIBLE_BAND_HZ = (3.0, 20.0)
 _TRUNK_CLAMP_S = (0.25, 0.40, 0.55, 0.70, 0.85)
-_AMPLITUDE_GRID_N = (50.0, 100.0, 200.0, 400.0, 800.0)
+_AMPLITUDE_GRID_MM = (5.0, 10.0, 15.0, 20.0, 30.0)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -329,8 +329,17 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
         "E": float(model.materials[0].youngs_modulus),
         "rho": float(model.materials[0].density),
     }
+    # Switch the model to displacement excitation: the eccentric-cam shaker
+    # used in real harvesters imposes a strict displacement, not a force.
+    from orchard_fem.domain import ExcitationKind
+    model = replace(
+        model,
+        excitation=replace(model.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT),
+    )
+    # amplitude_unit="mm" → A_grid values are interpreted as millimetres of
+    # imposed displacement at the clamp.
     evaluator = build_fenicsx_pareto_evaluator(
-        model, amplitude_unit="m", coverage_mode="branch",
+        model, amplitude_unit="mm", coverage_mode="branch",
     )
 
     f_grid = [
@@ -340,7 +349,7 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
         f_resonance + 1.0,
         f_resonance + 2.0,
     ]
-    A_grid = list(_AMPLITUDE_GRID_N)
+    A_grid = list(_AMPLITUDE_GRID_MM)
 
     clamp_labels = _candidate_clamps(model)
     label_map = _build_hierarchical_label_map(model)
@@ -381,7 +390,7 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     best = clamps[best_idx]
     print(f"[{label}] best clamp: {best.display_label} ({best.clamp_label})  "
           f"f*={best.knee.frequency_hz:.2f} Hz, "
-          f"A*={best.knee.amplitude:.0f} N, "
+          f"A*={best.knee.amplitude:.1f} mm, "
           f"activation={best.knee.detachment_coverage:.2f}, "
           f"σ={best.knee.trunk_max_stress / 1e6:.3f} MPa")
 
@@ -401,8 +410,13 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
 
 def main() -> int:
     _apply_pub_style()
-    out_dir = REPO / "outputs"
-    out_dir.mkdir(exist_ok=True)
+    results_root = REPO / "results"
+    out_pareto = results_root / "pareto"
+    out_frf = results_root / "frf"
+    out_response = results_root / "response"
+    out_summary = results_root / "summary"
+    for d in (out_pareto, out_frf, out_response, out_summary):
+        d.mkdir(parents=True, exist_ok=True)
 
     results: list[TreeResult] = []
     for n in (1, 2, 3, 4, 5):
@@ -413,27 +427,24 @@ def main() -> int:
         result = _evaluate_tree(model_path, label=f"tree_{n}")
         results.append(result)
 
-        _save_pareto_multi_clamp(result, out_dir / f"verify_pareto_tree_{n}")
-        _save_frf(result, out_dir / f"verify_frf_tree_{n}")
+        _save_pareto_multi_clamp(result, out_pareto / f"tree_{n}")
+        _save_frf(result, out_frf / f"tree_{n}")
 
-        # Compute per-fruit detachment at the best (clamp, f, A) and plot a
-        # side-view tree response map.
         outcomes = _compute_fruit_outcomes_at_best(result)
         _save_tree_response_map(
             result, outcomes,
-            out_dir / f"verify_response_tree_{n}",
+            out_response / f"tree_{n}",
         )
-        print(f"[tree_{n}] figures → outputs/verify_pareto_tree_{n}.{{png,pdf}} "
-              f"+ verify_frf_tree_{n}.{{png,pdf}} + "
-              f"verify_response_tree_{n}.{{png,pdf}}")
+        print(f"[tree_{n}] figures → results/{{pareto,frf,response}}/tree_{n}.{{png,pdf}}")
 
     if len(results) >= 2:
-        _save_all_pareto_overlay(results, out_dir / "verify_pareto_all_trees")
-        _save_all_frf_overlay(results, out_dir / "verify_frf_all_trees")
-        _save_knees_summary(results, out_dir / "verify_knees_summary")
-        _save_all_response_panels(results, out_dir / "verify_response_all_trees")
-        print(f"\n[summary] cross-tree figures → outputs/verify_*_all_trees.{{png,pdf}} "
-              f"+ verify_knees_summary.{{png,pdf}}")
+        _save_all_pareto_overlay(results, out_pareto / "all_trees")
+        _save_all_frf_overlay(results, out_frf / "all_trees")
+        _save_knees_summary(results, out_summary / "knees")
+        _save_all_response_panels(results, out_response / "all_trees")
+        print(f"\n[summary] cross-tree figures → "
+              f"results/{{pareto,frf,response}}/all_trees.{{png,pdf}} + "
+              f"results/summary/knees.{{png,pdf}}")
 
     _print_recommendation_table(results)
     print(f"\n[done] processed {len(results)} tree(s).")
@@ -535,7 +546,7 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
             target_branch_id=branch_id,
             target_s=(target_s if target_s is not None
                       else cloned.excitation.target_s),
-            amplitude=float(knee.amplitude),  # A is in N (amplitude_unit="m")
+            amplitude=float(knee.amplitude) * 1.0e-3,  # mm → m (HARMONIC_DISPLACEMENT)
             driving_frequency_hz=float(knee.frequency_hz),
         ),
         analysis=replace(
@@ -675,7 +686,7 @@ def _save_tree_response_map(
     k = result.best.knee
     ax.set_title(
         f"{result.label} response — "
-        f"$f^*={k.frequency_hz:.1f}$ Hz, $A^*={k.amplitude:.0f}$ N, "
+        f"$f^*={k.frequency_hz:.1f}$ Hz, $A^*={k.amplitude:.1f}$ mm, "
         f"clamp: {result.best.display_label}\n"
         f"{n_det}/{n_total} fruits detached ({fruit_pct:.0f}%)  •  "
         f"{len(activated)}/{len(fruit_branches)} branches activated "
@@ -821,7 +832,7 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
     ax.text(
         0.02, 0.98,
         f"$f^* = {bk.frequency_hz:.1f}$ Hz\n"
-        f"$A^* = {bk.amplitude:.0f}$ N\n"
+        f"$A^* = {bk.amplitude:.1f}$ mm\n"
         f"branch activation $= {bk.detachment_coverage:.2f}$\n"
         f"$\\sigma_{{\\max}} = {by:.2f}$ MPa\n"
         f"clamp: {best.display_label}",
@@ -1001,7 +1012,7 @@ def _save_knees_summary(results: list[TreeResult], stem: Path) -> None:
 
     for ax, values, ylabel, title in (
         (axes[0, 0], f_stars, "f* [Hz]", "Knee drive frequency"),
-        (axes[0, 1], a_stars, "A* [N]",  "Knee force amplitude"),
+        (axes[0, 1], a_stars, "A* [mm]",  "Knee displacement amplitude"),
         (axes[1, 0], covs,    "Branch activation", "Knee branch activation"),
         (axes[1, 1], sigmas,  r"$\sigma_{\mathrm{max}}$ [MPa]", "Knee trunk stress"),
     ):
@@ -1043,7 +1054,7 @@ def _print_recommendation_table(results: list[TreeResult]) -> None:
     if not results:
         return
     print("\n┌────────┬─────────┬─────────────┬─────────┬────────┬────────────┬─────────────┐")
-    print("│  Tree  │ Fruits  │ Best clamp  │  f* Hz  │  A* N  │ Activation │ σ_max [MPa] │")
+    print("│  Tree  │ Fruits  │ Best clamp  │  f* Hz  │ A* mm  │ Activation │ σ_max [MPa] │")
     print("├────────┼─────────┼─────────────┼─────────┼────────┼────────────┼─────────────┤")
     for r in results:
         b = r.best
