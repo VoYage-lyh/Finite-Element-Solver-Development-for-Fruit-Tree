@@ -39,6 +39,13 @@ sys.path.insert(0, str(REPO))
 #  Constants
 # ────────────────────────────────────────────────────────────────────────────
 _FEASIBLE_BAND_HZ = (3.0, 20.0)
+
+# Per-tree legend placement for the multi-clamp Pareto figure. Override when
+# the default "lower right" gets crowded by the front. Anything missing
+# defaults to "lower right".
+_PARETO_LEGEND_LOC = {
+    "tree_1": "upper left",
+}
 _TRUNK_CLAMP_S = (0.25, 0.40, 0.55, 0.70, 0.85)
 _AMPLITUDE_GRID_MM = (5.0, 10.0, 15.0, 20.0, 30.0)
 
@@ -64,9 +71,9 @@ def _apply_pub_style():
         "font.family": "serif",
         "font.serif": ["Times New Roman", "DejaVu Serif"],
         "mathtext.fontset": "stix",
-        "font.size": 12,
-        "axes.titlesize": 14,
-        "axes.labelsize": 13,
+        "font.size": 14,
+        "axes.titlesize": 16,
+        "axes.labelsize": 15,
         "axes.linewidth": 0.9,
         "axes.edgecolor": "#333333",
         "axes.spines.top": False,
@@ -75,8 +82,8 @@ def _apply_pub_style():
         "grid.color": "#d0d0d0",
         "grid.linewidth": 0.6,
         "grid.linestyle": "-",
-        "xtick.labelsize": 11,
-        "ytick.labelsize": 11,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
         "xtick.major.size": 4,
         "ytick.major.size": 4,
         "xtick.major.width": 0.8,
@@ -85,10 +92,10 @@ def _apply_pub_style():
         "ytick.color": "#333333",
         "legend.frameon": True,
         "legend.framealpha": 0.92,
-        "legend.fontsize": 10,
+        "legend.fontsize": 12,
         "legend.edgecolor": "#cccccc",
         "savefig.bbox": "tight",
-        "savefig.pad_inches": 0.06,
+        "savefig.pad_inches": 0.02,
         "figure.dpi": 110,
         "savefig.dpi": 300,
         "pdf.fonttype": 42,
@@ -154,6 +161,10 @@ class ClampResult:
     display_label: str      # reader-friendly, e.g. "B1 root"
     front: object           # ParetoFront
     knee: object            # ParetoKnee
+    # Per-(f, A) fruit-level outcomes on the best clamp's grid — populated
+    # only for the chosen best clamp, consumed by the greedy multi-stage
+    # sequence in ``_greedy_sequence``. ``None`` for non-best clamps.
+    grid_outcomes: dict | None = None
 
 
 @dataclass
@@ -404,6 +415,17 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
           f"activation={best.knee.detachment_coverage:.2f}, "
           f"σ={best.knee.trunk_max_stress / 1e6:.3f} MPa")
 
+    # Pre-compute fruit-level outcomes on the best clamp's (f, A) grid for the
+    # downstream greedy multi-stage sequence. Only the best clamp gets this
+    # treatment (saving 8× the cost of evaluating every candidate clamp).
+    print(f"[{label}] tabulating fruit outcomes on best-clamp (f, A) grid …")
+    t0 = time.time()
+    best.grid_outcomes = _build_best_clamp_grid(
+        model, theta, best, f_grid, A_grid,
+    )
+    print(f"[{label}]   grid outcomes built ({time.time() - t0:.1f} s, "
+          f"{len(best.grid_outcomes)} entries)")
+
     return TreeResult(
         label=label,
         n_fruits=len(model.fruits),
@@ -418,13 +440,72 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     )
 
 
+def _load_or_evaluate(model_path: Path, label: str, *,
+                       cache_dir: Path, force_recompute: bool) -> "TreeResult":
+    """Load a cached TreeResult, falling back to a fresh FE evaluation.
+
+    The cache file lives at ``<cache_dir>/<label>.pkl``. Re-run the script
+    with ``--force`` to invalidate every cached tree, or just delete a
+    single ``<label>.pkl`` to recompute one tree.
+    """
+    import pickle
+
+    cache_file = cache_dir / f"{label}.pkl"
+    if cache_file.exists() and not force_recompute:
+        with open(cache_file, "rb") as fh:
+            result = pickle.load(fh)
+        print(f"[{label}] loaded from cache: "
+              f"{cache_file.relative_to(REPO)}")
+        # Cache-schema migration: older caches don't carry the best-clamp
+        # (f, A) outcomes needed by the greedy sequence. Patch in place.
+        if not getattr(result.best, "grid_outcomes", None):
+            print(f"[{label}]   migrating cache: adding best-clamp grid …")
+            f_res = result.f_resonance
+            f_grid = [max(0.5, f_res - 2.0),
+                      max(0.5, f_res - 1.0),
+                      f_res, f_res + 1.0, f_res + 2.0]
+            A_grid = list(_AMPLITUDE_GRID_MM)
+            t0 = time.time()
+            result.best.grid_outcomes = _build_best_clamp_grid(
+                result.model, result.theta, result.best, f_grid, A_grid,
+            )
+            print(f"[{label}]   migrated ({time.time() - t0:.1f} s)")
+            with open(cache_file, "wb") as fh:
+                pickle.dump(result, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        return result
+    result = _evaluate_tree(model_path, label=label)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    with open(cache_file, "wb") as fh:
+        pickle.dump(result, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    size_kb = cache_file.stat().st_size / 1024.0
+    print(f"[{label}] cached → {cache_file.relative_to(REPO)} ({size_kb:.0f} KB)")
+    return result
+
+
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Multi-clamp Pareto recommendation for 5 sample trees.",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Ignore cached TreeResults and recompute every tree.",
+    )
+    parser.add_argument(
+        "--only-figures", action="store_true",
+        help="Refuse to run any FE — fail loudly if any cache is missing. "
+             "Use this when only the figure styling has changed.",
+    )
+    args = parser.parse_args()
+
     _apply_pub_style()
     results_root = REPO / "results"
     out_pareto = results_root / "pareto"
     out_frf = results_root / "frf"
     out_response = results_root / "response"
     out_summary = results_root / "summary"
+    cache_dir = REPO / "cache" / "verify_pareto"
     for d in (out_pareto, out_frf, out_response, out_summary):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -434,29 +515,61 @@ def main() -> int:
         if not model_path.exists():
             print(f"[skip] {model_path} not found")
             continue
-        result = _evaluate_tree(model_path, label=f"tree_{n}")
+        label = f"tree_{n}"
+        if args.only_figures and not (cache_dir / f"{label}.pkl").exists():
+            print(f"[error] --only-figures requested but cache missing for "
+                  f"{label}. Run without --only-figures first.")
+            return 1
+        result = _load_or_evaluate(
+            model_path, label,
+            cache_dir=cache_dir,
+            force_recompute=args.force,
+        )
         results.append(result)
 
-        _save_pareto_multi_clamp(result, out_pareto / f"tree_{n}")
-        _save_frf(result, out_frf / f"tree_{n}")
+        _save_pareto_multi_clamp(result, out_pareto / f"pareto_tree_{n}")
+        _save_frf(result, out_frf / f"frf_tree_{n}")
 
         outcomes = _compute_fruit_outcomes_at_best(result)
         _save_tree_response_map(
             result, outcomes,
-            out_response / f"tree_{n}",
+            out_response / f"response_tree_{n}",
         )
-        print(f"[tree_{n}] figures → results/{{pareto,frf,response}}/tree_{n}.{{png,pdf}}")
+        print(f"[tree_{n}] figures → "
+              f"results/pareto/pareto_tree_{n}.{{png,pdf}} + "
+              f"results/frf/frf_tree_{n}.{{png,pdf}} + "
+              f"results/response/response_tree_{n}.{{png,pdf}}")
+
+    # Strategy A: greedy multi-stage sequence on each tree's best clamp.
+    out_sequence = results_root / "sequence"
+    out_sequence.mkdir(parents=True, exist_ok=True)
+    results_with_stages: list[tuple[TreeResult, list[dict]]] = []
+    for n, result in zip((1, 2, 3, 4, 5), results):
+        stages = _greedy_sequence(result, target=0.95, max_stages=5)
+        results_with_stages.append((result, stages))
+        _save_sequence_panel(
+            result, stages,
+            out_sequence / f"sequence_tree_{n}",
+        )
+        if stages:
+            print(f"[tree_{n}] sequence: {len(stages)} stages → "
+                  f"results/sequence/sequence_tree_{n}.{{png,pdf}}")
 
     if len(results) >= 2:
-        _save_all_pareto_overlay(results, out_pareto / "all_trees")
-        _save_all_frf_overlay(results, out_frf / "all_trees")
-        _save_knees_summary(results, out_summary / "knees")
-        _save_all_response_panels(results, out_response / "all_trees")
+        _save_all_pareto_overlay(results, out_pareto / "pareto_all_trees")
+        _save_all_frf_overlay(results, out_frf / "frf_all_trees")
+        _save_knees_summary(results, out_summary / "summary_knees")
+        _save_sequence_coverage(
+            results_with_stages, out_summary / "summary_sequence_coverage",
+        )
         print(f"\n[summary] cross-tree figures → "
-              f"results/{{pareto,frf,response}}/all_trees.{{png,pdf}} + "
-              f"results/summary/knees.{{png,pdf}}")
+              f"results/pareto/pareto_all_trees.{{png,pdf}} + "
+              f"results/frf/frf_all_trees.{{png,pdf}} + "
+              f"results/summary/summary_knees.{{png,pdf}} + "
+              f"results/summary/summary_sequence_coverage.{{png,pdf}}")
 
     _print_recommendation_table(results)
+    _print_sequence_table(results_with_stages)
     print(f"\n[done] processed {len(results)} tree(s).")
     return 0
 
@@ -530,10 +643,12 @@ def _generate_linear_fruits(model, policy, spacing: float = 0.05):
 # ────────────────────────────────────────────────────────────────────────────
 #  Tree response map — per-fruit detachment at the best (clamp, f, A)
 # ────────────────────────────────────────────────────────────────────────────
-def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
-    """Re-solve the FE problem at the recommended work point and return a list
-    of per-fruit dicts with detachment status and 3D position.
-    """
+def _compute_fruit_outcomes(
+    model, theta: dict, clamp_label: str,
+    frequency_hz: float, amplitude_mm: float,
+) -> list[dict]:
+    """Re-solve the FE problem at the given (clamp, f, A) and return a list of
+    per-fruit dicts with detachment status and 3D position."""
     from orchard_fem.calibration.fenicsx_bridge import (
         _apply_theta_to_model, _parse_clamp_label,
     )
@@ -542,13 +657,8 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
     )
     from orchard_fem.topology import ObservationPoint
 
-    model = result.model
-    theta = result.theta
-    best = result.best
-    knee = best.knee
-
     cloned = _apply_theta_to_model(model, theta)
-    branch_id, target_s = _parse_clamp_label(best.clamp_label)
+    branch_id, target_s = _parse_clamp_label(clamp_label)
     cloned = replace(
         cloned,
         excitation=replace(
@@ -556,13 +666,13 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
             target_branch_id=branch_id,
             target_s=(target_s if target_s is not None
                       else cloned.excitation.target_s),
-            amplitude=float(knee.amplitude) * 1.0e-3,  # mm → m (HARMONIC_DISPLACEMENT)
-            driving_frequency_hz=float(knee.frequency_hz),
+            amplitude=float(amplitude_mm) * 1.0e-3,
+            driving_frequency_hz=float(frequency_hz),
         ),
         analysis=replace(
             cloned.analysis,
-            frequency_start_hz=float(knee.frequency_hz),
-            frequency_end_hz=float(knee.frequency_hz) + 1.0e-6,
+            frequency_start_hz=float(frequency_hz),
+            frequency_end_hz=float(frequency_hz) + 1.0e-6,
             frequency_steps=1,
         ),
     )
@@ -591,7 +701,7 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
     if cloned.fruit_policy is not None:
         d_detach = float(cloned.fruit_policy.detachment_displacement_m)
 
-    omega = 2.0 * np.pi * float(knee.frequency_hz)
+    omega = 2.0 * np.pi * float(frequency_hz)
     outcomes: list[dict] = []
     for obs_id, fruit in fruit_keys:
         idx = name_to_idx.get(obs_id)
@@ -613,6 +723,107 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
             "detach_force_N": float(detach_force),
         })
     return outcomes
+
+
+def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
+    """Re-solve at the best recommended (clamp, f, A) — thin wrapper."""
+    k = result.best.knee
+    return _compute_fruit_outcomes(
+        result.model, result.theta, result.best.clamp_label,
+        k.frequency_hz, k.amplitude,
+    )
+
+
+def _build_best_clamp_grid(
+    model, theta: dict, best: ClampResult,
+    f_grid: list[float], A_grid: list[float],
+) -> dict:
+    """Tabulate fruit-level outcomes on every (f, A) cell of the best clamp.
+
+    Returns ``{(f, A): {"detached_branches": set[str], "n_detached": int,
+    "sigma_mpa": float}}`` — compact enough to ship inside the cached
+    ``TreeResult`` (~6 KB total for 5 trees).
+    """
+    front = best.front
+    objectives = front.objectives
+    freqs_all = front.frequencies_hz
+    amps_all = front.amplitudes
+    # Build (f, A) → σ lookup from the Pareto candidate cloud.
+    sigma_at = {}
+    for i in range(objectives.shape[0]):
+        key = (float(freqs_all[i]), float(amps_all[i]))
+        sigma_at[key] = float(objectives[i, 1]) / 1.0e6  # to MPa
+
+    grid: dict = {}
+    for f in f_grid:
+        for A in A_grid:
+            outcomes_list = _compute_fruit_outcomes(
+                model, theta, best.clamp_label, f, A,
+            )
+            grid[(float(f), float(A))] = {
+                "detached_branches": {
+                    o["branch_id"] for o in outcomes_list if o["detached"]
+                },
+                "n_detached": sum(1 for o in outcomes_list if o["detached"]),
+                "n_total_fruits": len(outcomes_list),
+                "sigma_mpa": sigma_at.get((float(f), float(A)), float("nan")),
+            }
+    return grid
+
+
+# ────────────────────────────────────────────────────────────────────────────
+#  Strategy A — Greedy multi-stage sequence
+# ────────────────────────────────────────────────────────────────────────────
+def _greedy_sequence(
+    result: TreeResult, *, target: float = 0.95, max_stages: int = 5,
+) -> list[dict]:
+    """Build a sequence of (f, A) work points on the *best* clamp.
+
+    At each stage we pick the (f, A) cell of the pre-tabulated grid that
+    maximises ``|new branches| / σ`` (new branches per unit of trunk stress
+    paid). Stop when the cumulative branch activation reaches ``target``,
+    when no further (f, A) introduces new branches, or after ``max_stages``.
+    """
+    grid = result.best.grid_outcomes
+    if not grid:
+        return []
+
+    fruit_branches = {f.branch_id for f in result.model.fruits}
+    n_total = max(len(fruit_branches), 1)
+
+    activated: set[str] = set()
+    stages: list[dict] = []
+    for stage in range(max_stages):
+        best_score = 0.0
+        best_choice = None
+        for (f, A), info in grid.items():
+            new = info["detached_branches"] - activated
+            sigma = info["sigma_mpa"]
+            if not new or not (sigma > 0):
+                continue
+            score = len(new) / sigma                # new branches per MPa
+            if score > best_score:
+                best_score = score
+                best_choice = (f, A, new, sigma, info)
+        if best_choice is None:
+            break
+        f, A, new, sigma, info = best_choice
+        activated |= new
+        coverage = len(activated) / n_total
+        stages.append({
+            "stage": stage + 1,
+            "f_hz": f,
+            "A_mm": A,
+            "new_branches": sorted(new),
+            "n_new_branches": len(new),
+            "cumulative_branches": sorted(activated),
+            "coverage": coverage,
+            "sigma_mpa": sigma,
+            "n_detached_fruits": info["n_detached"],
+        })
+        if coverage >= target:
+            break
+    return stages
 
 
 def _branch_polyline_xz(branch, n: int = 30):
@@ -690,26 +901,19 @@ def _save_tree_response_map(
     n_det = sum(1 for o in outcomes if o["detached"])
     fruit_branches = {o["branch_id"] for o in outcomes}
     activated = {o["branch_id"] for o in outcomes if o["detached"]}
-    fruit_pct = 100.0 * n_det / max(n_total, 1)
-    branch_pct = 100.0 * len(activated) / max(len(fruit_branches), 1)
 
-    k = result.best.knee
+    # Title: two lines, no percentages.
     ax.set_title(
-        f"{result.label} response — "
-        f"$f^*={k.frequency_hz:.1f}$ Hz, $A^*={k.amplitude:.1f}$ mm, "
-        f"clamp: {result.best.display_label}\n"
-        f"{n_det}/{n_total} fruits detached ({fruit_pct:.0f}%)  •  "
-        f"{len(activated)}/{len(fruit_branches)} branches activated "
-        f"({branch_pct:.0f}%)",
-        fontsize=12,
+        f"{result.label}\n"
+        f"{n_det}/{n_total} fruits detached  •  "
+        f"{len(activated)}/{len(fruit_branches)} branches activated",
+        fontsize=15,
     )
 
     handles = [
-        Line2D([], [], color="#444444", linewidth=2.6, label="Trunk"),
         Line2D([], [], color="#1B7837", linewidth=2.2, label="Activated branch"),
         Line2D([], [], color="#E08214", linewidth=1.6,
-               label="Fruit-bearing, not activated"),
-        Line2D([], [], color="#bbbbbb", linewidth=1.0, label="No fruit"),
+               label="Not activated branch"),
         Line2D([], [], marker="o", color="w", markerfacecolor="#1B7837",
                markeredgecolor="white", markersize=10, label="Fruit detached"),
         Line2D([], [], marker="o", color="w", markerfacecolor="#cccccc",
@@ -718,67 +922,28 @@ def _save_tree_response_map(
                markeredgecolor="white", markersize=15,
                label=f"Clamp ({result.best.display_label})"),
     ]
-    ax.legend(handles=handles, loc="lower right", fontsize=9, framealpha=0.95)
+    ax.legend(handles=handles, loc="lower right", fontsize=12, framealpha=0.95)
     ax.set_xlabel("x [m]")
-    ax.set_ylabel("z [m] (height)")
+    ax.set_ylabel("z [m]")
     ax.set_aspect("equal")
     ax.grid(True, alpha=0.3)
 
-    fig.tight_layout()
-    _save_both(fig, stem)
-    plt.close(fig)
+    # Working-parameter box in the lower-left, matching the Pareto figure style.
+    k = result.best.knee
+    ax.text(
+        0.02, 0.02,
+        f"$f^* = {k.frequency_hz:.1f}$ Hz\n"
+        f"$A^* = {k.amplitude:.1f}$ mm\n"
+        f"clamp: {result.best.display_label}",
+        transform=ax.transAxes,
+        ha="left", va="bottom",
+        fontsize=13, color="#B2182B",
+        bbox=dict(boxstyle="round,pad=0.45", fc="white",
+                  ec="#B2182B", lw=0.9, alpha=0.95),
+        zorder=10,
+    )
 
-
-def _save_all_response_panels(
-    results: list[TreeResult], stem: Path,
-) -> None:
-    """5-panel side-by-side tree-response map for all trees."""
-    import matplotlib.pyplot as plt
-    from matplotlib.lines import Line2D
-
-    n = len(results)
-    fig, axes = plt.subplots(1, n, figsize=(4.6 * n, 5.4), squeeze=False)
-    axes = axes[0]
-    for ax, r in zip(axes, results):
-        outcomes = _compute_fruit_outcomes_at_best(r)
-        _draw_tree_response(ax, r.model, outcomes,
-                            r.best.clamp_label, r.label_map,
-                            show_branch_labels=False, fontsize=8)
-        activated = {o["branch_id"] for o in outcomes if o["detached"]}
-        fruit_branches = {o["branch_id"] for o in outcomes}
-        n_det = sum(1 for o in outcomes if o["detached"])
-        branch_pct = 100.0 * len(activated) / max(len(fruit_branches), 1)
-        ax.set_title(
-            f"{r.label}\n"
-            f"clamp: {r.best.display_label}\n"
-            f"{n_det}/{len(outcomes)} fruits, "
-            f"{len(activated)}/{len(fruit_branches)} branches "
-            f"({branch_pct:.0f}%)",
-            fontsize=10,
-        )
-        ax.set_xlabel("x [m]", fontsize=10)
-        ax.set_aspect("equal")
-        ax.grid(True, alpha=0.3)
-        ax.tick_params(labelsize=8)
-    axes[0].set_ylabel("z [m]", fontsize=10)
-
-    legend_handles = [
-        Line2D([], [], color="#1B7837", linewidth=2.2, label="Activated branch"),
-        Line2D([], [], color="#E08214", linewidth=1.6, label="Fruit, not activated"),
-        Line2D([], [], color="#bbbbbb", linewidth=1.0, label="No fruit"),
-        Line2D([], [], marker="o", color="w", markerfacecolor="#1B7837",
-               markeredgecolor="white", markersize=9, label="Fruit detached"),
-        Line2D([], [], marker="o", color="w", markerfacecolor="#cccccc",
-               markeredgecolor="#888888", markersize=7, label="Fruit retained"),
-        Line2D([], [], marker="*", color="w", markerfacecolor="#B2182B",
-               markeredgecolor="white", markersize=14, label="Best clamp"),
-    ]
-    fig.legend(handles=legend_handles, loc="lower center",
-               ncol=6, fontsize=9, frameon=True,
-               bbox_to_anchor=(0.5, -0.04))
-    fig.suptitle("Tree response under best (clamp, f, A) — side view",
-                 fontsize=13, y=1.00)
-    fig.tight_layout(rect=(0.0, 0.04, 1.0, 1.0))
+    fig.tight_layout(pad=0.4)
     _save_both(fig, stem)
     plt.close(fig)
 
@@ -844,23 +1009,9 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
     ax.scatter([bx], [by], s=380, marker="o",
                facecolor="none", edgecolor="#B2182B", linewidth=2.6,
                zorder=8)
-    ax.text(
-        0.02, 0.98,
-        f"$f^* = {bk.frequency_hz:.1f}$ Hz\n"
-        f"$A^* = {bk.amplitude:.1f}$ mm\n"
-        f"branch activation $= {bk.detachment_coverage:.2f}$\n"
-        f"$\\sigma_{{\\max}} = {by:.2f}$ MPa\n"
-        f"clamp: {best.display_label}",
-        transform=ax.transAxes,
-        ha="left", va="top",
-        fontsize=10, color="#B2182B",
-        bbox=dict(boxstyle="round,pad=0.4", fc="white",
-                  ec="#B2182B", lw=0.8, alpha=0.95),
-        zorder=10,
-    )
 
     ax.set_yscale("log")
-    ax.set_xlabel("Branch activation (fraction of fruit-bearing branches resonating)")
+    ax.set_xlabel("Branch activation")
     ax.set_ylabel(r"Trunk peak stress $\sigma_{\mathrm{max}}$  [MPa, log]")
     ax.set_title(
         f"Multi-clamp Pareto — {result.label} "
@@ -869,10 +1020,35 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
     ax.set_xlim(0.0, 1.0)
     if np.isfinite(sigma_lo) and sigma_lo > 0:
         ax.set_ylim(sigma_lo * 0.5, sigma_hi * 1.5)
-    ax.legend(loc="lower right", fontsize=9,
+
+    # Per-tree legend/annotation placement (override default lower-right when
+    # the points crowd that corner).
+    legend_loc = _PARETO_LEGEND_LOC.get(result.label, "lower right")
+    ax.legend(loc=legend_loc, fontsize=12,
               ncol=2 if len(result.clamps) > 5 else 1)
 
-    fig.tight_layout()
+    # Knee annotation: by default left-top; if legend already there, drop it
+    # below the legend (still left side).
+    if legend_loc == "upper left":
+        ann_xy = (0.02, 0.62)
+    else:
+        ann_xy = (0.02, 0.98)
+    ax.text(
+        ann_xy[0], ann_xy[1],
+        f"$f^* = {bk.frequency_hz:.1f}$ Hz\n"
+        f"$A^* = {bk.amplitude:.1f}$ mm\n"
+        f"branch activation $= {bk.detachment_coverage:.2f}$\n"
+        f"$\\sigma_{{\\max}} = {by:.2f}$ MPa\n"
+        f"clamp: {best.display_label}",
+        transform=ax.transAxes,
+        ha="left", va="top",
+        fontsize=13, color="#B2182B",
+        bbox=dict(boxstyle="round,pad=0.45", fc="white",
+                  ec="#B2182B", lw=0.9, alpha=0.95),
+        zorder=10,
+    )
+
+    fig.tight_layout(pad=0.4)
     _save_both(fig, stem)
     plt.close(fig)
 
@@ -918,7 +1094,7 @@ def _save_frf(result: TreeResult, stem: Path) -> None:
         ha="left", va="bottom", zorder=5,
     )
 
-    fig.tight_layout()
+    fig.tight_layout(pad=0.4)
     _save_both(fig, stem)
     plt.close(fig)
 
@@ -970,7 +1146,7 @@ def _save_all_pareto_overlay(results: list[TreeResult], stem: Path) -> None:
         cov_max_all = max(cov_max_all, float(cov[nd_sane].max()))
 
     ax.set_yscale("log")
-    ax.set_xlabel("Branch activation (fraction of fruit-bearing branches resonating)")
+    ax.set_xlabel("Branch activation")
     ax.set_ylabel(r"Trunk peak stress $\sigma_{\mathrm{max}}$  [MPa, log]")
     ax.set_title("Best-clamp Pareto fronts — 5 trees")
     ax.set_xlim(0.0, 1.0)
@@ -978,7 +1154,7 @@ def _save_all_pareto_overlay(results: list[TreeResult], stem: Path) -> None:
     ax.grid(True, which="major", linewidth=0.6, color="#d0d0d0")
     ax.grid(True, which="minor", linewidth=0.4, color="#ececec")
 
-    fig.tight_layout()
+    fig.tight_layout(pad=0.4)
     _save_both(fig, stem)
     plt.close(fig)
 
@@ -1013,7 +1189,216 @@ def _save_all_frf_overlay(results: list[TreeResult], stem: Path) -> None:
     ax.grid(True, which="minor", linewidth=0.4, color="#ececec")
     ax.legend(loc="upper right", fontsize=9)
 
-    fig.tight_layout()
+    fig.tight_layout(pad=0.4)
+    _save_both(fig, stem)
+    plt.close(fig)
+
+
+def _save_sequence_coverage(
+    results_with_stages: list[tuple[TreeResult, list[dict]]], stem: Path,
+) -> None:
+    """Plot cumulative branch activation vs stage index for every tree."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(7.4, 5.4))
+    for i, (r, stages) in enumerate(results_with_stages):
+        color = _TREE_PALETTE[i % len(_TREE_PALETTE)]
+        # Prepend (stage 0, coverage 0) so the curve starts at the origin.
+        xs = [0] + [s["stage"] for s in stages]
+        ys = [0.0] + [s["coverage"] for s in stages]
+        ax.plot(xs, ys, "-o", color=color, lw=1.6,
+                markersize=8, markerfacecolor=color,
+                markeredgecolor="white", markeredgewidth=0.7,
+                label=f"{r.label}")
+    ax.axhline(0.95, color="#B2182B", linestyle="--", lw=1.2, alpha=0.85)
+    ax.text(0.02, 0.96, "95% target", transform=ax.transAxes,
+            color="#B2182B", fontsize=12, va="top", ha="left",
+            family="serif")
+    ax.set_xlabel("Sequential stage index")
+    ax.set_ylabel("Cumulative branch activation")
+    ax.set_title("Greedy multi-stage activation coverage")
+    ax.set_xlim(0, max((len(s) for _, s in results_with_stages), default=1))
+    ax.set_ylim(0, 1.05)
+    ax.legend(loc="lower right")
+    fig.tight_layout(pad=0.4)
+    _save_both(fig, stem)
+    plt.close(fig)
+
+
+_STAGE_PALETTE = ["#3F60A0", "#1B7837", "#E08214", "#762A83", "#A04D6A"]
+
+
+def _save_sequence_panel(
+    result: TreeResult, stages: list[dict], stem: Path,
+) -> None:
+    """Side-view sequence panel: every branch is coloured by the stage that
+    *first* activated it; that colour persists in every later subplot so the
+    rightmost subplot shows the cumulative "filled" tree. Each subplot is
+    titled just "Stage k"; the working parameters live in a red box at the
+    lower-left, mirroring the per-tree response figure."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    if not stages:
+        return
+
+    # Map every branch to the stage (0-indexed) that first activated it.
+    branch_first_stage: dict[str, int] = {}
+    for idx, stage in enumerate(stages):
+        for b in stage["new_branches"]:
+            branch_first_stage.setdefault(b, idx)
+
+    # Clamp position (same across all stages)
+    from orchard_fem.calibration.fenicsx_bridge import _parse_clamp_label
+    bid, s_clamp = _parse_clamp_label(result.best.clamp_label)
+    if s_clamp is None:
+        s_clamp = 0.5
+    clamp_branch = next(b for b in result.model.branches if b.branch_id == bid)
+    clamp_pos = clamp_branch.path.point_at(float(s_clamp))
+
+    import math
+    from matplotlib.gridspec import GridSpec
+
+    n = len(stages)
+    per_cell_w, per_cell_h = 4.6, 4.6
+
+    # Layout choices:
+    #   1–3 stages → 1×n
+    #   4 stages   → 2×2
+    #   5 stages   → row 1 has 3 panels, row 2 has 2 panels centred
+    #   ≥6 stages  → 3 columns, ceil(n/3) rows
+    if n <= 3:
+        nrows, ncols = 1, n
+        use_centred_last_row = False
+    elif n == 4:
+        nrows, ncols = 2, 2
+        use_centred_last_row = False
+    elif n == 5:
+        nrows, ncols = 2, 3
+        use_centred_last_row = True
+    else:
+        ncols = 3
+        nrows = (n + ncols - 1) // ncols
+        use_centred_last_row = (n % ncols) != 0
+
+    # Limit the legend to at most ~2-panel widths. Allow up to 4 columns
+    # per legend row; total handles = 3 + n (Trunk + n stages + Not act. + Clamp).
+    n_handles = 3 + n
+    legend_ncol = min(4, n_handles)
+    legend_rows = math.ceil(n_handles / legend_ncol)
+    legend_height_in = 0.45 + 0.40 * legend_rows  # inches
+
+    fig_w = per_cell_w * ncols
+    fig_h = per_cell_h * nrows + legend_height_in
+    fig = plt.figure(figsize=(fig_w, fig_h))
+
+    # Build axes via GridSpec — supports centred last row.
+    if use_centred_last_row:
+        # Double the grid columns so an offset of 1 cell ≈ half-panel; then
+        # place last-row panels starting at column = (2*ncols - 2*n_last)/2
+        col_units = ncols * 2
+        n_last = n - ncols * (nrows - 1)
+        last_start = (col_units - n_last * 2) // 2
+        gs = GridSpec(
+            nrows, col_units, figure=fig,
+            wspace=0.18, hspace=0.42,
+        )
+        axes_list = []
+        for r in range(nrows):
+            row_count = ncols if r < nrows - 1 else n_last
+            row_start = 0 if r < nrows - 1 else last_start
+            for c in range(row_count):
+                col_off = row_start + c * 2
+                ax = fig.add_subplot(gs[r, col_off:col_off + 2])
+                axes_list.append(ax)
+    else:
+        gs = GridSpec(
+            nrows, ncols, figure=fig,
+            wspace=0.18, hspace=0.42,
+        )
+        axes_list = [fig.add_subplot(gs[r, c])
+                     for r in range(nrows) for c in range(ncols)
+                     if r * ncols + c < n]
+
+    # Track which panels start a new row (for ylabel only on them).
+    if use_centred_last_row:
+        row_start_indices = [0]
+        cumulative = ncols
+        while cumulative < n:
+            row_start_indices.append(cumulative)
+            cumulative += ncols
+    else:
+        row_start_indices = [r * ncols for r in range(nrows)]
+
+    for ax_idx, (ax, stage) in enumerate(zip(axes_list, stages)):
+        for branch in result.model.branches:
+            xs, zs = _branch_polyline_xz(branch)
+            if branch.branch_id == "trunk":
+                color, lw = "#444444", 2.6
+            elif branch.branch_id in branch_first_stage and \
+                 branch_first_stage[branch.branch_id] <= ax_idx:
+                stage_color = _STAGE_PALETTE[
+                    branch_first_stage[branch.branch_id] % len(_STAGE_PALETTE)
+                ]
+                color, lw = stage_color, 2.4
+            else:
+                color, lw = "#cccccc", 1.2
+            ax.plot(xs, zs, color=color, linewidth=lw,
+                    solid_capstyle="round", zorder=2)
+
+        ax.scatter([clamp_pos.x], [clamp_pos.z],
+                   color="#B2182B", s=260, marker="*",
+                   edgecolors="white", linewidths=1.3, zorder=6)
+
+        ax.set_title(f"Stage {stage['stage']}", fontsize=16, fontweight="bold")
+        ax.set_xlabel("x [m]")
+        if ax_idx in row_start_indices:
+            ax.set_ylabel("z [m]")
+        ax.set_aspect("equal")
+        ax.grid(True, alpha=0.3)
+
+        ax.text(
+            0.02, 0.02,
+            f"$f = {stage['f_hz']:.1f}$ Hz\n"
+            f"$A = {stage['A_mm']:.0f}$ mm\n"
+            f"+{stage['n_new_branches']} branches\n"
+            f"cum. {stage['coverage'] * 100:.0f}%",
+            transform=ax.transAxes,
+            ha="left", va="bottom",
+            fontsize=13, color="#B2182B",
+            bbox=dict(boxstyle="round,pad=0.45", fc="white",
+                      ec="#B2182B", lw=0.9, alpha=0.95),
+            zorder=10,
+        )
+
+    # Legend — at most 4 columns wide; multi-row if necessary.
+    legend_handles = [Line2D([], [], color="#444444", lw=2.6, label="Trunk")]
+    for i in range(n):
+        legend_handles.append(
+            Line2D([], [], color=_STAGE_PALETTE[i % len(_STAGE_PALETTE)],
+                   lw=2.4, label=f"Activated at stage {i + 1}")
+        )
+    legend_handles.append(
+        Line2D([], [], color="#cccccc", lw=1.2, label="Not activated")
+    )
+    legend_handles.append(
+        Line2D([], [], marker="*", color="w", markerfacecolor="#B2182B",
+               markeredgecolor="white", markersize=15, label="Clamp")
+    )
+
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center", ncol=legend_ncol,
+        fontsize=13, framealpha=0.95,
+        bbox_to_anchor=(0.5, 0.005),
+    )
+
+    # Reserve exactly legend_height_in inches at the bottom.
+    gs.tight_layout(
+        fig,
+        rect=(0.0, legend_height_in / fig_h, 1.0, 1.0),
+        pad=0.3, h_pad=1.2, w_pad=0.6,
+    )
     _save_both(fig, stem)
     plt.close(fig)
 
@@ -1066,7 +1451,7 @@ def _save_knees_summary(results: list[TreeResult], stem: Path) -> None:
 
     fig.suptitle("Best-clamp knee recommendations across 5 trees",
                  fontsize=14, y=1.00)
-    fig.tight_layout(rect=(0.0, 0.06, 1.0, 1.0))
+    fig.tight_layout(pad=0.4, rect=(0.0, 0.06, 1.0, 1.0))
     _save_both(fig, stem)
     plt.close(fig)
 
@@ -1086,6 +1471,30 @@ def _print_recommendation_table(results: list[TreeResult]) -> None:
             f"{k.detachment_coverage:>10.2f} │ {k.trunk_max_stress/1e6:>11.3f} │"
         )
     print("└────────┴─────────┴─────────────┴─────────┴────────┴────────────┴─────────────┘")
+
+
+def _print_sequence_table(
+    results_with_stages: list[tuple[TreeResult, list[dict]]],
+) -> None:
+    if not results_with_stages:
+        return
+    print("\n  Greedy multi-stage sequence  (single best clamp per tree)")
+    print("  ┌────────┬───────┬─────────┬────────┬───────────┬───────────┬──────────┐")
+    print("  │  Tree  │ Stage │  f Hz   │ A mm   │ + branch  │ Cum. cov. │ σ [MPa]  │")
+    print("  ├────────┼───────┼─────────┼────────┼───────────┼───────────┼──────────┤")
+    for r, stages in results_with_stages:
+        if not stages:
+            print(f"  │ {r.label:>6} │   -   │    -    │   -    │    -      │     -     │    -     │")
+            continue
+        for i, s in enumerate(stages):
+            label = r.label if i == 0 else ""
+            print(
+                f"  │ {label:>6} │ {s['stage']:>5} │ {s['f_hz']:>7.2f} │ "
+                f"{s['A_mm']:>6.1f} │ {s['n_new_branches']:>9d} │ "
+                f"{s['coverage']:>9.2f} │ {s['sigma_mpa']:>8.3f} │"
+            )
+        print("  ├────────┼───────┼─────────┼────────┼───────────┼───────────┼──────────┤")
+    print("  └────────┴───────┴─────────┴────────┴───────────┴───────────┴──────────┘")
 
 
 if __name__ == "__main__":
