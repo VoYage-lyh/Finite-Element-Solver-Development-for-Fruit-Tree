@@ -26,7 +26,7 @@ orchard_pinn/      Placeholder package for future surrogate/inverse modelling wo
 examples/          Small runnable example models
 trees/             Orchard architecture examples and generated solver-ready models
 docs/              User, input-format, architecture, verification, and development notes
-config/            Conda/environment setup files and solver defaults
+config/            Conda/environment setup files
 tests/             Integration and verification tests
 build/             Generated local artifacts; safe to recreate
 ```

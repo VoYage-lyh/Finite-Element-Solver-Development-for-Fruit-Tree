@@ -135,6 +135,9 @@ def non_dominated_mask(objectives: np.ndarray) -> np.ndarray:
     """
     n = objectives.shape[0]
     mask = np.ones(n, dtype=bool)
+    # NaN rows can neither dominate nor be dominated under `<=` / `<` comparisons,
+    # so they would otherwise survive non-dominated sorting and corrupt the front.
+    mask &= ~np.isnan(objectives).any(axis=1)
     for i in range(n):
         if not mask[i]:
             continue

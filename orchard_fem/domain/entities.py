@@ -180,6 +180,6 @@ class OrchardModel:
 
     def find_observation(self, observation_id: str) -> ObservationPoint | None:
         for observation in self.observations:
-            if observation.id == observation_id:
+            if observation.observation_id == observation_id:
                 return observation
         return None

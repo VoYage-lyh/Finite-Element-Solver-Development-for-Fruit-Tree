@@ -180,29 +180,51 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         frequency_steps=int(
             analysis_payload.get("frequency_steps", analysis_defaults.frequency_steps)
         ),
-        time_step_seconds=float(analysis_payload.get("time_step_seconds", 0.002)),
-        total_time_seconds=float(analysis_payload.get("total_time_seconds", 1.0)),
-        output_stride=int(analysis_payload.get("output_stride", 1)),
-        max_nonlinear_iterations=int(analysis_payload.get("max_nonlinear_iterations", 12)),
-        nonlinear_tolerance=float(analysis_payload.get("nonlinear_tolerance", 1.0e-8)),
-        rayleigh_alpha=float(analysis_payload.get("rayleigh_alpha", 0.0)),
-        rayleigh_beta=float(analysis_payload.get("rayleigh_beta", 1.0e-4)),
+        time_step_seconds=float(
+            analysis_payload.get("time_step_seconds", analysis_defaults.time_step_seconds)
+        ),
+        total_time_seconds=float(
+            analysis_payload.get("total_time_seconds", analysis_defaults.total_time_seconds)
+        ),
+        output_stride=int(
+            analysis_payload.get("output_stride", analysis_defaults.output_stride)
+        ),
+        max_nonlinear_iterations=int(
+            analysis_payload.get(
+                "max_nonlinear_iterations", analysis_defaults.max_nonlinear_iterations
+            )
+        ),
+        nonlinear_tolerance=float(
+            analysis_payload.get("nonlinear_tolerance", analysis_defaults.nonlinear_tolerance)
+        ),
+        rayleigh_alpha=float(
+            analysis_payload.get("rayleigh_alpha", analysis_defaults.rayleigh_alpha)
+        ),
+        rayleigh_beta=float(
+            analysis_payload.get("rayleigh_beta", analysis_defaults.rayleigh_beta)
+        ),
         auto_nonlinear_levels=[
             int(level) for level in analysis_payload.get("auto_nonlinear_levels", [])
         ],
         auto_nonlinear_cubic_scale=float(
-            analysis_payload.get("auto_nonlinear_cubic_scale", 0.0)
+            analysis_payload.get(
+                "auto_nonlinear_cubic_scale", analysis_defaults.auto_nonlinear_cubic_scale
+            )
         ),
         include_gravity_prestress=bool(
-            analysis_payload.get("include_gravity_prestress", False)
+            analysis_payload.get(
+                "include_gravity_prestress", analysis_defaults.include_gravity_prestress
+            )
         ),
         gravity_direction=(
             gravity_direction.x,
             gravity_direction.y,
             gravity_direction.z,
         ),
-        use_corotational=bool(analysis_payload.get("use_corotational", False)),
-        output_csv=str(analysis_payload.get("output_csv", "frequency_response.csv")),
+        use_corotational=bool(
+            analysis_payload.get("use_corotational", analysis_defaults.use_corotational)
+        ),
+        output_csv=str(analysis_payload.get("output_csv", analysis_defaults.output_csv)),
     )
 
     observations = []
