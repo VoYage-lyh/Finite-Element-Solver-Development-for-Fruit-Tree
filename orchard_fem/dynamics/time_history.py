@@ -9,7 +9,7 @@ from orchard_fem.dynamics.excitation import (
     build_time_load_vector,
 )
 from orchard_fem.dynamics.nonlinear import (
-    evaluate_nonlinear_tangent_and_force,
+    evaluate_nonlinear_force_and_tangents,
     infinity_norm,
     matrix_vector_multiply,
 )
@@ -74,7 +74,8 @@ class _TimeHistoryExecution:
 
 def _build_effective_matrix(
     assembled: LinearDynamicAssemblyResult,
-    nonlinear_tangent: list[list[float]],
+    nonlinear_stiffness_tangent: list[list[float]],
+    nonlinear_damping_tangent: list[list[float]],
     mass_scale: float,
     damping_scale: float,
 ) -> list[list[float]]:
@@ -87,7 +88,8 @@ def _build_effective_matrix(
                 (mass_scale * assembled.mass_matrix[row_index][column_index])
                 + (damping_scale * assembled.damping_matrix[row_index][column_index])
                 + assembled.stiffness_matrix[row_index][column_index]
-                + nonlinear_tangent[row_index][column_index]
+                + nonlinear_stiffness_tangent[row_index][column_index]
+                + (damping_scale * nonlinear_damping_tangent[row_index][column_index])
             )
 
     return matrix
@@ -101,10 +103,11 @@ def _compute_initial_acceleration(
     velocity: list[float],
 ) -> list[float]:
     external_force = build_time_load_vector(assembled, excitation, analysis, 0.0)
-    _, nonlinear_force = evaluate_nonlinear_tangent_and_force(
+    _, _, nonlinear_force = evaluate_nonlinear_force_and_tangents(
         len(assembled.dof_labels),
         assembled.nonlinear_links,
         displacement,
+        velocity,
     )
     damping_force = matrix_vector_multiply(assembled.damping_matrix, velocity)
     stiffness_force = matrix_vector_multiply(assembled.stiffness_matrix, displacement)
@@ -222,10 +225,15 @@ def _solve_time_history_execution(
                 for index in range(dof_count)
             ]
 
-            nonlinear_tangent, nonlinear_force = evaluate_nonlinear_tangent_and_force(
+            (
+                nonlinear_stiffness_tangent,
+                nonlinear_damping_tangent,
+                nonlinear_force,
+            ) = evaluate_nonlinear_force_and_tangents(
                 dof_count,
                 assembled.nonlinear_links,
                 displacement_guess,
+                velocity_guess,
             )
             external_force = build_time_load_vector(
                 assembled,
@@ -251,7 +259,8 @@ def _solve_time_history_execution(
 
             effective_matrix = _build_effective_matrix(
                 assembled,
-                nonlinear_tangent,
+                nonlinear_stiffness_tangent,
+                nonlinear_damping_tangent,
                 mass_scale,
                 damping_scale,
             )

@@ -167,11 +167,14 @@ def _scatter_first_harmonic_link(
     dof_count: int,
     response: list[float],
     link,
+    omega: float = 0.0,
 ) -> None:
     real = response[:dof_count]
     imag = response[dof_count:]
     relative_real, relative_imag = relative_complex_components(real, imag, link)
-    link_response = first_harmonic_link_response(link, relative_real, relative_imag)
+    link_response = first_harmonic_link_response(
+        link, relative_real, relative_imag, omega
+    )
 
     signed_dofs = [(link.first_dof, 1.0)]
     if link.second_dof >= 0:
@@ -199,6 +202,7 @@ def _build_harmonic_balance_residual_and_jacobian(
     rhs: list[float],
     assembled: LinearDynamicAssemblyResult,
     response: list[float],
+    omega: float,
 ) -> tuple[list[float], Matrix]:
     residual = [
         value - rhs[row_index]
@@ -215,6 +219,7 @@ def _build_harmonic_balance_residual_and_jacobian(
             dof_count=dof_count,
             response=response,
             link=link,
+            omega=omega,
         )
     return residual, jacobian
 
@@ -225,6 +230,7 @@ def _newton_harmonic_balance_from_start(
     assembled: LinearDynamicAssemblyResult,
     analysis,
     start_response: list[float],
+    omega: float,
 ) -> list[float]:
     response = start_response[:]
     tolerance = float(analysis.nonlinear_tolerance)
@@ -236,6 +242,7 @@ def _newton_harmonic_balance_from_start(
             rhs,
             assembled,
             response,
+            omega,
         )
         residual_norm = _infinity_norm(residual)
         if residual_norm <= target_norm:
@@ -261,6 +268,7 @@ def _newton_harmonic_balance_from_start(
                 rhs,
                 assembled,
                 trial,
+                omega,
             )
             trial_norm = _infinity_norm(trial_residual)
             if trial_norm < accepted_norm:
@@ -278,6 +286,7 @@ def _newton_harmonic_balance_from_start(
         rhs,
         assembled,
         response,
+        omega,
     )
     raise RuntimeError(
         "Harmonic-balance frequency response did not converge "
@@ -316,6 +325,7 @@ def _solve_harmonic_balance_frequency_point(
                 assembled,
                 analysis,
                 start_response,
+                omega,
             )
         except RuntimeError as exc:
             errors.append(str(exc))

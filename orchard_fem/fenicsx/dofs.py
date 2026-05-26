@@ -96,9 +96,22 @@ def resolve_embedded_beam_component_dof(
         )
 
     if len(dofs) != 1:
-        raise ValueError(
-            f"Expected exactly one DOF at point {point} for component {component}, found {len(dofs)}."
+        # Multiple branches can share an endpoint (e.g. several level-2 children
+        # attached at the same node of a level-1 parent). Each branch's embedded
+        # line contributes its own vertex at that location, so the geometric
+        # lookup returns one DOF per incident branch. After the joint operator
+        # is assembled (coincident DOFs, MPC, or penalty), the values at these
+        # DOFs coincide to within solver tolerance, so any representative works
+        # for observation purposes. Pick the smallest for determinism.
+        import warnings
+
+        warnings.warn(
+            f"Multiple DOFs ({len(dofs)}) found at point {point} for component "
+            f"{component}; using the smallest. Verify joint coupling at this "
+            "shared node.",
+            stacklevel=2,
         )
+        return int(min(dofs))
     return int(dofs[0])
 
 
@@ -135,10 +148,14 @@ def resolve_embedded_beam_component_dof_by_vertex(
             f"No DOF found at vertex {vertex_index} for component {component}."
         )
     if len(dofs) != 1:
-        raise ValueError(
-            f"Expected exactly one DOF at vertex {vertex_index} for component "
-            f"{component}, found {len(dofs)}."
+        import warnings
+
+        warnings.warn(
+            f"Multiple DOFs ({len(dofs)}) found at vertex {vertex_index} for "
+            f"component {component}; using the smallest.",
+            stacklevel=2,
         )
+        return int(min(dofs))
     return int(dofs[0])
 
 

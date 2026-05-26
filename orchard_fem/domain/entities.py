@@ -83,6 +83,7 @@ class ClampBoundaryCondition:
     support_stiffness: float = 0.0
     support_damping: float = 0.0
     cubic_stiffness: float = 0.0
+    quadratic_damping: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,8 @@ class AnalysisSettings:
     rayleigh_beta: float = 1.0e-4
     auto_nonlinear_levels: list[int] = field(default_factory=list)
     auto_nonlinear_cubic_scale: float = 0.0
+    auto_nonlinear_randomize: bool = False
+    auto_nonlinear_seed: int = 2026
     include_gravity_prestress: bool = False
     gravity_direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
     use_corotational: bool = False

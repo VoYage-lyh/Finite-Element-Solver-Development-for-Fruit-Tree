@@ -146,6 +146,7 @@ def load_orchard_model(file_path: str) -> OrchardModel:
             support_stiffness=float(clamp["support_stiffness"]),
             support_damping=float(clamp["support_damping"]),
             cubic_stiffness=float(clamp.get("cubic_stiffness", 0.0)),
+            quadratic_damping=float(clamp.get("quadratic_damping", 0.0)),
         )
         for clamp in payload.get("clamps", [])
     ]
@@ -209,6 +210,16 @@ def load_orchard_model(file_path: str) -> OrchardModel:
         auto_nonlinear_cubic_scale=float(
             analysis_payload.get(
                 "auto_nonlinear_cubic_scale", analysis_defaults.auto_nonlinear_cubic_scale
+            )
+        ),
+        auto_nonlinear_randomize=bool(
+            analysis_payload.get(
+                "auto_nonlinear_randomize", analysis_defaults.auto_nonlinear_randomize
+            )
+        ),
+        auto_nonlinear_seed=int(
+            analysis_payload.get(
+                "auto_nonlinear_seed", analysis_defaults.auto_nonlinear_seed
             )
         ),
         include_gravity_prestress=bool(

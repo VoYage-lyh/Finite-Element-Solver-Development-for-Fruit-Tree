@@ -19,7 +19,7 @@ from orchard_fem.visualization.model_scene import (
 def _apply_publication_style(plt) -> None:
     plt.rcParams.update({
         "font.family": "serif",
-        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "font.serif": ["Times New Roman", "Times", "Liberation Serif", "Nimbus Roman", "DejaVu Serif"],
         "mathtext.fontset": "stix",
     })
 

@@ -5,7 +5,12 @@ from math import pi
 from typing import Any
 
 from orchard_fem.discretization.damping import compute_default_damping_ratio
-from orchard_fem.dynamics.nonlinear import nonlinear_force, nonlinear_tangent
+from orchard_fem.dynamics.nonlinear import (
+    nonlinear_force,
+    nonlinear_tangent,
+    quadratic_damping_force,
+    quadratic_damping_tangent,
+)
 from orchard_fem.domain import ExcitationKind, OrchardModel
 from orchard_fem.dynamics.excitation import (
     TimeExcitationState,
@@ -278,66 +283,117 @@ def _evaluate_nonlinear_force_and_tangent(
     stiffness_matrix: Any,
     nonlinear_links,
     displacement: Any,
-) -> tuple[Any, Any]:
+    velocity: Any | None = None,
+) -> tuple[Any, Any, Any]:
     force_vector = stiffness_matrix.createVecRight()
     force_vector.set(0.0)
-    tangent_matrix = _create_empty_aij_matrix_like(stiffness_matrix)
-    owned_rows = tangent_matrix.getOwnershipRange()
+    stiffness_tangent_matrix = _create_empty_aij_matrix_like(stiffness_matrix)
+    damping_tangent_matrix = _create_empty_aij_matrix_like(stiffness_matrix)
+    stiffness_owned_rows = stiffness_tangent_matrix.getOwnershipRange()
+    damping_owned_rows = damping_tangent_matrix.getOwnershipRange()
     owned_vector_rows = force_vector.getOwnershipRange()
 
     for link in nonlinear_links:
-        second_value = _vector_value(displacement, link.second_dof) if link.second_dof >= 0 else 0.0
-        relative_displacement = _vector_value(displacement, link.first_dof) - second_value
+        first_disp = _vector_value(displacement, link.first_dof)
+        if link.second_dof >= 0:
+            second_disp = _vector_value(displacement, link.second_dof)
+        else:
+            second_disp = 0.0
+        relative_displacement = first_disp - second_disp
         scalar_force = nonlinear_force(link, relative_displacement)
         scalar_tangent = nonlinear_tangent(link, relative_displacement)
 
+        damping_contribution = 0.0
+        damping_jacobian = 0.0
+        if velocity is not None and link.quadratic_damping != 0.0:
+            first_vel = _vector_value(velocity, link.first_dof)
+            if link.second_dof >= 0:
+                second_vel = _vector_value(velocity, link.second_dof)
+            else:
+                second_vel = 0.0
+            relative_velocity = first_vel - second_vel
+            damping_contribution = quadratic_damping_force(link, relative_velocity)
+            damping_jacobian = quadratic_damping_tangent(link, relative_velocity)
+
+        total_force = scalar_force + damping_contribution
         _accumulate_owned_vector_value(
             force_vector,
             owned_vector_rows,
             link.first_dof,
-            scalar_force,
+            total_force,
         )
         _accumulate_owned_matrix_value(
-            tangent_matrix,
-            owned_rows,
+            stiffness_tangent_matrix,
+            stiffness_owned_rows,
             link.first_dof,
             link.first_dof,
             scalar_tangent,
         )
+        if damping_jacobian != 0.0:
+            _accumulate_owned_matrix_value(
+                damping_tangent_matrix,
+                damping_owned_rows,
+                link.first_dof,
+                link.first_dof,
+                damping_jacobian,
+            )
 
         if link.second_dof >= 0:
             _accumulate_owned_vector_value(
                 force_vector,
                 owned_vector_rows,
                 link.second_dof,
-                -scalar_force,
+                -total_force,
             )
             _accumulate_owned_matrix_value(
-                tangent_matrix,
-                owned_rows,
+                stiffness_tangent_matrix,
+                stiffness_owned_rows,
                 link.first_dof,
                 link.second_dof,
                 -scalar_tangent,
             )
             _accumulate_owned_matrix_value(
-                tangent_matrix,
-                owned_rows,
+                stiffness_tangent_matrix,
+                stiffness_owned_rows,
                 link.second_dof,
                 link.first_dof,
                 -scalar_tangent,
             )
             _accumulate_owned_matrix_value(
-                tangent_matrix,
-                owned_rows,
+                stiffness_tangent_matrix,
+                stiffness_owned_rows,
                 link.second_dof,
                 link.second_dof,
                 scalar_tangent,
             )
+            if damping_jacobian != 0.0:
+                _accumulate_owned_matrix_value(
+                    damping_tangent_matrix,
+                    damping_owned_rows,
+                    link.first_dof,
+                    link.second_dof,
+                    -damping_jacobian,
+                )
+                _accumulate_owned_matrix_value(
+                    damping_tangent_matrix,
+                    damping_owned_rows,
+                    link.second_dof,
+                    link.first_dof,
+                    -damping_jacobian,
+                )
+                _accumulate_owned_matrix_value(
+                    damping_tangent_matrix,
+                    damping_owned_rows,
+                    link.second_dof,
+                    link.second_dof,
+                    damping_jacobian,
+                )
 
     force_vector.assemblyBegin()
     force_vector.assemblyEnd()
-    tangent_matrix.assemble()
-    return force_vector, tangent_matrix
+    stiffness_tangent_matrix.assemble()
+    damping_tangent_matrix.assemble()
+    return force_vector, stiffness_tangent_matrix, damping_tangent_matrix
 
 
 def _build_effective_matrix(
@@ -348,6 +404,7 @@ def _build_effective_matrix(
     *,
     mass_scale: float,
     damping_scale: float,
+    nonlinear_damping_tangent_matrix: Any | None = None,
 ) -> Any:
     from petsc4py import PETSc
 
@@ -366,6 +423,12 @@ def _build_effective_matrix(
         effective_matrix.axpy(
             1.0,
             nonlinear_tangent_matrix,
+            structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
+        )
+    if nonlinear_damping_tangent_matrix is not None:
+        effective_matrix.axpy(
+            damping_scale,
+            nonlinear_damping_tangent_matrix,
             structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN,
         )
     effective_matrix.assemble()
@@ -489,10 +552,11 @@ def _solve_nonlinear_newmark_step_with_snes(
             gamma=gamma,
             dt=dt,
         )
-        nonlinear_force_vector, _ = _evaluate_nonlinear_force_and_tangent(
+        nonlinear_force_vector, _, _ = _evaluate_nonlinear_force_and_tangent(
             stiffness_matrix,
             nonlinear_links,
             current_displacement,
+            velocity,
         )
         elastic_force_vector = _build_ufl_augmented_elastic_force(
             ufl_bridge,
@@ -512,10 +576,23 @@ def _solve_nonlinear_newmark_step_with_snes(
         _assign_vector(residual, computed_residual)
 
     def assemble_jacobian(_snes, current_displacement, jacobian, preconditioner) -> None:
-        _, nonlinear_tangent_matrix = _evaluate_nonlinear_force_and_tangent(
+        _, velocity = _state_from_displacement(
+            current_displacement,
+            displacement_predictor,
+            velocity_predictor,
+            mass_scale=mass_scale,
+            gamma=gamma,
+            dt=dt,
+        )
+        (
+            _,
+            nonlinear_stiffness_tangent_matrix,
+            nonlinear_damping_tangent_matrix,
+        ) = _evaluate_nonlinear_force_and_tangent(
             stiffness_matrix,
             nonlinear_links,
             current_displacement,
+            velocity,
         )
         elastic_jacobian = _build_ufl_augmented_elastic_jacobian(
             ufl_bridge,
@@ -526,9 +603,10 @@ def _solve_nonlinear_newmark_step_with_snes(
             elastic_jacobian,
             mass_matrix,
             damping_matrix,
-            nonlinear_tangent_matrix,
+            nonlinear_stiffness_tangent_matrix,
             mass_scale=mass_scale,
             damping_scale=damping_scale,
+            nonlinear_damping_tangent_matrix=nonlinear_damping_tangent_matrix,
         )
         _assign_matrix(jacobian, effective_matrix)
         if preconditioner is not jacobian:

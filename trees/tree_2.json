@@ -882,7 +882,15 @@
     "rayleigh_alpha": 0.0,
     "rayleigh_beta": 0.0001,
     "include_gravity_prestress": true,
-    "output_csv": "results/tree_2_asymmetric_multi_leader/frf.csv"
+    "auto_nonlinear_levels": [
+      2,
+      3
+    ],
+    "auto_nonlinear_randomize": true,
+    "auto_nonlinear_seed": 20262,
+    "nonlinear_tolerance": 1e-05,
+    "max_nonlinear_iterations": 30,
+    "output_csv": "results_nonlinear/tree_2_asymmetric_multi_leader/frf.csv"
   },
   "observations": [
     {

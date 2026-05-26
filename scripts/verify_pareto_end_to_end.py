@@ -69,7 +69,7 @@ def _apply_pub_style():
 
     plt.rcParams.update({
         "font.family": "serif",
-        "font.serif": ["Times New Roman", "DejaVu Serif"],
+        "font.serif": ["Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif"],
         "mathtext.fontset": "stix",
         "font.size": 14,
         "axes.titlesize": 16,
@@ -497,17 +497,26 @@ def main() -> int:
         help="Refuse to run any FE — fail loudly if any cache is missing. "
              "Use this when only the figure styling has changed.",
     )
+    parser.add_argument(
+        "--output-dir", default="results",
+        help="Directory (relative to repo root, or absolute) where figures are "
+             "written. Defaults to 'results'. Use 'results_nonlinear' to keep "
+             "outputs from the randomized Duffing-link pipeline separate from "
+             "the linear-baseline figures.",
+    )
     args = parser.parse_args()
 
     _apply_pub_style()
-    results_root = REPO / "results"
+    output_dir_arg = Path(args.output_dir)
+    results_root = output_dir_arg if output_dir_arg.is_absolute() else REPO / output_dir_arg
     out_pareto = results_root / "pareto"
     out_frf = results_root / "frf"
     out_response = results_root / "response"
     out_summary = results_root / "summary"
-    cache_dir = REPO / "cache" / "verify_pareto"
+    cache_dir = REPO / "cache" / f"verify_pareto_{results_root.name}"
     for d in (out_pareto, out_frf, out_response, out_summary):
         d.mkdir(parents=True, exist_ok=True)
+    results_label = results_root.name
 
     results: list[TreeResult] = []
     for n in (1, 2, 3, 4, 5):
@@ -536,9 +545,9 @@ def main() -> int:
             out_response / f"response_tree_{n}",
         )
         print(f"[tree_{n}] figures → "
-              f"results/pareto/pareto_tree_{n}.{{png,pdf}} + "
-              f"results/frf/frf_tree_{n}.{{png,pdf}} + "
-              f"results/response/response_tree_{n}.{{png,pdf}}")
+              f"{results_label}/pareto/pareto_tree_{n}.{{png,pdf}} + "
+              f"{results_label}/frf/frf_tree_{n}.{{png,pdf}} + "
+              f"{results_label}/response/response_tree_{n}.{{png,pdf}}")
 
     # Strategy A: greedy multi-stage sequence on each tree's best clamp.
     out_sequence = results_root / "sequence"
@@ -553,7 +562,7 @@ def main() -> int:
         )
         if stages:
             print(f"[tree_{n}] sequence: {len(stages)} stages → "
-                  f"results/sequence/sequence_tree_{n}.{{png,pdf}}")
+                  f"{results_label}/sequence/sequence_tree_{n}.{{png,pdf}}")
 
     if len(results) >= 2:
         _save_all_pareto_overlay(results, out_pareto / "pareto_all_trees")
@@ -563,10 +572,10 @@ def main() -> int:
             results_with_stages, out_summary / "summary_sequence_coverage",
         )
         print(f"\n[summary] cross-tree figures → "
-              f"results/pareto/pareto_all_trees.{{png,pdf}} + "
-              f"results/frf/frf_all_trees.{{png,pdf}} + "
-              f"results/summary/summary_knees.{{png,pdf}} + "
-              f"results/summary/summary_sequence_coverage.{{png,pdf}}")
+              f"{results_label}/pareto/pareto_all_trees.{{png,pdf}} + "
+              f"{results_label}/frf/frf_all_trees.{{png,pdf}} + "
+              f"{results_label}/summary/summary_knees.{{png,pdf}} + "
+              f"{results_label}/summary/summary_sequence_coverage.{{png,pdf}}")
 
     _print_recommendation_table(results)
     _print_sequence_table(results_with_stages)

@@ -312,6 +312,7 @@ def _build_first_harmonic_nonlinear_vector_and_tangent(
     solution: Any,
     *,
     build_tangent: bool,
+    omega: float = 0.0,
 ) -> tuple[Any, Any | None]:
     vector = block_matrix.createVecRight()
     vector.set(0.0)
@@ -330,6 +331,7 @@ def _build_first_harmonic_nonlinear_vector_and_tangent(
             link,
             relative_real,
             relative_imag,
+            omega,
         )
         signed_dofs = [(link.first_dof, 1.0)]
         if link.second_dof >= 0:
@@ -491,6 +493,7 @@ def _solve_harmonic_balance_frequency_point(
             nonlinear_links,
             current_solution,
             build_tangent=False,
+            omega=omega,
         )
         residual.axpy(1.0, nonlinear_vector)
         return residual
@@ -509,6 +512,7 @@ def _solve_harmonic_balance_frequency_point(
             nonlinear_links,
             current_solution,
             build_tangent=True,
+            omega=omega,
         )
         if nonlinear_tangent is not None:
             jacobian.axpy(

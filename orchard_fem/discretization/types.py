@@ -62,3 +62,4 @@ class NonlinearLinkDefinition:
     cubic_stiffness: float = 0.0
     open_stiffness: float = 0.0
     gap_threshold: float = 0.0
+    quadratic_damping: float = 0.0

@@ -29,7 +29,7 @@ REPO = Path(__file__).resolve().parents[1]
 # ────────────────────────────────────────────────────────────────────────────
 plt.rcParams.update({
     "font.family": "serif",
-    "font.serif": ["Times New Roman", "DejaVu Serif"],
+    "font.serif": ["Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif"],
     "mathtext.fontset": "stix",
     "mathtext.default": "it",
     "font.size": 10,

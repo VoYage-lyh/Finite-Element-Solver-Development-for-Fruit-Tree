@@ -120,7 +120,7 @@ POSITION_ORDER = ["root", "mid", "tip"]
 # ────────────────────────────────────────────────────────────────────────────
 plt.rcParams.update({
     "font.family": "serif",
-    "font.serif": ["Times New Roman", "DejaVu Serif"],
+    "font.serif": ["Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif"],
     "mathtext.fontset": "stix",
     "mathtext.default": "regular",
     "font.size": 14,
