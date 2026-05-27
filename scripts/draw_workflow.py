@@ -169,21 +169,25 @@ def main() -> int:
 
     # ── Stage 1: Modeling ──────────────────────────────────────────────────
     cx = lane_centers[0]
-    s1_a = _node(ax, cx, 80, node_w, 8,
+    s1_a = _node(ax, cx, 77, node_w, 7.5,
                  "Tree morphology measurement\n"
                  r"$\mathcal{G} = (\mathcal{B}, \mathcal{E})$",
                  ec="#3F60A0", fontsize=body_fs)
-    s1_b = _node(ax, cx, 68, node_w, 8,
+    s1_b = _node(ax, cx, 66, node_w, 7.5,
                  "Branch material tests\n"
                  r"$\rightarrow$ priors $p(\theta)$",
                  ec="#3F60A0", fontsize=body_fs)
-    s1_c = _node(ax, cx, 56, node_w, 8,
+    s1_c = _node(ax, cx, 55, node_w, 7.5,
                  "Fruit distribution model\n"
                  "(linear arc-length density)",
                  ec="#3F60A0", fontsize=body_fs)
-    s1_d = _node(ax, cx, 42, node_w, 8,
+    s1_d = _node(ax, cx, 44, node_w, 7.5,
                  "Assemble FE operators\n"
                  r"$\mathbf{M},\,\mathbf{K}(\theta),\,\mathbf{C}(\alpha,\beta)$",
+                 ec="#3F60A0", fontsize=body_fs)
+    s1_e = _node(ax, cx, 33, node_w, 7.5,
+                 "Local nonlinear correction\n"
+                 r"$k_3 \Delta u^{3} + c_2 |\Delta v|\Delta v$",
                  ec="#3F60A0", fontsize=body_fs)
     s1_exit = _node(ax, cx, exit_y, node_w, 8,
                     "Prior-constrained\nFE model",
@@ -191,23 +195,28 @@ def main() -> int:
     _arrow_v(ax, s1_a, s1_b, color="#3F60A0")
     _arrow_v(ax, s1_b, s1_c, color="#3F60A0")
     _arrow_v(ax, s1_c, s1_d, color="#3F60A0")
-    _arrow_v(ax, s1_d, s1_exit, color="#3F60A0")
+    _arrow_v(ax, s1_d, s1_e, color="#3F60A0")
+    _arrow_v(ax, s1_e, s1_exit, color="#3F60A0")
 
     # ── Stage 2: Calibration ───────────────────────────────────────────────
     cx = lane_centers[1]
-    s2_a = _node(ax, cx, 80, node_w, 8,
+    s2_a = _node(ax, cx, 77, node_w, 7.5,
                  "Hammer test\n"
                  "(force + accel. signals)",
                  ec="#A04D6A", fontsize=body_fs)
-    s2_b = _node(ax, cx, 68, node_w, 8,
+    s2_b = _node(ax, cx, 66, node_w, 7.5,
+                 "Butterworth LP filter\n"
+                 r"$f_c=50$ Hz, zero-phase",
+                 ec="#A04D6A", fontsize=body_fs)
+    s2_c = _node(ax, cx, 55, node_w, 7.5,
                  r"$H_{1}$ FRF estimate" + "\n" +
                  r"$H_{1} = G_{\mathrm{af}}/G_{\mathrm{ff}}$",
                  ec="#A04D6A", fontsize=body_fs)
-    s2_c = _node(ax, cx, 56, node_w, 8,
+    s2_d = _node(ax, cx, 44, node_w, 7.5,
                  "Peak picking\n"
                  r"$\hat{f}_{r}$, $|\hat{H}(\omega_{i})|$",
                  ec="#A04D6A", fontsize=body_fs)
-    s2_d = _node(ax, cx, 42, node_w, 8,
+    s2_e = _node(ax, cx, 33, node_w, 7.5,
                  "MCMC calibration (emcee)\n"
                  r"$\theta \in \mathbb{R}^{8}$",
                  ec="#A04D6A", fontsize=body_fs)
@@ -218,24 +227,29 @@ def main() -> int:
     _arrow_v(ax, s2_a, s2_b, color="#A04D6A")
     _arrow_v(ax, s2_b, s2_c, color="#A04D6A")
     _arrow_v(ax, s2_c, s2_d, color="#A04D6A")
-    _arrow_v(ax, s2_d, s2_exit, color="#A04D6A")
+    _arrow_v(ax, s2_d, s2_e, color="#A04D6A")
+    _arrow_v(ax, s2_e, s2_exit, color="#A04D6A")
 
     # ── Stage 3: Validation ────────────────────────────────────────────────
     cx = lane_centers[2]
-    s3_a = _node(ax, cx, 80, node_w, 8,
+    s3_a = _node(ax, cx, 77, node_w, 7.5,
                  "Fixed-frequency\nexcitation test",
                  ec="#A38033", fontsize=body_fs)
-    s3_b = _node(ax, cx, 68, node_w, 8,
+    s3_b = _node(ax, cx, 66, node_w, 7.5,
                  r"Forward solve at $\hat{\theta}$" + "\n"
                  "(posterior median)",
                  ec="#A38033", fontsize=body_fs)
-    s3_c = _node(ax, cx, 56, node_w, 8,
+    s3_c = _node(ax, cx, 55, node_w, 7.5,
                  "Posterior predictive FRF\n"
                  "(NRMSE, peak error)",
                  ec="#A38033", fontsize=body_fs)
-    s3_d = _node(ax, cx, 42, node_w, 8,
+    s3_d = _node(ax, cx, 44, node_w, 7.5,
                  "90% CI coverage check\n"
                  "vs. independent data",
+                 ec="#A38033", fontsize=body_fs)
+    s3_e = _node(ax, cx, 33, node_w, 7.5,
+                 "Linear vs nonlinear FRF\n"
+                 r"$\Delta f / f_{\rm lin}$, peak shape",
                  ec="#A38033", fontsize=body_fs)
     s3_exit = _node(ax, cx, exit_y, node_w, 8,
                     "Validated\ncalibrated model",
@@ -243,36 +257,42 @@ def main() -> int:
     _arrow_v(ax, s3_a, s3_b, color="#A38033")
     _arrow_v(ax, s3_b, s3_c, color="#A38033")
     _arrow_v(ax, s3_c, s3_d, color="#A38033")
-    _arrow_v(ax, s3_d, s3_exit, color="#A38033")
+    _arrow_v(ax, s3_d, s3_e, color="#A38033")
+    _arrow_v(ax, s3_e, s3_exit, color="#A38033")
 
     # ── Stage 4: Recommendation ────────────────────────────────────────────
     cx = lane_centers[3]
-    s4_a = _node(ax, cx, 80, node_w, 8,
+    s4_a = _node(ax, cx, 77, node_w, 7.5,
                  r"$(p, f, A)$ sweep" + "\n"
                  r"$\mathcal{P}_{0} \times \mathcal{F} \times \mathcal{A}$",
                  ec="#3F7A55", fontsize=body_fs)
-    s4_b = _node(ax, cx, 68, node_w, 8,
+    s4_b = _node(ax, cx, 66, node_w, 7.5,
                  "Multi-clamp Pareto\n"
                  r"$C_{\mathrm{cov}}$ vs $\sigma_{\mathrm{tr}}$",
                  ec="#3F7A55", fontsize=body_fs)
-    s4_c = _node(ax, cx, 56, node_w, 8,
+    s4_c = _node(ax, cx, 55, node_w, 7.5,
                  "Knee selection\n"
                  r"$\min \|(\tilde{y}_{1}, \tilde{y}_{2})\|_{2}$",
                  ec="#3F7A55", fontsize=body_fs)
-    s4_d = _node(ax, cx, 42, node_w, 8,
+    s4_d = _node(ax, cx, 44, node_w, 7.5,
                  "Posterior + Sobol\n"
                  r"90% CI, $S_{T,i}$",
                  ec="#3F7A55", fontsize=body_fs)
+    s4_e = _node(ax, cx, 33, node_w, 7.5,
+                 "Operating-parameter sequence\n"
+                 r"$\{(f_k, A_k)\}_{k=1}^{N},\; C_{\mathrm{cov}}^{\rm cum}\!\uparrow$",
+                 ec="#3F7A55", fontsize=body_fs)
     s4_exit = _node(
         ax, cx, exit_y, node_w, 8,
-        "Recommendation\n"
-        r"$(p^{\dagger}, f^{\dagger}, A^{\dagger}) \pm$ CI",
-        fc="white", ec="#3F7A55", weight="bold", fontsize=13,
+        "Staged recommendation\n"
+        r"$(p^{\dagger},\,\{(f_k, A_k)\}_{k=1}^{N}) \pm$ CI",
+        fc="white", ec="#3F7A55", weight="bold", fontsize=12,
     )
     _arrow_v(ax, s4_a, s4_b, color="#3F7A55")
     _arrow_v(ax, s4_b, s4_c, color="#3F7A55")
     _arrow_v(ax, s4_c, s4_d, color="#3F7A55")
-    _arrow_v(ax, s4_d, s4_exit, color="#3F7A55")
+    _arrow_v(ax, s4_d, s4_e, color="#3F7A55")
+    _arrow_v(ax, s4_e, s4_exit, color="#3F7A55")
 
     # ── Inter-lane main arrows: all at y = exit_y, perfectly horizontal ────
     _arrow_h(ax, s1_exit, s2_exit, color="#222", lw=2.0)

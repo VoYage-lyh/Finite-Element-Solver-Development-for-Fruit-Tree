@@ -199,6 +199,51 @@ def resample_record(
 # Analysis
 # ---------------------------------------------------------------------------
 
+def apply_lowpass(
+    record: "ResampledRecord",
+    fs: float,
+    *,
+    cutoff_hz: float = 50.0,
+    order: int = 4,
+) -> "ResampledRecord":
+    """Zero-phase Butterworth lowpass on the ACCELERATION channels only.
+
+    Inspired by the upstream MATLAB pipeline in
+    Excitation-Machinery-Parameter-Prediction-Method/analyse_chibi_data.m.
+    The wireless accelerometers are dominated by HF sensor noise + bursty-
+    packetisation artefacts; filtering them suppresses that band-wide noise
+    and lets the per-impact FFT recover the true low-frequency structural
+    response.
+
+    The hammer-force trace is **deliberately left unfiltered**: a sharp
+    impulse has flat spectral content well above any practical cutoff and
+    LPF would smear it into a broad bump, destroying both the peak-detector
+    threshold and the FRF input spectrum.
+    """
+    from scipy.signal import butter, filtfilt
+
+    nyq = fs / 2.0
+    if cutoff_hz >= nyq or cutoff_hz <= 0.0:
+        return record
+    b, a = butter(order, cutoff_hz / nyq, btype="low")
+
+    def _filt(signal: np.ndarray, axis: int = -1) -> np.ndarray:
+        finite_mask = np.isfinite(signal)
+        if not finite_mask.any():
+            return signal
+        clean = np.where(finite_mask, signal, 0.0)
+        if signal.ndim == 1:
+            clean = clean - np.nanmean(signal)
+        else:
+            clean = clean - np.nanmean(signal, axis=0, keepdims=True)
+        out = filtfilt(b, a, clean, axis=axis)
+        out[~finite_mask] = np.nan
+        return out
+
+    new_accel = {s: _filt(arr, axis=0) for s, arr in record.accel.items()}
+    return ResampledRecord(record.time_s, record.force, new_accel)
+
+
 def auto_align_force(
     record: ResampledRecord,
     fs: float,
@@ -246,19 +291,13 @@ def auto_align_force(
     )
 
 
-def detect_impacts(
+def _detect_impacts_raw(
     time_s: np.ndarray,
     force: np.ndarray,
     *,
-    threshold_ratio: float = 0.2,
-    min_separation_s: float = 0.05,
+    threshold_ratio: float,
+    min_separation_s: float,
 ) -> np.ndarray:
-    """Return time indices of distinct hammer impact peaks.
-
-    A peak is the most-extreme sample (positive or negative magnitude) above
-    ``threshold_ratio * max(|force|)`` separated from any prior peak by at
-    least ``min_separation_s`` seconds.
-    """
     if force.size == 0:
         return np.empty(0, dtype=int)
     mag = np.abs(force - np.nanmedian(force))
@@ -282,6 +321,76 @@ def detect_impacts(
             picks.append(local)
         i = j + 1
     return np.asarray(picks, dtype=int)
+
+
+def detect_impacts(
+    time_s: np.ndarray,
+    force: np.ndarray,
+    *,
+    threshold_ratio: float = 0.2,
+    min_separation_s: float = 0.05,
+    reject_outliers_sigma: float = 5.0,
+    outlier_max_passes: int = 3,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Hammer impact peaks with MAD-based drift-spike rejection.
+
+    A peak is the most-extreme sample (positive or negative magnitude) above
+    ``threshold_ratio * max(|force|)`` separated from any prior peak by at
+    least ``min_separation_s`` seconds.
+
+    Drift / glitch peaks (e.g., the wireless logger occasionally registering
+    a single-sample saturation spike a few × larger than any real hammer
+    strike) would otherwise inflate the detection threshold and mask real
+    strikes. With ``reject_outliers_sigma > 0`` we iteratively:
+
+      1. detect peaks on the working trace,
+      2. compute the median and MAD of the detected peak magnitudes,
+      3. flag peaks whose magnitude exceeds
+         ``median + reject_outliers_sigma * 1.4826·MAD`` as drift artifacts,
+      4. zero-mask a ±20 ms window around each flagged sample,
+      5. re-detect, until no further outliers appear (or
+         ``outlier_max_passes`` is reached).
+
+    Returns ``(peak_indices, rejected_indices)`` where ``rejected_indices``
+    is empty when no drift was found. Pass
+    ``reject_outliers_sigma=0`` to disable rejection.
+    """
+    if force.size == 0:
+        return np.empty(0, dtype=int), np.empty(0, dtype=int)
+
+    work = np.where(np.isfinite(force), force, 0.0).astype(float, copy=True)
+    rejected: list[int] = []
+    dt = time_s[1] - time_s[0]
+    half_window = max(1, int(0.02 / dt))  # ±20 ms zero-mask around a glitch
+
+    for _ in range(max(1, outlier_max_passes)):
+        peaks = _detect_impacts_raw(
+            time_s, work,
+            threshold_ratio=threshold_ratio,
+            min_separation_s=min_separation_s,
+        )
+        if reject_outliers_sigma <= 0.0 or peaks.size < 4:
+            return peaks, np.asarray(rejected, dtype=int)
+        amps = np.abs(work[peaks] - np.nanmedian(work))
+        med = float(np.median(amps))
+        mad = float(np.median(np.abs(amps - med))) + 1e-30
+        threshold = med + reject_outliers_sigma * 1.4826 * mad
+        outlier_mask = amps > threshold
+        if not outlier_mask.any():
+            return peaks, np.asarray(rejected, dtype=int)
+        for p in peaks[outlier_mask]:
+            lo = max(0, int(p) - half_window)
+            hi = min(work.size, int(p) + half_window + 1)
+            work[lo:hi] = 0.0
+            rejected.append(int(p))
+
+    # Final pass after the last masking iteration.
+    peaks = _detect_impacts_raw(
+        time_s, work,
+        threshold_ratio=threshold_ratio,
+        min_separation_s=min_separation_s,
+    )
+    return peaks, np.asarray(rejected, dtype=int)
 
 
 def compute_frf_ensemble(
@@ -385,15 +494,21 @@ def _preprocessing_signature(
     force_clock_start: float | None,
     auto_align: bool,
     align_ref: str,
+    lowpass_hz: float | None,
+    lowpass_order: int,
+    reject_outliers_sigma: float,
 ) -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 3,
         "force": _file_signature(force_path),
         "accel": {s: _file_signature(p) for s, p in accel_paths.items()},
         "fs": fs,
         "force_clock_start": force_clock_start,
         "auto_align": auto_align,
         "align_ref": align_ref,
+        "lowpass_hz": lowpass_hz,
+        "lowpass_order": lowpass_order,
+        "reject_outliers_sigma": reject_outliers_sigma,
     }
 
 
@@ -403,6 +518,11 @@ class _ProcessedBlob:
     peaks: np.ndarray
     lag_s: float
     signature: dict[str, Any]
+    rejected_peaks: np.ndarray = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.rejected_peaks is None:
+            self.rejected_peaks = np.empty(0, dtype=int)
 
 
 def _try_load_cache(cache_path: Path, signature: dict[str, Any]) -> _ProcessedBlob | None:
@@ -472,6 +592,9 @@ def plot_time_history_overview(
     out_dir: Path,
     *,
     station: str = "tip",
+    rejected: np.ndarray | None = None,
+    excluded: np.ndarray | None = None,
+    excluded_span: tuple[float, float] | None = None,
 ) -> None:
     """Two-panel overview: hammer force on top, station accel-Z on bottom."""
     _configure_matplotlib_style()
@@ -482,6 +605,19 @@ def plot_time_history_overview(
         gridspec_kw={"height_ratios": [1, 1]},
     )
 
+    t_lo = record.time_s[0]
+    t_hi = record.time_s[-1]
+    if excluded_span is not None:
+        kept_lo, kept_hi = excluded_span
+        for ax in (ax_f, ax_a):
+            if kept_lo > t_lo:
+                ax.axvspan(t_lo, kept_lo, color="#e9e9e9", alpha=0.55,
+                           zorder=0, linewidth=0)
+            if kept_hi < t_hi:
+                ax.axvspan(kept_hi, t_hi, color="#e9e9e9", alpha=0.55,
+                           zorder=0, linewidth=0,
+                           label="off-axis (excluded)")
+
     ax_f.plot(record.time_s, record.force, color=PRIMARY_COLOR, linewidth=0.9)
     if peaks.size:
         ax_f.plot(
@@ -489,7 +625,23 @@ def plot_time_history_overview(
             linestyle="none", marker="v", markersize=4.0,
             markerfacecolor=ACCENT_COLOR, markeredgecolor="white",
             markeredgewidth=0.5, zorder=3,
-            label=f"detected impacts (N={peaks.size})",
+            label=f"Z-axis impacts (N={peaks.size})",
+        )
+    if excluded is not None and excluded.size:
+        ax_f.plot(
+            record.time_s[excluded], record.force[excluded],
+            linestyle="none", marker="v", markersize=4.0,
+            markerfacecolor="#bdbdbd", markeredgecolor="white",
+            markeredgewidth=0.5, zorder=2,
+            label=f"off-axis impacts (N={excluded.size})",
+        )
+    if rejected is not None and rejected.size:
+        ax_f.plot(
+            record.time_s[rejected], record.force[rejected],
+            linestyle="none", marker="x", markersize=7.0,
+            markerfacecolor="none", markeredgecolor="#555555",
+            markeredgewidth=1.4, zorder=4,
+            label=f"rejected drift (N={rejected.size})",
         )
     ax_f.set_ylabel("Force [N]")
     ax_f.set_title("Hammer impact-test record (50 strikes, root→tip)")
@@ -651,6 +803,14 @@ def _parse_force_start(text: str | None) -> float | None:
     return _parse_clock_seconds(raw)
 
 
+def _parse_time_range(text: str | None) -> tuple[float, float] | None:
+    if text is None:
+        return None
+    sep = "," if "," in text else ":"
+    lo_str, hi_str = text.split(sep, 1)
+    return float(lo_str), float(hi_str)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -686,6 +846,39 @@ def main() -> int:
         "--force",
         action="store_true",
         help="Ignore cached preprocessing under cache/hammer_test/<name>/ and recompute.",
+    )
+    parser.add_argument(
+        "--impacts-time-range",
+        default=None,
+        help="Restrict the FRF ensemble to impacts within [t_min, t_max] seconds "
+        "of the common (post-align) time axis. Use this to exclude off-axis "
+        "strikes (e.g., during tree1_p1 the X-direction strikes ran after "
+        "t≈73 s, so pass '0,73' to keep only the Z-direction strikes). "
+        "Format: 'min,max'. Excluded impacts still appear (greyed) in the "
+        "time-history figure; the cache is *not* invalidated, so you can "
+        "iterate this quickly.",
+    )
+    parser.add_argument(
+        "--reject-outliers-sigma",
+        type=float,
+        default=5.0,
+        help="MAD-based drift-spike rejection threshold on detected peak "
+        "magnitudes (default 5.0; pass 0 to disable). "
+        "Removes single-sample sensor saturation glitches before the FRF.",
+    )
+    parser.add_argument(
+        "--lowpass-hz",
+        type=float,
+        default=50.0,
+        help="Zero-phase Butterworth lowpass cutoff applied to force + accel "
+        "before peak detection / FRF (default 50 Hz; ref: chibi pipeline uses 65 Hz). "
+        "Pass 0 to disable.",
+    )
+    parser.add_argument(
+        "--lowpass-order",
+        type=int,
+        default=4,
+        help="Butterworth lowpass order (default 4).",
     )
     parser.add_argument(
         "--no-auto-align",
@@ -736,10 +929,13 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     force_clock_start = _parse_force_start(args.force_start)
+    lowpass_hz: float | None = args.lowpass_hz if args.lowpass_hz > 0 else None
     signature = _preprocessing_signature(
         force_path, accel_paths,
         fs=args.fs, force_clock_start=force_clock_start,
         auto_align=not args.no_auto_align, align_ref=args.align_ref,
+        lowpass_hz=lowpass_hz, lowpass_order=args.lowpass_order,
+        reject_outliers_sigma=args.reject_outliers_sigma,
     )
     cache_path = CACHE_ROOT / prefix.name / "processed.pkl"
 
@@ -770,20 +966,60 @@ def main() -> int:
             )
             print(f"Auto-aligned force by {lag_s:+.3f} s "
                   f"(cross-corr vs {args.align_ref} envelope)")
-        peaks = detect_impacts(record.time_s, record.force)
-        blob = _ProcessedBlob(record=record, peaks=peaks, lag_s=lag_s, signature=signature)
+        if lowpass_hz is not None:
+            print(f"Lowpass: Butterworth order {args.lowpass_order} @ "
+                  f"{lowpass_hz:.1f} Hz (zero-phase filtfilt)")
+            record = apply_lowpass(
+                record, fs=args.fs,
+                cutoff_hz=lowpass_hz, order=args.lowpass_order,
+            )
+        peaks, rejected = detect_impacts(
+            record.time_s, record.force,
+            reject_outliers_sigma=args.reject_outliers_sigma,
+        )
+        if rejected.size:
+            print(
+                f"Rejected {rejected.size} drift outlier(s) at t = "
+                + ", ".join(f"{record.time_s[i]:.3f} s" for i in rejected)
+            )
+        blob = _ProcessedBlob(
+            record=record, peaks=peaks, lag_s=lag_s,
+            signature=signature, rejected_peaks=rejected,
+        )
         _write_cache(cache_path, blob)
         print(f"[cache] wrote {cache_path.relative_to(REPO_ROOT)}")
 
     record = blob.record
-    peaks = blob.peaks
+    all_peaks = blob.peaks
+    rejected = getattr(blob, "rejected_peaks", np.empty(0, dtype=int))
+
+    # Optionally restrict to a contiguous time window so off-axis strikes
+    # (e.g. X-direction hammering segments) don't contaminate the Z FRF.
+    time_range = _parse_time_range(args.impacts_time_range)
+    if time_range is not None:
+        t_lo, t_hi = time_range
+        peak_times = record.time_s[all_peaks]
+        in_range = (peak_times >= t_lo) & (peak_times <= t_hi)
+        peaks = all_peaks[in_range]
+        excluded_peaks = all_peaks[~in_range]
+        print(f"Time filter [{t_lo:.2f}, {t_hi:.2f}] s: "
+              f"keeping {peaks.size} / {all_peaks.size} impacts "
+              f"({excluded_peaks.size} excluded as off-axis)")
+    else:
+        peaks = all_peaks
+        excluded_peaks = np.empty(0, dtype=int)
     if peaks.size:
         print("Detected impacts at t [s]:", ", ".join(f"{record.time_s[p]:.3f}" for p in peaks))
     else:
         print("Warning: no impacts detected above threshold.")
 
     print("Plotting time-history overview")
-    plot_time_history_overview(record, peaks, out_dir, station=args.station)
+    plot_time_history_overview(
+        record, peaks, out_dir,
+        station=args.station, rejected=rejected,
+        excluded=excluded_peaks,
+        excluded_span=time_range,
+    )
     print(f"Plotting FRF for {args.station} station")
     plot_station_frf(
         record,

@@ -152,6 +152,53 @@ def _find_in_band_resonance(
     return peak_idx, False
 
 
+def _find_in_band_peaks(
+    freqs: np.ndarray,
+    mags: np.ndarray,
+    band: tuple[float, float],
+    *,
+    prominence_ratio: float = 0.10,
+    min_separation_hz: float = 2.0,
+    max_peaks: int = 4,
+) -> list[int]:
+    """Return ALL prominent local maxima inside ``band``, sorted by amplitude.
+
+    A local maximum on the log-magnitude trace qualifies if its absolute
+    magnitude is at least ``(1 + prominence_ratio)`` × the in-band median.
+    Within ``min_separation_hz`` of an already-selected peak no further peak
+    is added (otherwise neighbouring grid samples around one mode would
+    inflate the count). At most ``max_peaks`` peaks are returned.
+
+    Differs from :func:`_find_in_band_resonance` which only returns the
+    single dominant peak.
+    """
+    in_band = (freqs >= band[0]) & (freqs <= band[1])
+    if not in_band.any():
+        return []
+    log_mags = np.log(np.maximum(mags, 1.0e-20))
+    is_local_max = np.zeros(mags.size, dtype=bool)
+    is_local_max[1:-1] = (
+        (log_mags[1:-1] > log_mags[:-2]) & (log_mags[1:-1] > log_mags[2:])
+    )
+    candidates = is_local_max & in_band
+    if not candidates.any():
+        return []
+    band_median = float(np.median(mags[in_band]))
+    cand_idx = np.flatnonzero(candidates)
+    prominent = mags[cand_idx] >= band_median * (1.0 + prominence_ratio)
+    cand_idx = cand_idx[prominent] if prominent.any() else cand_idx
+    cand_idx = cand_idx[np.argsort(-mags[cand_idx])]  # descending magnitude
+    selected: list[int] = []
+    for idx in cand_idx:
+        if any(abs(float(freqs[idx]) - float(freqs[s])) < min_separation_hz
+               for s in selected):
+            continue
+        selected.append(int(idx))
+        if len(selected) >= max_peaks:
+            break
+    return selected
+
+
 # ────────────────────────────────────────────────────────────────────────────
 #  Workflow data containers
 # ────────────────────────────────────────────────────────────────────────────
@@ -342,8 +389,22 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     f_resonance = float(freqs[peak_idx])
     detect_type = "local max" if has_local_max else "curvature inflection"
     print(f"[{label}]   sweep {time.time() - t0:.1f} s   "
-          f"resonance ({detect_type}) @ {f_resonance:.2f} Hz "
+          f"primary resonance ({detect_type}) @ {f_resonance:.2f} Hz "
           f"({mags[peak_idx] / model.excitation.amplitude * 1e3:.3f} mm/N)")
+
+    # Pick at most ONE well-separated secondary mode (≥ 5 Hz away from the
+    # primary) — typically the "other end" of the bimodal trees: e.g. the
+    # 12 Hz mode for tree_4 (primary 4.5 Hz) or the 5–6 Hz mode for the
+    # trees whose primary sits near 13 Hz. Anything closer than 5 Hz is
+    # treated as a sibling of the primary and ignored.
+    secondary_idxs = _find_in_band_peaks(
+        freqs, mags, _FEASIBLE_BAND_HZ,
+        prominence_ratio=0.10, min_separation_hz=5.0, max_peaks=2,
+    )
+    secondary_freqs = [float(freqs[k]) for k in secondary_idxs
+                       if int(k) != peak_idx]
+    if secondary_freqs:
+        print(f"[{label}]   secondary peak @ {secondary_freqs[0]:.2f} Hz")
 
     theta = {
         "E": float(model.materials[0].youngs_modulus),
@@ -362,13 +423,28 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
         model, amplitude_unit="mm", coverage_mode="branch",
     )
 
-    f_grid = [
+    # f_grid = primary-mode neighbourhood ± 2 Hz, plus a tight ±1 Hz cluster
+    # around every secondary peak. This lets the Pareto front weigh "soft"
+    # multi-mode candidates (e.g. tree_4 with peaks at 4.5 Hz and 13 Hz)
+    # against the dominant mode; the stress + coverage criteria then keep
+    # only the operating points that actually clear the harvesting target,
+    # so unsuitable resonances drop out by themselves.
+    f_grid_set: set[float] = {
         max(0.5, f_resonance - 2.0),
         max(0.5, f_resonance - 1.0),
         f_resonance,
         f_resonance + 1.0,
         f_resonance + 2.0,
-    ]
+    }
+    for f_sec in secondary_freqs:
+        for df in (-1.0, 0.0, 1.0):
+            f_grid_set.add(max(0.5, f_sec + df))
+    # Hard band guard: stay inside the feasible mechanical band even if a
+    # secondary peak sits near its edge.
+    f_grid = sorted(
+        f for f in f_grid_set
+        if _FEASIBLE_BAND_HZ[0] - 1.5 <= f <= _FEASIBLE_BAND_HZ[1] + 1.5
+    )
     A_grid = list(_AMPLITUDE_GRID_MM)
 
     clamp_labels = _candidate_clamps(model)
@@ -1180,19 +1256,42 @@ def _save_all_frf_overlay(results: list[TreeResult], stem: Path) -> None:
     )
     for i, r in enumerate(results):
         color = _TREE_PALETTE[i % len(_TREE_PALETTE)]
+        # Primary + at most one well-separated secondary peak (≥ 5 Hz away)
+        # so only the genuinely different modes are marked, not the sidebands
+        # of the same resonance.
+        peak_idxs = _find_in_band_peaks(
+            r.freqs, r.mags, _FEASIBLE_BAND_HZ,
+            prominence_ratio=0.10, min_separation_hz=5.0, max_peaks=2,
+        )
+        peak_freqs = [float(r.freqs[k]) for k in peak_idxs]
+        if peak_freqs:
+            primary_f = peak_freqs[0]
+            if len(peak_freqs) >= 2:
+                label = (f"{r.label} (primary {primary_f:.1f} Hz, "
+                         f"secondary {peak_freqs[1]:.1f} Hz)")
+            else:
+                label = f"{r.label} (resonance {primary_f:.1f} Hz)"
+        else:
+            label = f"{r.label} (resonance {r.f_resonance:.1f} Hz)"
+
         ax.semilogy(r.freqs, r.mags * 1.0e3,
                     color=color, linewidth=1.3, alpha=0.85,
-                    label=f"{r.label} (resonance {r.f_resonance:.1f} Hz)",
-                    zorder=2)
-        in_band = (r.freqs >= _FEASIBLE_BAND_HZ[0]) & \
-                  (r.freqs <= _FEASIBLE_BAND_HZ[1])
-        ax.scatter([r.f_resonance], [r.mags[r.freqs.tolist().index(r.f_resonance)] * 1e3],
-                   color=color, s=70, edgecolors="white", linewidths=0.8,
-                   zorder=4)
+                    label=label, zorder=2)
+        # Primary peak: solid filled marker (top-of-mag).
+        # Secondary peaks: smaller hollow marker so the eye distinguishes them.
+        for rank, k in enumerate(peak_idxs):
+            f = float(r.freqs[k])
+            m_mm = float(r.mags[k]) * 1e3
+            if rank == 0:
+                ax.scatter([f], [m_mm], color=color, s=70,
+                           edgecolors="white", linewidths=0.8, zorder=4)
+            else:
+                ax.scatter([f], [m_mm], facecolors="none", edgecolors=color,
+                           s=44, linewidths=1.4, zorder=4)
 
     ax.set_xlabel("Frequency [Hz]")
     ax.set_ylabel("Mean canopy-tip displacement [mm]")
-    ax.set_title("FRF sweeps across 5 trees — markers at in-band resonance")
+    ax.set_title("FRF sweeps across 5 trees — filled = primary, hollow = secondary peaks")
     ax.set_xlim(0.0, max(r.freqs.max() for r in results))
     ax.grid(True, which="major", linewidth=0.6, color="#d0d0d0")
     ax.grid(True, which="minor", linewidth=0.4, color="#ececec")
