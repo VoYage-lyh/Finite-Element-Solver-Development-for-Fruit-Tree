@@ -15,3 +15,18 @@ __pycache__/
 .venv/
 venv/
 cache/
+
+# Local data and generated outputs (not hosted)
+trees/
+results/
+results_nonlinear/
+
+# Image files
+*.png
+*.pdf
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.tif
+*.tiff
