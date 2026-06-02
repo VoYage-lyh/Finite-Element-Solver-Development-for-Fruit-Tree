@@ -625,7 +625,7 @@ def plot_time_history_overview(
             linestyle="none", marker="v", markersize=4.0,
             markerfacecolor=ACCENT_COLOR, markeredgecolor="white",
             markeredgewidth=0.5, zorder=3,
-            label=f"Z-axis impacts (N={peaks.size})",
+            label=f"used for $H_1$ (N={peaks.size})",
         )
     if excluded is not None and excluded.size:
         ax_f.plot(
@@ -633,7 +633,7 @@ def plot_time_history_overview(
             linestyle="none", marker="v", markersize=4.0,
             markerfacecolor="#bdbdbd", markeredgecolor="white",
             markeredgewidth=0.5, zorder=2,
-            label=f"off-axis impacts (N={excluded.size})",
+            label=f"unused (off-axis or deferred, N={excluded.size})",
         )
     if rejected is not None and rejected.size:
         ax_f.plot(
@@ -848,6 +848,14 @@ def main() -> int:
         help="Ignore cached preprocessing under cache/hammer_test/<name>/ and recompute.",
     )
     parser.add_argument(
+        "--num-impacts",
+        type=int,
+        default=5,
+        help="Use only the first N impacts (after time-range filter) for "
+        "the H1 ensemble FRF (default 5). Pass 0 to use all available impacts. "
+        "Independent of cache.",
+    )
+    parser.add_argument(
         "--impacts-time-range",
         default=None,
         help="Restrict the FRF ensemble to impacts within [t_min, t_max] seconds "
@@ -1008,6 +1016,15 @@ def main() -> int:
     else:
         peaks = all_peaks
         excluded_peaks = np.empty(0, dtype=int)
+
+    # Further restrict to the first N impacts (cleaner, well-separated strikes
+    # at the start of the test usually have the most consistent force level).
+    if args.num_impacts and args.num_impacts > 0 and peaks.size > args.num_impacts:
+        remainder = peaks[args.num_impacts :]
+        peaks = peaks[: args.num_impacts]
+        excluded_peaks = np.concatenate([excluded_peaks, remainder])
+        print(f"First-N filter: keeping {peaks.size} impacts for H1 averaging "
+              f"({remainder.size} additional impacts deferred / unused)")
     if peaks.size:
         print("Detected impacts at t [s]:", ", ".join(f"{record.time_s[p]:.3f}" for p in peaks))
     else:

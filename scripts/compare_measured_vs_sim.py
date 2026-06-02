@@ -36,11 +36,13 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 
-# Cache locations populated by verify_pareto_end_to_end.py.
+# Cache locations populated by verify_pareto_end_to_end.py (whole-tree-mean FRF).
 PARETO_CACHE_LIN = REPO / "cache" / "verify_pareto_results"
 PARETO_CACHE_NL = REPO / "cache" / "verify_pareto_results_nonlinear"
+# Cache populated by compute_validation_frf.py (single-branch single-point FRF).
+VALIDATION_CACHE = REPO / "cache" / "validation_frf"
 
-# Excitation amplitude used by the pareto pipeline (= tree_*.json "amplitude").
+# Excitation amplitude used by both pipelines (= tree_*.json "amplitude").
 F_EXCITATION_N = 10.0
 
 
@@ -94,10 +96,12 @@ def _register_pareto_pickle_classes() -> None:
 
 
 def load_sim_displacement_frf(cache_dir: Path, tree_n: int) -> tuple[np.ndarray, np.ndarray]:
-    """Return ``(freqs_hz, H_x)`` from a pareto cache pickle.
+    """Whole-tree-mean displacement compliance ``H_x = mean(|U_tip|)/F`` from
+    the pareto cache pickle (units: m·N⁻¹).
 
-    ``H_x`` is the displacement compliance |U_tip|/F in m·N⁻¹, obtained by
-    dividing the stored displacement amplitudes by ``F_EXCITATION_N``.
+    Note: this is the **averaged** FRF over all branch tips in ``ux``, NOT
+    comparable to a single-accelerometer measurement. For validation use
+    :func:`load_validation_frf` instead.
     """
     path = cache_dir / f"tree_{tree_n}.pkl"
     if not path.exists():
@@ -110,6 +114,50 @@ def load_sim_displacement_frf(cache_dir: Path, tree_n: int) -> tuple[np.ndarray,
     freqs = np.asarray(record.freqs, dtype=float)
     mags = np.asarray(record.mags, dtype=float) / F_EXCITATION_N
     return freqs, mags
+
+
+def load_validation_frf(
+    *, tree_n: int,
+    input_branch: str, input_node: str, input_comp: str,
+    output_branch: str, output_station: str, output_comp: str,
+    prefer_calibrated: bool = True,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
+    """Single-branch single-point displacement compliance from the validation
+    cache produced by ``compute_validation_frf.py``.
+
+    If a ``*_calibrated.npz`` companion file exists (produced by passing
+    ``--from-calibration`` to compute_validation_frf.py), the **linear**
+    curve is read from the uncalibrated cache and the **nonlinear** curve
+    is read from the calibrated cache — giving "baseline linear vs
+    calibrated nonlinear" on a single plot.
+
+    Returns ``(freqs_hz, H_x_lin, H_x_nl, is_calibrated)`` with units m·N⁻¹.
+    """
+    stem = (f"tree_{tree_n}_{input_branch}_{input_node}_{input_comp}"
+            f"_to_{output_branch}_{output_station}_{output_comp}")
+    default_path = VALIDATION_CACHE / f"{stem}.npz"
+    calib_path = VALIDATION_CACHE / f"{stem}_calibrated.npz"
+
+    if not default_path.exists():
+        raise FileNotFoundError(
+            f"Validation FRF cache missing: {default_path}. Run "
+            f"`python scripts/compute_validation_frf.py "
+            f"--tree {tree_n} --input-branch {input_branch} "
+            f"--input-node {input_node} --input-comp {input_comp} "
+            f"--output-station {output_station} --output-comp {output_comp}` "
+            f"first."
+        )
+    d_def = np.load(default_path)
+    amp = float(d_def["amplitude"])
+    freqs = np.asarray(d_def["freqs"], dtype=float)
+    H_lin = np.asarray(d_def["mag_lin"], dtype=float) / amp
+
+    if prefer_calibrated and calib_path.exists():
+        d_cal = np.load(calib_path)
+        H_nl = np.asarray(d_cal["mag_nl"], dtype=float) / float(d_cal["amplitude"])
+        return freqs, H_lin, H_nl, True
+    H_nl = np.asarray(d_def["mag_nl"], dtype=float) / amp
+    return freqs, H_lin, H_nl, False
 
 
 def measured_displacement_frf(
@@ -191,6 +239,31 @@ def main() -> int:
                         help="Linear damping ratio ζ_lin.")
     parser.add_argument("--A-resp", type=float, default=5.0e-3,
                         help="Modal response amplitude at resonance [m].")
+
+    # --- single-branch validation FRF source (default mode, apples-to-apples)
+    parser.add_argument(
+        "--use-pareto-cache", action="store_true",
+        help="Use whole-tree-mean FRF from the pareto cache (legacy, NOT "
+        "physically comparable to a single accelerometer). Default off.",
+    )
+    parser.add_argument(
+        "--input-branch", default="left_leader",
+        help="Validation FRF: excitation branch_id (default left_leader, "
+        "i.e. level-1 branch 1 for tree_1).",
+    )
+    parser.add_argument("--input-node", default="root",
+                        choices=("root", "mid", "tip"))
+    parser.add_argument("--input-comp", default="ux",
+                        choices=("ux", "uy", "uz"),
+                        help="Excitation direction in the global frame. The "
+                        "field accelerometer's 'Z' on a vertical-leaning leader "
+                        "branch lies in the lateral plane → default ux.")
+    parser.add_argument("--output-branch", default=None,
+                        help="Default: same as --input-branch (drive-point FRF).")
+    parser.add_argument("--output-station", default="tip",
+                        choices=("root", "mid", "tip"))
+    parser.add_argument("--output-comp", default="ux",
+                        choices=("ux", "uy", "uz"))
     args = parser.parse_args()
 
     measured_dir = REPO / args.measured_dir
@@ -199,35 +272,54 @@ def main() -> int:
     coherence = cols[f"coherence_{args.component}"]
     H_x_meas = measured_displacement_frf(freqs_meas, H_accel)
 
-    # Simulation FRF curves from pareto cache (instant, no FE re-run).
-    _register_pareto_pickle_classes()
-    f_sim_lin, Hx_sim_lin = load_sim_displacement_frf(PARETO_CACHE_LIN, args.tree)
-    f_sim_nl, Hx_sim_nl = load_sim_displacement_frf(PARETO_CACHE_NL, args.tree)
+    # Simulation FRF — by default use the SINGLE-BRANCH cache (apples-to-apples
+    # with one accelerometer) instead of the pareto whole-tree mean.
+    is_calibrated = False
+    if args.use_pareto_cache:
+        _register_pareto_pickle_classes()
+        f_sim_lin, Hx_sim_lin = load_sim_displacement_frf(PARETO_CACHE_LIN, args.tree)
+        f_sim_nl, Hx_sim_nl = load_sim_displacement_frf(PARETO_CACHE_NL, args.tree)
+        sim_label_suffix = "whole-tree mean"
+    else:
+        out_branch = args.output_branch or args.input_branch
+        f_sim_lin, Hx_sim_lin, Hx_sim_nl, is_calibrated = load_validation_frf(
+            tree_n=args.tree,
+            input_branch=args.input_branch, input_node=args.input_node,
+            input_comp=args.input_comp,
+            output_branch=out_branch, output_station=args.output_station,
+            output_comp=args.output_comp,
+        )
+        f_sim_nl = f_sim_lin
+        sim_label_suffix = (f"{args.input_branch}@{args.input_node} "
+                            f"{args.input_comp} → "
+                            f"{out_branch}@{args.output_station} {args.output_comp}")
+        if is_calibrated:
+            print("[validation] using calibrated nonlinear curve "
+                  "(_calibrated.npz)")
 
     # Summary tables for the k3/c2 back-estimate (still useful for the printout).
     shift_rows = load_summary_rows(REPO / "results_nonlinear/verification/summary_frequency_shift.csv")
     c2_rows = load_summary_rows(REPO / "results_nonlinear/verification/summary_c2_suppression.csv")
-    if args.tree not in shift_rows or args.tree not in c2_rows:
-        print(f"[warn] tree {args.tree} not in summary CSVs — back-estimate skipped.")
-        est = None
-        f_lin = float(f_sim_lin[np.argmax(Hx_sim_lin)])
-        f_full = float(f_sim_nl[np.argmax(Hx_sim_nl)])
-        f_cubic = f_lin
-        peak_lin_sim = float(np.max(Hx_sim_lin))
-        peak_nl_sim = float(np.max(Hx_sim_nl))
-    else:
-        s = shift_rows[args.tree]
+    # Peak frequencies are taken from the loaded curves directly so they match
+    # whatever FRF source (pareto whole-tree mean vs single-branch validation)
+    # the user picked. The k3/c2 back-estimate optionally pulls cubic-only
+    # peak data from the diagnostic summary CSV when available.
+    f_lin = float(f_sim_lin[np.argmax(Hx_sim_lin)])
+    f_full = float(f_sim_nl[np.argmax(Hx_sim_nl)])
+    peak_lin_sim = float(np.max(Hx_sim_lin))
+    peak_nl_sim = float(np.max(Hx_sim_nl))
+
+    if args.tree in shift_rows and args.tree in c2_rows:
         c = c2_rows[args.tree]
-        f_lin = s["f_lin_Hz"]
-        f_full = c["f_full_Hz"]
         f_cubic = c["f_cubic_only_Hz"]
-        peak_lin_sim = float(np.max(Hx_sim_lin))
-        peak_nl_sim = float(np.max(Hx_sim_nl))
         est = estimate_k3_c2(
             f_lin_hz=f_lin, f_cubic_only_hz=f_cubic, f_full_hz=f_full,
             peak_cubic_only=c["peak_mag_cubic_only"], peak_full=c["peak_mag_full"],
             k1=args.k1, m=args.m, A_resp_m=args.A_resp, zeta_lin=args.zeta_lin,
         )
+    else:
+        est = None
+        f_cubic = f_lin
 
     print(f"\n=== Simulation summary, tree {args.tree} ===")
     print(f"  f_lin       = {f_lin:.2f} Hz   |H_x|_peak = {peak_lin_sim:.3e} m·N⁻¹")
@@ -279,12 +371,15 @@ def main() -> int:
     ax_h.semilogy(
         f_sim_lin[mask_sim_lin], Hx_sim_lin[mask_sim_lin],
         color=PRIMARY, linewidth=1.6, linestyle="-",
-        label=r"Linear sim  ($k_3 = 0,\ c_2 = 0$)",
+        label=rf"Linear sim  ($k_3 = 0,\ c_2 = 0$)",
     )
+    nl_label = (r"Nonlinear sim (calibrated $\beta, k_3, c_2$)"
+                if not args.use_pareto_cache and is_calibrated
+                else r"Nonlinear sim  ($k_3 \neq 0,\ c_2 \neq 0$)")
     ax_h.semilogy(
         f_sim_nl[mask_sim_nl], Hx_sim_nl[mask_sim_nl],
         color=ACCENT, linewidth=1.6, linestyle="-",
-        label=r"Nonlinear sim  ($k_3 \neq 0,\ c_2 \neq 0$)",
+        label=nl_label,
     )
     ax_h.semilogy(
         freqs_meas[mask_meas], H_x_meas[mask_meas],
@@ -298,8 +393,8 @@ def main() -> int:
     ax_h.axvline(f_full, color=ACCENT, linewidth=0.9, linestyle=":", alpha=0.7)
     ax_h.set_ylabel(rf"$|H_x| = |U_{{\rm tip}}/F|$ [{UNIT_FRF_X}]")
     ax_h.set_title(
-        rf"tree {args.tree}: $f_{{\rm lin}}={f_lin:.2f}$ Hz $\rightarrow$ "
-        rf"$f_{{\rm full}}={f_full:.2f}$ Hz "
+        rf"tree {args.tree}: $f_{{\rm lin}}={f_lin:.2f}\,$Hz $\rightarrow$ "
+        rf"$f_{{\rm full}}={f_full:.2f}\,$Hz "
         rf"($\Delta f/f_{{\rm lin}}={(f_full-f_lin)/f_lin*100:+.1f}\%$)"
     )
     ax_h.set_xlim(0.0, args.fmax)
