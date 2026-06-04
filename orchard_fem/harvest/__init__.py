@@ -19,8 +19,12 @@ from orchard_fem.harvest.objective import (
 from orchard_fem.harvest.optimization import optimize_harvest_excitation
 from orchard_fem.harvest.stress_recovery import (
     ElementEndForces,
+    NetworkStressResult,
+    clamp_stress_from_solution,
     element_peak_stress,
+    element_stress_from_solution,
     extreme_fibre_distance,
+    network_peak_stress,
     recover_element_end_forces,
 )
 
@@ -45,4 +49,9 @@ __all__ = [
     "recover_element_end_forces",
     "element_peak_stress",
     "extreme_fibre_distance",
+    # network-level stress aggregation
+    "NetworkStressResult",
+    "element_stress_from_solution",
+    "network_peak_stress",
+    "clamp_stress_from_solution",
 ]

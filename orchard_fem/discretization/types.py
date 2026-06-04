@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from orchard_fem.discretization.beam.types import BeamElementProperties
 
 
 Matrix = list[list[float]]
@@ -26,6 +30,12 @@ class BranchElementState:
     transformation_matrix: Matrix
     length: float
     axial_rigidity: float
+    # Optional fields for stress recovery (see orchard_fem.harvest.stress_recovery).
+    # ``properties`` supplies the local stiffness; the extreme-fibre distances give
+    # ``c_y``/``c_z`` for σ = M·c/I. Defaulted so legacy construction stays valid.
+    properties: "BeamElementProperties | None" = None
+    extreme_fibre_y: float = 0.0
+    extreme_fibre_z: float = 0.0
 
 
 @dataclass(frozen=True)

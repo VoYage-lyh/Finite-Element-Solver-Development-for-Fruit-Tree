@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import fabs
+from math import fabs, sqrt
 
 from orchard_fem.discretization.beam_element import (
     BeamElementProperties,
@@ -220,6 +220,12 @@ class OrchardSystemAssembler:
                         transformation_matrix=transformation,
                         length=element_length,
                         axial_rigidity=axial_rigidity,
+                        properties=properties,
+                        # c_y from I_z (=∫y²dA) and c_z from I_y (circular: c=√(4I/A)).
+                        # Mirrors orchard_fem.harvest.stress_recovery.extreme_fibre_distance
+                        # (kept inline to avoid a discretization→harvest dependency).
+                        extreme_fibre_y=sqrt(4.0 * iz / area) if area > 0.0 else 0.0,
+                        extreme_fibre_z=sqrt(4.0 * iy / area) if area > 0.0 else 0.0,
                     )
                 )
 

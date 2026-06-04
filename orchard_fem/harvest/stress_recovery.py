@@ -44,9 +44,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from orchard_fem.discretization.beam.local_matrices import build_local_stiffness_matrix
 from orchard_fem.discretization.beam.types import BeamElementProperties
+
+if TYPE_CHECKING:
+    from orchard_fem.discretization.types import BranchElementState
 
 Number = complex | float
 
@@ -177,3 +181,128 @@ def element_peak_stress(
     bending_y_stress = (m_y * cz / iy) if iy > 0.0 else 0.0
 
     return axial_stress + bending_z_stress + bending_y_stress
+
+
+# --------------------------------------------------------------------------- #
+# Network-level aggregation
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class NetworkStressResult:
+    """Peak fibre stress over a whole branch network for one solution.
+
+    Parameters
+    ----------
+    peak_stress:
+        Maximum element peak stress over the whole tree [Pa].
+    peak_branch_id / peak_element_index:
+        Where the maximum occurs.
+    per_branch_peak:
+        Maximum element peak stress per branch [Pa].
+    """
+
+    peak_stress: float
+    peak_branch_id: str | None
+    peak_element_index: int | None
+    per_branch_peak: dict[str, float]
+
+
+def _element_local_displacements(
+    element: "BranchElementState",
+    solution: list[Number],
+) -> list[Number]:
+    """Local 12-vector ``u_local = T · u_global[dofs]`` for *element*."""
+    u_global = [solution[d] for d in element.dofs]
+    return _matvec12(element.transformation_matrix, u_global)
+
+
+def element_stress_from_solution(
+    element: "BranchElementState",
+    solution: list[Number],
+) -> float:
+    """Peak fibre stress of one assembled element from a global solution vector.
+
+    *element* must carry ``properties`` and extreme-fibre distances (populated by
+    the assembler); raises ``ValueError`` otherwise.
+    """
+    if element.properties is None:
+        raise ValueError(
+            "BranchElementState has no properties; assemble with stress-recovery "
+            "support to populate them."
+        )
+    u_local = _element_local_displacements(element, solution)
+    return element_peak_stress(
+        element.properties,
+        u_local,
+        c_y=element.extreme_fibre_y or None,
+        c_z=element.extreme_fibre_z or None,
+    )
+
+
+def network_peak_stress(
+    branch_elements: "dict[str, list[BranchElementState]]",
+    solution: list[Number],
+) -> NetworkStressResult:
+    """Peak fibre stress over the whole branch network for a global solution.
+
+    Parameters
+    ----------
+    branch_elements:
+        ``LinearDynamicAssemblyResult.branch_elements`` (per-branch element list).
+    solution:
+        Full global DOF displacement vector (real for static, complex amplitudes
+        for harmonic analysis).
+
+    Returns
+    -------
+    NetworkStressResult
+    """
+    per_branch_peak: dict[str, float] = {}
+    peak_stress = 0.0
+    peak_branch_id: str | None = None
+    peak_element_index: int | None = None
+
+    for branch_id, elements in branch_elements.items():
+        branch_peak = 0.0
+        for element in elements:
+            sigma = element_stress_from_solution(element, solution)
+            if sigma > branch_peak:
+                branch_peak = sigma
+            if sigma > peak_stress:
+                peak_stress = sigma
+                peak_branch_id = branch_id
+                peak_element_index = element.element_index
+        per_branch_peak[branch_id] = branch_peak
+
+    return NetworkStressResult(
+        peak_stress=peak_stress,
+        peak_branch_id=peak_branch_id,
+        peak_element_index=peak_element_index,
+        per_branch_peak=per_branch_peak,
+    )
+
+
+def clamp_stress_from_solution(
+    branch_elements: "dict[str, list[BranchElementState]]",
+    clamp_branch_ids: "set[str] | list[str]",
+    solution: list[Number],
+) -> float:
+    """Peak fibre stress at the clamped branches' root elements [Pa].
+
+    The actuator grip sits at a branch root, so the clamp-tier stress is taken as
+    the maximum peak stress over the root element (``element_index == 0``) of each
+    clamped branch.  Returns 0.0 when no clamped branch is present.
+    """
+    clamp_ids = set(clamp_branch_ids)
+    peak = 0.0
+    for branch_id, elements in branch_elements.items():
+        if branch_id not in clamp_ids:
+            continue
+        for element in elements:
+            if element.element_index != 0:
+                continue
+            sigma = element_stress_from_solution(element, solution)
+            if sigma > peak:
+                peak = sigma
+    return peak
