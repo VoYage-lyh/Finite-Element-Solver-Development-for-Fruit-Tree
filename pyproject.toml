@@ -41,6 +41,10 @@ uq = [
   "SALib>=1.5",
   "tqdm>=4.66",
 ]
+rig = [
+  # DS5L1 vibration-rig serial link (orchard_fem.actuator.ds5l1 / vibration_gui).
+  "pyserial>=3.5",
+]
 ubuntu-test = [
   "pytest>=8.0",
   "pytest-cov>=5.0",

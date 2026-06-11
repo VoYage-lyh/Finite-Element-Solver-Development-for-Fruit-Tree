@@ -1,4 +1,11 @@
 """Fruit harvest detachment analysis."""
+from orchard_fem.harvest.basin import (
+    BasinResult,
+    DuffingElement,
+    compute_basin_ccm,
+    integrity_factor,
+    steady_amplitude,
+)
 from orchard_fem.harvest.detachment import (
     DetachmentResult,
     DetachmentSpectrum,
@@ -54,4 +61,10 @@ __all__ = [
     "element_stress_from_solution",
     "network_peak_stress",
     "clamp_stress_from_solution",
+    # basin of attraction + integrity factor
+    "DuffingElement",
+    "BasinResult",
+    "compute_basin_ccm",
+    "integrity_factor",
+    "steady_amplitude",
 ]
