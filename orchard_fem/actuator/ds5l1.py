@@ -573,6 +573,7 @@ def run_harvest_plan_on_rig(
     limits: DS5L1Limits | None = None,
     calib_path: Path | str | None = None,
     status_cb: Callable[[str], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> str:
     """Execute a simulation-derived :class:`HarvestPlan` on the physical rig.
 
@@ -604,10 +605,14 @@ def run_harvest_plan_on_rig(
     calib_path:
         Frequency-calibration table; defaults to :func:`default_calib_path`.
 
+    should_stop:
+        Polled during the run; returning ``True`` stops early
+        (outcome ``"user_stop"``).
+
     Returns
     -------
     str
-        ``"completed"`` or ``"alarm_stop"``.
+        ``"completed"``, ``"alarm_stop"``, or ``"user_stop"``.
     """
     if (driver is None) == (port is None):
         raise ValueError("Supply exactly one of `port` or `driver`.")
@@ -664,6 +669,7 @@ def run_harvest_plan_on_rig(
             limits=limits,
             on_status=status_cb,
             on_calibrated=remember_calibration,
+            should_stop=should_stop,
         )
     finally:
         if own:

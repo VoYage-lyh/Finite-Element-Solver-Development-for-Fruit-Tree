@@ -181,6 +181,24 @@ def test_execute_completes_and_sequences_calls():
     assert drv.stopped is True
 
 
+def test_execute_user_stop():
+    drv = FakeDriver()
+    polls = {"n": 0}
+
+    def stop_after_two() -> bool:
+        polls["n"] += 1
+        return polls["n"] > 2
+
+    outcome = execute_harvest_plan(
+        _feasible_plan(), drv, calibrate=False,
+        now=lambda: 0.0,                    # never time out → exit only via stop
+        sleep=lambda dt: None,
+        should_stop=stop_after_two,
+    )
+    assert outcome == "user_stop"
+    assert drv.calls[-1] == ("stop",)
+
+
 def test_execute_alarm_stop_still_disables():
     drv = FakeDriver(alarm_after=2)
     outcome = execute_harvest_plan(

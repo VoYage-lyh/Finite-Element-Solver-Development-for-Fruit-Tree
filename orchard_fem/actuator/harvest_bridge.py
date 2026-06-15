@@ -422,9 +422,12 @@ def execute_harvest_plan(
     now: Callable[[], float] = time.monotonic,
     on_status: Callable[[str], None] | None = None,
     on_calibrated: Callable[[CalibrationOutcome], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
     calibration_kwargs: dict | None = None,
 ) -> str:
-    """Drive the rig through one harvest run; returns ``"completed"`` or ``"alarm_stop"``.
+    """Drive the rig through one harvest run.
+
+    Returns ``"completed"``, ``"alarm_stop"``, or ``"user_stop"``.
 
     Sequence (mirrors the verified bring-up): initialise internal-position mode
     while disabled → optional centring → write the ``±S`` segments → start the
@@ -447,6 +450,9 @@ def execute_harvest_plan(
     on_calibrated:
         Called with the :class:`CalibrationOutcome` once calibration finishes —
         e.g. to persist the ``(stroke, frequency) → rpm`` point to a table.
+    should_stop:
+        Polled once per alarm cycle; returning ``True`` ends the run early with
+        outcome ``"user_stop"`` (front-end stop button / e-stop request).
 
     Raises
     ------
@@ -481,6 +487,10 @@ def execute_harvest_plan(
         status(f"Running for {plan.duration_s:g} s…")
         t0 = now()
         while now() - t0 < plan.duration_s:
+            if should_stop is not None and should_stop():
+                outcome = "user_stop"
+                status("Stop requested — stopping.")
+                break
             if driver.alarm() != 0:
                 outcome = "alarm_stop"
                 status("Alarm raised — stopping.")
