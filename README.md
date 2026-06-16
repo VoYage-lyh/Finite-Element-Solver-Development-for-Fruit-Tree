@@ -61,7 +61,7 @@ python -m orchard_fem doctor
 If the environments already exist, typical local usage is:
 
 ```bash
-conda run -n orchard-dev python -m pytest -q tests/integration
+conda run -n orchard-fenicsx python -m pytest -q tests/integration
 conda run -n orchard-fenicsx python -m orchard_fem --help
 ```
 
@@ -172,10 +172,10 @@ See [docs/input_format.md](docs/input_format.md) for the model schema.
 
 ## Testing And Validation
 
-Fast tests in the lightweight environment:
+Python integration tests:
 
 ```bash
-conda run -n orchard-dev python -m pytest -q tests/integration
+conda run -n orchard-fenicsx python -m pytest -q tests/integration
 ```
 
 FEniCSx/PETSc/SLEPc tests:

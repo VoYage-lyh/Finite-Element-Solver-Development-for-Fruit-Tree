@@ -3,39 +3,23 @@ Orchard FEM conda environment commands
 
 Principle
 ---------
-1. Keep `orchard_fem` development centered on the active Orchard FEM package.
-2. Keep the PETSc/SLEPc/FEniCSx stack in its own environment.
-3. Keep PyTorch surrogate / inverse work separable from the solver stack to reduce dependency conflicts.
+1. Keep the high-fidelity solver work (PETSc/SLEPc/FEniCSx) + tests in one main env.
+2. Keep PyTorch surrogate / inverse work separable from the solver stack to reduce dependency conflicts.
 
 
-Environment A: general Python development / tests / plotting
------------------------------------------------------------
-Purpose:
-- Run the primary `orchard_fem` workflow
-- Run Python integration tests
-- Generate plots and benchmark summaries
-
-Command:
-conda create -n orchard-dev -c conda-forge python=3.11 pytest pytest-cov ruff mypy numpy scipy pandas matplotlib pyyaml h5py jupyterlab
-
-Activation:
-conda activate orchard-dev
-
-Optional:
-- If you want PyTorch in this environment too:
-  conda install -n orchard-dev -c pytorch -c conda-forge pytorch
-
-
-Environment B: FEniCSx / PETSc / SLEPc backend
-----------------------------------------------
+Environment A: FEniCSx / PETSc / SLEPc backend (primary)
+-------------------------------------------------------
 Important:
 - Recommended target platform: Ubuntu, WSL2 Ubuntu, or native Linux
-- Treat this as the main high-fidelity solver / verification environment
+- This is the main environment: solver, verification, AND the Python integration
+  tests / plotting / repo scripts / actuator GUI + rig tooling. It carries
+  pytest, ruff, numpy, scipy, matplotlib, pyserial, tkinter alongside FEniCSx.
 
 Purpose:
 - orchard_fem modal / frequency / time solver
 - PETSc / SLEPc eigen and linear solve backend
-- future DOLFINx integration
+- DOLFINx integration
+- run Python integration tests and the actuator console / DS5L1 rig tooling
 
 Command:
 conda env create -f config/fenicsx_pinn_environment.yml
@@ -48,7 +32,7 @@ Optional:
   conda install -n orchard-fenicsx -c pytorch -c conda-forge pytorch
 
 
-Environment C: PyTorch inverse / surrogate
+Environment B: PyTorch inverse / surrogate
 ------------------------------------------
 Purpose:
 - orchard_pinn inverse MVP
@@ -64,9 +48,8 @@ conda activate orchard-ml
 
 Minimal recommended rollout order
 ---------------------------------
-1. Create orchard-dev first
-2. Create orchard-fenicsx inside Ubuntu / WSL2 Ubuntu
-3. Create orchard-ml when you start PINN / surrogate work
+1. Create orchard-fenicsx inside Ubuntu / WSL2 Ubuntu (main env)
+2. Create orchard-ml when you start PINN / surrogate work
 
 
 Post-install checks

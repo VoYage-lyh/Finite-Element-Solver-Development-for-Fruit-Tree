@@ -6,8 +6,7 @@
 #   2. Use this file as the consolidated package/version reference
 #
 # Environment grouping
-#   - orchard-dev: native Windows development, tests, plotting, benchmark scripts
-#   - orchard-fenicsx: WSL2/Linux only, FEniCSx/PETSc/SLEPc backend work
+#   - orchard-fenicsx: WSL2/Linux, FEniCSx/PETSc/SLEPc backend + tests, plotting, scripts
 #   - orchard-ml: PyTorch inverse/surrogate work
 
 # Core development / tests / repo scripts

@@ -14,9 +14,8 @@ def _handle_full_validate(args: argparse.Namespace, application: OrchardApplicat
         repo_root=DEFAULT_REPO_ROOT,
         build_dir=args.build_dir,
         validation_dir=args.validation_dir,
-        orchard_dev_env=args.orchard_dev_env,
         orchard_fenicsx_env=args.orchard_fenicsx_env,
-        skip_dev_tests=args.skip_dev_tests,
+        skip_integration_tests=args.skip_integration_tests,
         skip_fenicsx_tests=args.skip_fenicsx_tests,
         skip_python_demo_suite=args.skip_python_demo_suite,
     )
@@ -33,8 +32,9 @@ def register_full_validate_command(
         "full-validate",
         help="Run the multi-environment Orchard FEM validation workflow.",
         description=(
-            "Run orchard-dev and orchard-fenicsx validation workflows from the package CLI. "
-            "Environment variables such as BUILD_DIR and ORCHARD_FENICSX_ENV are used as defaults."
+            "Run the Orchard FEM integration + verification workflow in the orchard-fenicsx "
+            "environment from the package CLI. Environment variables such as BUILD_DIR and "
+            "ORCHARD_FENICSX_ENV are used as defaults."
         ),
     )
     parser.add_argument(
@@ -50,22 +50,16 @@ def register_full_validate_command(
         help="Validation artifact directory. Defaults to $VALIDATION_DIR or <build>/validation.",
     )
     parser.add_argument(
-        "--orchard-dev-env",
-        type=str,
-        default=defaults.orchard_dev_env,
-        help="Conda environment name for the lightweight Python workflow.",
-    )
-    parser.add_argument(
         "--orchard-fenicsx-env",
         type=str,
         default=defaults.orchard_fenicsx_env,
         help="Conda environment name for the PETSc/SLEPc workflow.",
     )
     parser.add_argument(
-        "--skip-dev-tests",
+        "--skip-integration-tests",
         action="store_true",
-        default=defaults.skip_dev_tests,
-        help="Skip the orchard-dev validation step.",
+        default=defaults.skip_integration_tests,
+        help="Skip the integration-test step.",
     )
     parser.add_argument(
         "--skip-fenicsx-tests",

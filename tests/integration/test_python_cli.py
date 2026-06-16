@@ -226,9 +226,8 @@ def test_python_full_validate_subcommand_shows_help() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "--orchard-dev-env" in result.stdout
     assert "--orchard-fenicsx-env" in result.stdout
-    assert "--skip-dev-tests" in result.stdout
+    assert "--skip-integration-tests" in result.stdout
     assert "--skip-fenicsx-tests" in result.stdout
 
 

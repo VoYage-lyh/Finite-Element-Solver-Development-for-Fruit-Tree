@@ -20,9 +20,8 @@ class FullValidationConfig:
     repo_root: Path
     build_dir: Path
     validation_dir: Path
-    orchard_dev_env: str = "orchard-dev"
     orchard_fenicsx_env: str = "orchard-fenicsx"
-    skip_dev_tests: bool = False
+    skip_integration_tests: bool = False
     skip_fenicsx_tests: bool = False
     skip_python_demo_suite: bool = False
 
@@ -37,9 +36,8 @@ class FullValidationConfig:
             repo_root=resolved_repo_root,
             build_dir=build_dir,
             validation_dir=validation_dir,
-            orchard_dev_env=os.environ.get("ORCHARD_DEV_ENV", "orchard-dev"),
             orchard_fenicsx_env=os.environ.get("ORCHARD_FENICSX_ENV", "orchard-fenicsx"),
-            skip_dev_tests=os.environ.get("SKIP_DEV_TESTS", "0") == "1",
+            skip_integration_tests=os.environ.get("SKIP_INTEGRATION_TESTS", "0") == "1",
             skip_fenicsx_tests=os.environ.get("SKIP_FENICSX_TESTS", "0") == "1",
             skip_python_demo_suite=os.environ.get("SKIP_PYTHON_DEMO_SUITE", "0") == "1",
         )
@@ -61,15 +59,15 @@ def _require_command(command: str) -> None:
 def build_full_validation_steps(config: FullValidationConfig) -> list[FullValidationStep]:
     steps: list[FullValidationStep] = []
 
-    if not config.skip_dev_tests:
+    if not config.skip_integration_tests:
         steps.append(
             FullValidationStep(
-                label="Run orchard-dev Orchard FEM integration tests",
+                label="Run Orchard FEM integration tests (orchard-fenicsx)",
                 command=[
                     "conda",
                     "run",
                     "-n",
-                    config.orchard_dev_env,
+                    config.orchard_fenicsx_env,
                     "python",
                     "-m",
                     "orchard_fem",

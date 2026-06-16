@@ -37,15 +37,12 @@ import random
 import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable
-
-import numpy as np
+from typing import TYPE_CHECKING, Any, Callable
 
 from orchard_fem.actuator.harvest_bridge import DS5L1Limits
-from orchard_fem.recommendation.pareto import (
-    find_knee_min_distance,
-    non_dominated_mask,
-)
+
+if TYPE_CHECKING:  # annotations only — numpy/pareto stay lazy so the package
+    import numpy as np  # (and the CLI) imports without numpy installed
 
 ProgressCb = Callable[[str, float], None]   # (message, fraction 0..1)
 CancelCb = Callable[[], bool]
@@ -354,6 +351,8 @@ def find_in_band_resonance(
     *, prominence_ratio: float = 0.10,
 ) -> tuple[int, bool]:
     """``(peak_index, has_genuine_local_max)`` inside *band* (e2e port)."""
+    import numpy as np
+
     in_band = (freqs >= band[0]) & (freqs <= band[1])
     if not in_band.any():
         raise RuntimeError(f"No FRF samples in {band[0]}–{band[1]} Hz; widen the sweep.")
@@ -382,6 +381,8 @@ def find_in_band_peaks(
     *, prominence_ratio: float = 0.10, min_separation_hz: float = 5.0, max_peaks: int = 2,
 ) -> list[int]:
     """Indices of up to *max_peaks* prominent, well-separated in-band local maxima."""
+    import numpy as np
+
     in_band = (freqs >= band[0]) & (freqs <= band[1])
     log_mags = np.log(np.maximum(mags, 1.0e-20))
     is_local_max = np.zeros(mags.size, dtype=bool)
@@ -443,6 +444,8 @@ def rig_feasible(frequency_hz: float, amplitude_mm: float, limits: DS5L1Limits) 
 
 def _default_frf_sweep(model: Any, f_min: float, f_max: float, steps: int):
     """Mean tip-|H| spectrum via the FEniCSx solver (e2e ``_coarse_frf_sweep``)."""
+    import numpy as np
+
     from orchard_fem.fenicsx.frequency_response import (
         solve_embedded_beam_frequency_response_experiment,
     )
@@ -514,6 +517,13 @@ def recommend_harvest_parameters(
     RecommendationResult
         Including the decision trace (:attr:`~RecommendationResult.steps`).
     """
+    import numpy as np
+
+    from orchard_fem.recommendation.pareto import (
+        find_knee_min_distance,
+        non_dominated_mask,
+    )
+
     opt = options or RecommendationOptions()
     sweep = frf_sweep or _default_frf_sweep
     make_evaluator = evaluator_factory or _default_evaluator_factory
