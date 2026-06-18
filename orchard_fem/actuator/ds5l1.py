@@ -41,7 +41,9 @@ from typing import Callable
 from orchard_fem.actuator.harvest_bridge import (
     DS5L1Limits,
     HarvestPlan,
+    HarvestSchedule,
     execute_harvest_plan,
+    execute_harvest_schedule,
 )
 
 # ---------------- 常量(来自 DS5L1 手册附录4 Modbus 地址表) ----------------
@@ -570,12 +572,19 @@ def run_harvest_plan_on_rig(
     home: bool = True,
     home_offset_mm: float = 25.8,
     home_reverse: bool = False,
+    calibrate: bool = False,
     limits: DS5L1Limits | None = None,
     calib_path: Path | str | None = None,
     status_cb: Callable[[str], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> str:
     """Execute a simulation-derived :class:`HarvestPlan` on the physical rig.
+
+    ``calibrate`` is **off by default**: the rig vibrates for exactly
+    ``plan.duration_s``.  Online frequency calibration (``measure_freq``) would
+    add 5–23 s of un-counted vibration, so it is opt-in — enable it only to
+    populate the calibration table for a new ``(S, f)`` point.  The segment rpm
+    is always seeded from the table when a matching entry exists.
 
     完整联动链:仿真优化器 → :func:`~orchard_fem.actuator.harvest_bridge.
     plan_harvest_execution` 翻译为 ``HarvestPlan`` → 本函数在真机上执行。
@@ -663,11 +672,127 @@ def run_harvest_plan_on_rig(
                 save_calib(calib, calib_path)
                 status(f"Calibration point saved: {key} → {cal.rpm:.0f} rpm.")
 
+        if not calibrate:
+            status(f"Online calibration off — running exactly {plan.duration_s:g} s "
+                   f"at {plan.seed_rpm:.0f} rpm.")
         return execute_harvest_plan(
             plan, drv,
             home=home_cb,
+            calibrate=calibrate,
             limits=limits,
             on_status=status_cb,
+            on_calibrated=remember_calibration,
+            should_stop=should_stop,
+        )
+    finally:
+        if own:
+            drv.close()
+
+
+def run_harvest_schedule_on_rig(
+    schedule: HarvestSchedule,
+    *,
+    port: str | None = None,
+    driver: DS5L1 | None = None,
+    baud: int = 19200,
+    parity: str = "E",
+    stopbits: int = 1,
+    home: bool = True,
+    home_offset_mm: float = 25.8,
+    home_reverse: bool = False,
+    calibrate: bool = False,
+    limits: DS5L1Limits | None = None,
+    calib_path: Path | str | None = None,
+    status_cb: Callable[[str], None] | None = None,
+    on_stage: Callable | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> str:
+    """Execute a multi-stage :class:`HarvestSchedule` on the physical rig.
+
+    ``calibrate`` is **off by default** (each stage runs exactly its own
+    ``duration_s``); enable it only to populate the calibration table.
+
+    The staged-adjustment-sequence counterpart of :func:`run_harvest_plan_on_rig`:
+    connect → pre-clear alarms → init → home once → run every stage in order via
+    :func:`~orchard_fem.actuator.harvest_bridge.execute_harvest_schedule`
+    (drive started once, segments rewritten live between stages).  Each stage is
+    seeded from its own ``(S, f)`` calibration-table entry when present, and its
+    converged calibration point is saved back.
+
+    Returns ``"completed"``, ``"alarm_stop"``, or ``"user_stop"``.
+    """
+    if (driver is None) == (port is None):
+        raise ValueError("Supply exactly one of `port` or `driver`.")
+    if not schedule.feasible:
+        raise ValueError("Refusing an infeasible/empty schedule:\n" + schedule.summary())
+
+    def status(msg: str) -> None:
+        if status_cb is not None:
+            status_cb(msg)
+
+    own = driver is None
+    drv = driver or DS5L1()
+    if own:
+        status(f"Connecting to {port} ({baud}-8-{parity}-{stopbits})…")
+        drv.connect(port, baud, parity, stopbits)
+    try:
+        alm = drv.alarm()
+        if alm:
+            status(f"Active alarm E-{alm:03d}; attempting clear…")
+            alm = drv.clear_alarm()
+            if alm:
+                raise IOError(f"Alarm E-{alm:03d} cannot be auto-cleared; "
+                              f"investigate before running (E-161 = overload/stall).")
+
+        # Seed each stage from its own (S, f) calibration-table entry.
+        calib = load_calib(calib_path)
+        seeded: list = []
+        for stage in schedule.stages:
+            key = calib_key(stage.plan.stroke_mm, stage.plan.frequency_hz)
+            cached = calib.get(key)
+            plan = (dataclasses.replace(stage.plan, seed_rpm=float(cached["rpm"]))
+                    if cached else stage.plan)
+            seeded.append(dataclasses.replace(stage, plan=plan))
+        schedule = dataclasses.replace(schedule, stages=tuple(seeded))
+
+        home_cb: Callable[[], None] | None = None
+        if home:
+            if drv.setup_homing(home_offset_mm, home_reverse):
+                raise RuntimeError(
+                    "Homing (P9-21) was enabled for the first time and only takes "
+                    "effect after a drive power cycle. Power-cycle the drive, then rerun.")
+
+            def home_cb() -> None:
+                drv.home_center(status_cb=status_cb)
+
+        # Track the active stage so calibration is saved under the right (S, f).
+        active: dict = {"key": None, "accel": 10}
+
+        def stage_cb(stage) -> None:
+            active["key"] = calib_key(stage.plan.stroke_mm, stage.plan.frequency_hz)
+            active["accel"] = stage.plan.accel_ms
+            if on_stage is not None:
+                on_stage(stage)
+
+        def remember_calibration(cal) -> None:
+            if cal.converged and cal.measured_hz is not None and active["key"]:
+                calib[active["key"]] = {"rpm": round(cal.rpm, 1),
+                                        "f_act": round(cal.measured_hz, 3),
+                                        "accel": active["accel"],
+                                        "date": time.strftime("%Y-%m-%d")}
+                save_calib(calib, calib_path)
+                status(f"Calibration point saved: {active['key']} → {cal.rpm:.0f} rpm.")
+
+        if not calibrate:
+            status(f"Online calibration off — stages run exactly their durations "
+                   f"({schedule.total_duration_s:.1f} s total).")
+        return execute_harvest_schedule(
+            schedule, drv,
+            home=home_cb,
+            calibrate=calibrate,
+            limits=limits,
+            on_status=status_cb,
+            on_stage=stage_cb,
             on_calibrated=remember_calibration,
             should_stop=should_stop,
         )

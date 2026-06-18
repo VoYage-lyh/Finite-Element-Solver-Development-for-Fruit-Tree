@@ -1,24 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Harvest Console — 整链交互前端:树模型 → 仿真推荐 → 执行计划 → 电动缸执行.
+"""Harvest Console — 整链交互前端:树模型 → 仿真 → 电动缸执行.
 
-四步流程(Notebook 标签页),共享底部日志:
+三步流程(Notebook 标签页),共享底部日志:
 
 ① **树模型** — 选择 tree JSON(``trees/*.json``),加载并显示主要参数
    (:func:`orchard_fem.workflows.harvest_recommendation.summarize_orchard_model`)。
-② **仿真推荐** — 后台线程运行
+② **仿真** — 后台线程一键跑完整条流水线:
    :func:`~orchard_fem.workflows.harvest_recommendation.recommend_harvest_parameters`
-   (FRF 扫频 → 共振 → 夹持×(f,A) Pareto,**叠加电动缸包络硬约束**),
-   实时显示进度与调节步骤;结果表列出全部候选工作点(前沿/knee 标记),
-   选中即可送入计划;可导出/导入 JSON(离线机仅执行)。
-③ **执行计划** — 工作参数 → :class:`~orchard_fem.actuator.harvest_bridge.HarvestPlan`
-   (行程/转速/周期数 + 可行性);「收紧到包络」一键自动调整越界参数。
-④ **电动缸执行** — 串口连接、清报警、回中设置;执行 =
-   :func:`~orchard_fem.actuator.ds5l1.run_harvest_plan_on_rig`
-   (标定缓存起步 + 在线频率标定 + 报警轮询),停止按钮立即断使能;
+   (FRF 扫频 → 共振 → 夹持×(f,A) Pareto,**叠加电动缸包络硬约束**)定出最佳夹持,
+   随后自动在其上构建**调参序列**
+   (:func:`~orchard_fem.workflows.harvest_schedule.compute_harvest_schedule`:一次激振
+   够不够、不够就分阶段;每阶段时长由疲劳模型算)。结果表 + 推荐/序列两面板并排显示。
+③ **执行** — 串口连接、清报警、回中,一个 RUN 把②的序列在电动缸上逐阶段跑
+   (:func:`~orchard_fem.actuator.ds5l1.run_harvest_schedule_on_rig`),STOP 立即断使能;
    每次运行归档至 ``results/harvest_runs/``。
 
-运行:``python -m orchard_fem.actuator.harvest_console``
-(仿真需 dolfinx;无 dolfinx 的执行机可加载已导出的推荐 JSON 走 ③④。)
+运行:``python -m orchard_fem.actuator.harvest_console``(仿真需 dolfinx)。
 """
 from __future__ import annotations
 
@@ -33,12 +30,8 @@ from importlib import util as _importlib_util
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from orchard_fem.actuator.ds5l1 import DS5L1, run_harvest_plan_on_rig
-from orchard_fem.actuator.harvest_bridge import (
-    DS5L1Limits,
-    HarvestPlan,
-    plan_harvest_execution,
-)
+from orchard_fem.actuator.ds5l1 import DS5L1, run_harvest_schedule_on_rig
+from orchard_fem.actuator.harvest_bridge import DS5L1Limits
 from orchard_fem.workflows.harvest_recommendation import (
     RecommendationOptions,
     RecommendationResult,
@@ -51,7 +44,28 @@ TREES_DIR = REPO_ROOT / "trees"
 RUNS_DIR = REPO_ROOT / "results" / "harvest_runs"
 
 LIMITS = DS5L1Limits()
- 
+
+# Flat modern palette (forestry-green accent), used across the whole console.
+PALETTE = {
+    "bg": "#eef2f0",          # window background (cool light grey-green)
+    "surface": "#ffffff",     # cards / inputs / tables
+    "surface_alt": "#f3f6f4", # subtle alternate fill (tabs, headings)
+    "border": "#d4ddd8",
+    "text": "#1f2a24",
+    "muted": "#5f6f67",
+    "primary": "#2e7d32",     # primary action / accent (green)
+    "primary_dark": "#1b5e20",
+    "primary_hover": "#388e3c",
+    "primary_soft": "#e3efe5",
+    "accent": "#1565c0",      # schedule action (blue)
+    "accent_hover": "#1976d2",
+    "danger": "#c62828",      # stop
+    "danger_hover": "#d32f2f",
+    "on_dark": "#eaf3ec",
+    "disabled_fg": "#b9c4be",
+    "sel": "#cdeccf",
+}
+
 
 def _has(module: str) -> bool:
     return _importlib_util.find_spec(module) is not None
@@ -88,7 +102,13 @@ class HarvestConsole:
         self.model = None
         self.model_path: Path | None = None
         self.result: RecommendationResult | None = None
-        self.plan: HarvestPlan | None = None
+        self.schedule = None                       # HarvestSchedule (the executable artifact)
+        self._hlabels: dict = {}                   # branch_id → hierarchical label (T/1/1.1)
+        self._clamp_raw: list = []                 # raw "branch_id@s" aligned with the clamp list
+        self._fig_imgs: dict = {}                  # keep PhotoImage refs alive
+        self._fig_src: dict = {}                   # label → source PIL image (for rescale)
+        self._fig_fitsize: dict = {}               # label → last fitted (w, h)
+        self._fig_dir = None                       # temp dir for rendered topology PNGs
         self.drv = DS5L1()
         self._q: queue.Queue = queue.Queue()
         self._sim_cancel = threading.Event()
@@ -96,46 +116,161 @@ class HarvestConsole:
         self._sim_running = False
         self._rig_running = False
 
-        root.title("Orchard Harvest Console — 仿真 → DS5L1 执行")
-        root.minsize(980, 720)
+        root.title("Orchard Harvest Console — Simulation → DS5L1 Execution")
+        root.geometry("1180x720")               # landscape rectangle, compact
+        root.minsize(1040, 640)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.ui_font = _pick_ui_font(root)
-        style = ttk.Style()
-        try:
-            style.theme_use("vista")
-        except tk.TclError:
-            pass
-        style.configure("TLabelframe.Label", font=(self.ui_font, 9, "bold"),
-                        foreground="#1b5e20")
-        style.configure("Knee.Treeview", background="#e8f5e9")
+        self._setup_style(ttk.Style())
+        p = PALETTE
 
-        header = tk.Frame(root, bg="#1b5e20")
+        # --- header band: title + flow (left), lab identity (right) ---
+        header = tk.Frame(root, bg=p["primary_dark"])
         header.pack(fill="x")
-        tk.Label(header, text="Orchard Harvest Console",
-                 font=(self.ui_font, 14, "bold"), bg="#1b5e20", fg="white",
-                 ).pack(pady=(8, 0))
-        env = (f"dolfinx {'✓' if _has('dolfinx') else '✗(仅可加载已导出结果)'}   "
-               f"pyserial {'✓' if _has('serial') else '✗(无法连接电动缸)'}")
-        tk.Label(header, text=env, font=(self.ui_font, 9),
-                 bg="#1b5e20", fg="#c8e6c9").pack(pady=(0, 6))
+        left = tk.Frame(header, bg=p["primary_dark"])
+        left.pack(side="left", anchor="w", padx=14, pady=6)
+        tk.Label(left, text="Orchard Harvest Console",
+                 font=(self.ui_font, 17, "bold"), bg=p["primary_dark"], fg="white",
+                 ).pack(anchor="w")
+        tk.Label(left, text="Tree model  →  Simulation  →  Execution (plan / schedule)",
+                 font=(self.ui_font, 10), bg=p["primary_dark"], fg=p["on_dark"],
+                 ).pack(anchor="w")
+        tk.Label(header,
+                 text="Key Laboratory of State Forestry Administration\n"
+                      "on Forestry Equipment and Automation",
+                 font=(self.ui_font, 10, "bold"), justify="right",
+                 bg=p["primary_dark"], fg=p["on_dark"],
+                 ).pack(side="right", anchor="e", padx=14, pady=6)
+        env = (f"dolfinx {'✓' if _has('dolfinx') else '✗ load exported results only'}     "
+               f"pyserial {'✓' if _has('serial') else '✗ actuator connection unavailable'}")
+        tk.Label(root, text=env, font=(self.ui_font, 9), bg=p["surface_alt"],
+                 fg=p["muted"], anchor="w", padx=14,
+                 ).pack(fill="x")
+
+        # --- shared progress + log ---
+        # Reserve the bottom panel BEFORE the notebook (side="bottom"), so it can
+        # never be squeezed off-screen when a tab's content is tall.
+        bottom = ttk.Frame(root, padding=(8, 2, 8, 6))
+        bottom.pack(side="bottom", fill="x")
+        ttk.Label(bottom, text="Log / progress", style="Muted.TLabel").pack(anchor="w")
+        self.progress = ttk.Progressbar(bottom, maximum=1.0)
+        self.progress.pack(fill="x", pady=(2, 4))
+        self.log_text = tk.Text(bottom, height=7, state="disabled",
+                                font=("Consolas", 10), bg=p["surface"], fg=p["text"],
+                                relief="flat", borderwidth=0, highlightthickness=1,
+                                highlightbackground=p["border"], padx=8, pady=5)
+        self.log_text.pack(fill="both", expand=True)
 
         self.nb = ttk.Notebook(root)
-        self.nb.pack(fill="both", expand=True, padx=6, pady=4)
+        self.nb.pack(side="top", fill="both", expand=True, padx=6, pady=(4, 2))
         self._build_tab_model()
         self._build_tab_sim()
-        self._build_tab_plan()
-        self._build_tab_rig()
-
-        bottom = ttk.Frame(root)
-        bottom.pack(fill="x", padx=6, pady=(0, 6))
-        self.progress = ttk.Progressbar(bottom, maximum=1.0)
-        self.progress.pack(fill="x")
-        self.log_text = tk.Text(bottom, height=9, state="disabled",
-                                font=("Consolas", 9), bg="#fafafa")
-        self.log_text.pack(fill="both", expand=True, pady=(3, 0))
+        self._build_tab_rig()       # ③ Execution (working point + plan + run)
 
         self.root.after(100, self._pump)
+
+    # ------------------------------------------------------------------ #
+    # 主题与控件样式
+    # ------------------------------------------------------------------ #
+
+    def _setup_style(self, style: ttk.Style) -> None:
+        """Flat, modern restyle of the (Linux/WSL) ttk theme."""
+        p, f = PALETTE, self.ui_font
+        try:
+            style.theme_use("clam")          # restylable on every platform
+        except tk.TclError:
+            pass
+        self.root.configure(bg=p["bg"])
+        style.configure(".", background=p["bg"], foreground=p["text"],
+                        fieldbackground=p["surface"], bordercolor=p["border"],
+                        focuscolor=p["primary"], font=(f, 11))
+        style.configure("TFrame", background=p["bg"])
+        style.configure("TLabel", background=p["bg"], foreground=p["text"], font=(f, 11))
+        style.configure("Muted.TLabel", background=p["bg"], foreground=p["muted"])
+        style.configure("Heading.TLabel", background=p["bg"],
+                        foreground=p["primary_dark"], font=(f, 12, "bold"))
+        style.configure("TLabelframe", background=p["bg"], bordercolor=p["border"],
+                        relief="solid", borderwidth=1, padding=5)
+        style.configure("TLabelframe.Label", background=p["bg"],
+                        foreground=p["primary_dark"], font=(f, 11, "bold"))
+        # buttons — subtle default + green accent variant
+        style.configure("TButton", background=p["surface"], foreground=p["text"],
+                        bordercolor=p["border"], relief="flat", borderwidth=1,
+                        padding=(10, 5), font=(f, 11))
+        style.map("TButton",
+                  background=[("pressed", p["primary_soft"]),
+                              ("active", p["surface_alt"]),
+                              ("disabled", p["surface_alt"])],
+                  bordercolor=[("active", p["primary"])],
+                  foreground=[("disabled", p["disabled_fg"])])
+        style.configure("Accent.TButton", background=p["primary"],
+                        foreground="white", bordercolor=p["primary"],
+                        borderwidth=0, padding=(12, 6), font=(f, 11, "bold"))
+        style.map("Accent.TButton",
+                  background=[("pressed", p["primary_dark"]),
+                              ("active", p["primary_hover"]),
+                              ("disabled", p["surface_alt"])],
+                  foreground=[("disabled", p["disabled_fg"])])
+        # inputs
+        for w in ("TEntry", "TSpinbox", "TCombobox"):
+            style.configure(w, fieldbackground=p["surface"], background=p["surface"],
+                            bordercolor=p["border"], borderwidth=1, relief="flat",
+                            padding=3, arrowcolor=p["muted"], font=(f, 11))
+        style.map("TCombobox", fieldbackground=[("readonly", p["surface"])],
+                  bordercolor=[("focus", p["primary"])])
+        style.configure("TCheckbutton", background=p["bg"], foreground=p["text"], font=(f, 11))
+        style.configure("TRadiobutton", background=p["bg"], foreground=p["text"], font=(f, 11))
+        style.map("TCheckbutton", background=[("active", p["bg"])])
+        style.map("TRadiobutton", background=[("active", p["bg"])])
+        # notebook tabs
+        style.configure("TNotebook", background=p["bg"], borderwidth=0,
+                        tabmargins=(2, 4, 2, 0))
+        style.configure("TNotebook.Tab", background=p["surface_alt"],
+                        foreground=p["muted"], padding=(16, 7),
+                        font=(f, 11, "bold"), borderwidth=0)
+        style.map("TNotebook.Tab",
+                  background=[("selected", p["surface"]), ("active", p["primary_soft"])],
+                  foreground=[("selected", p["primary_dark"])])
+        # table
+        style.configure("Treeview", background=p["surface"],
+                        fieldbackground=p["surface"], foreground=p["text"],
+                        rowheight=28, borderwidth=0, relief="flat", font=(f, 10))
+        style.configure("Treeview.Heading", background=p["surface_alt"],
+                        foreground=p["muted"], font=(f, 10, "bold"),
+                        relief="flat", padding=5, borderwidth=0)
+        style.map("Treeview.Heading", background=[("active", p["primary_soft"])])
+        style.map("Treeview", background=[("selected", p["sel"])],
+                  foreground=[("selected", p["text"])])
+        # progressbar + scrollbar
+        style.configure("TProgressbar", troughcolor=p["border"],
+                        background=p["primary"], bordercolor=p["border"],
+                        lightcolor=p["primary"], darkcolor=p["primary"],
+                        thickness=10, borderwidth=0)
+        style.configure("Vertical.TScrollbar", background=p["surface_alt"],
+                        troughcolor=p["bg"], bordercolor=p["bg"],
+                        arrowcolor=p["muted"], relief="flat", borderwidth=0)
+        style.map("Vertical.TScrollbar", background=[("active", p["border"])])
+
+    def _big_button(self, parent, text, base, hover, command):
+        """A flat, filled accent button (classic tk) with hover feedback."""
+        btn = tk.Button(parent, text=text, font=(self.ui_font, 14, "bold"),
+                        bg=base, fg="white", activebackground=hover,
+                        activeforeground="white", relief="flat", bd=0,
+                        highlightthickness=0, cursor="hand2",
+                        disabledforeground=PALETTE["disabled_fg"],
+                        state="disabled", command=command)
+
+        def on_enter(_e):
+            if str(btn["state"]) != "disabled":
+                btn.configure(bg=hover)
+
+        def on_leave(_e):
+            btn.configure(bg=base)
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
 
     # ------------------------------------------------------------------ #
     # 共享:日志 / 队列泵
@@ -146,6 +281,64 @@ class HarvestConsole:
         self.log_text.insert("end", f"{time.strftime('%H:%M:%S')}  {msg}\n")
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+
+    def _notify(self, title: str, msg: str, *, warn: bool = False) -> None:
+        """Surface a message in the always-visible log AND a fronted dialog.
+
+        On WSL/Linux a bare modal messagebox can open *behind* the main window
+        and grab input, making the app look frozen — so we also write to the log
+        and parent + lift the dialog so it actually shows.
+        """
+        self.log(f"⚠ {msg.splitlines()[0]}")
+        try:
+            self.root.lift()
+            self.root.focus_force()
+            (messagebox.showwarning if warn else messagebox.showerror)(
+                title, msg, parent=self.root)
+        except Exception:  # noqa: BLE001 - dialog must never break the flow
+            pass
+
+    def _confirm(self, title: str, body: str, *, ok_text: str = "Proceed") -> bool:
+        """Modal Yes/No dialog showing *body* in a monospace, content-sized box.
+
+        Used instead of ``messagebox.askyesno`` for plan/schedule summaries, whose
+        aligned tables wrap badly in the proportional-font system dialog.
+        """
+        p = PALETTE
+        lines = body.splitlines() or [""]
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.configure(bg=p["bg"])
+        win.transient(self.root)
+        win.resizable(False, False)
+        ttk.Label(win, text=title, style="Heading.TLabel").pack(
+            anchor="w", padx=14, pady=(12, 4))
+        txt = tk.Text(win, font=("Consolas", 10), bg=p["surface"], fg=p["text"],
+                      relief="flat", borderwidth=0, highlightthickness=1,
+                      highlightbackground=p["border"], padx=10, pady=8,
+                      width=min(max(len(x) for x in lines) + 2, 80),
+                      height=min(len(lines), 22))
+        txt.insert("end", body)
+        txt.configure(state="disabled")
+        txt.pack(fill="both", expand=True, padx=14, pady=4)
+        result = {"ok": False}
+        btns = ttk.Frame(win)
+        btns.pack(fill="x", padx=14, pady=(4, 12))
+
+        def _yes() -> None:
+            result["ok"] = True
+            win.destroy()
+
+        ttk.Button(btns, text=ok_text, style="Accent.TButton", command=_yes,
+                   ).pack(side="right", padx=4)
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="right", padx=4)
+        win.bind("<Escape>", lambda _e: win.destroy())
+        win.update_idletasks()
+        win.lift()
+        win.focus_force()
+        win.grab_set()
+        self.root.wait_window(win)
+        return result["ok"]
 
     def _post(self, kind: str, payload) -> None:
         self._q.put((kind, payload))
@@ -160,6 +353,10 @@ class HarvestConsole:
                     self.progress["value"] = payload
                 elif kind == "sim_done":
                     self._on_sim_done(payload)
+                elif kind == "sched_done":
+                    self._on_sched_done(payload)
+                elif kind == "figs_done":
+                    self._show_figures(payload)
                 elif kind == "rig_done":
                     self._on_rig_done(payload)
         except queue.Empty:
@@ -172,21 +369,32 @@ class HarvestConsole:
 
     def _build_tab_model(self) -> None:
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text=" ① 树模型 ")
+        self.nb.add(tab, text="  ① Tree Model  ")
         row = ttk.Frame(tab)
-        row.pack(fill="x", padx=8, pady=8)
+        row.pack(fill="x", padx=6, pady=4)
         self.var_model_path = tk.StringVar()
-        ttk.Label(row, text="模型 JSON:").pack(side="left")
+        ttk.Label(row, text="Model JSON:").pack(side="left")
         ttk.Entry(row, textvariable=self.var_model_path).pack(
             side="left", fill="x", expand=True, padx=6)
-        ttk.Button(row, text="浏览…", command=self.on_browse_model).pack(side="left")
-        ttk.Button(row, text="加载", command=self.on_load_model).pack(side="left", padx=6)
+        ttk.Button(row, text="Browse…", command=self.on_browse_model).pack(side="left")
+        ttk.Button(row, text="Load", command=self.on_load_model).pack(side="left", padx=6)
 
-        box = ttk.LabelFrame(tab, text="模型主要参数")
-        box.pack(fill="both", expand=True, padx=8, pady=4)
-        self.model_info = tk.Text(box, state="disabled", font=(self.ui_font, 10),
-                                  bg="#fcfcfc")
-        self.model_info.pack(fill="both", expand=True, padx=4, pady=4)
+        box = ttk.LabelFrame(tab, text="Model summary")
+        box.pack(fill="x", padx=6, pady=3)
+        self.model_info = tk.Text(box, state="disabled", height=9, font=(self.ui_font, 11),
+                                  bg=PALETTE["surface"], fg=PALETTE["text"],
+                                  relief="flat", borderwidth=0, highlightthickness=1,
+                                  highlightbackground=PALETTE["border"], padx=10, pady=8)
+        self.model_info.pack(fill="x", padx=4, pady=4)
+
+        figs = ttk.LabelFrame(tab, text="Topology (branch labels match ② clamp points)")
+        figs.pack(fill="both", expand=True, padx=6, pady=3)
+        self.fig2d = ttk.Label(figs, text="2D side view — load a model to render",
+                               anchor="center", style="Muted.TLabel")
+        self.fig2d.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        self.fig3d = ttk.Label(figs, text="3D view — load a model to render",
+                               anchor="center", style="Muted.TLabel")
+        self.fig3d.pack(side="left", fill="both", expand=True, padx=4, pady=4)
 
     def on_browse_model(self) -> None:
         path = filedialog.askopenfilename(
@@ -199,33 +407,100 @@ class HarvestConsole:
     def on_load_model(self) -> None:
         path = self.var_model_path.get().strip()
         if not path:
-            messagebox.showwarning("提示", "请先选择模型 JSON 文件")
+            messagebox.showwarning("Notice", "Select a model JSON file first.")
             return
         try:
             from orchard_fem.io.loaders import load_orchard_model
             self.model = load_orchard_model(path)
             self.model_path = Path(path)
         except Exception as e:  # noqa: BLE001
-            messagebox.showerror("加载失败", str(e))
-            self.log(f"模型加载失败: {e}")
+            messagebox.showerror("Load failed", str(e))
+            self.log(f"Model load failed: {e}")
             return
         summary = summarize_orchard_model(self.model, path)
         self.model_info.configure(state="normal")
         self.model_info.delete("1.0", "end")
         self.model_info.insert("end", "\n".join(summary.lines()))
         self.model_info.configure(state="disabled")
-        # 夹持候选自动填入仿真页
+        # hierarchical branch labels (T / 1 / 1.1 …) — shared with the topology figures
         try:
-            labels = candidate_clamp_labels(self.model, RecommendationOptions())
-        except Exception:  # noqa: BLE001 - 无 trunk 命名时回退到各枝根部
-            labels = [f"{b.branch_id}@0.00" for b in self.model.branches]
+            import json
+            from orchard_fem.visualization.model_scene import hierarchical_labels
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            self._hlabels = hierarchical_labels(raw.get("branches", []))
+        except Exception:  # noqa: BLE001
+            raw, self._hlabels = None, {}
+        # candidate clamps: keep raw "branch_id@s" for execution, show hierarchical label
+        try:
+            raw_labels = candidate_clamp_labels(self.model, RecommendationOptions())
+        except Exception:  # noqa: BLE001 - no "trunk" node → fall back to each branch root
+            raw_labels = [f"{b.branch_id}@0.00" for b in self.model.branches]
+        self._clamp_raw = list(raw_labels)
         self.clamp_list.delete(0, "end")
-        for label in labels:
-            self.clamp_list.insert("end", label)
+        for raw_label in raw_labels:
+            self.clamp_list.insert("end", self._display_clamp(raw_label))
         self.clamp_list.selection_set(0, "end")
-        self.log(f"已加载模型 {summary.name}({summary.n_branches} 枝, "
-                 f"{summary.n_fruits} 果)")
-        self.nb.select(1)
+        if raw is not None:
+            self._render_topology(raw)
+        self.log(f"Model loaded: {summary.name} "
+                 f"({summary.n_branches} branches, {summary.n_fruits} fruits)")
+
+    def _display_clamp(self, raw: str) -> str:
+        """Raw 'branch_id@s' → 'hlabel@s' (hierarchical label matching the figures)."""
+        if "@" in raw:
+            bid, s = raw.split("@", 1)
+            return f"{self._hlabels.get(bid, bid)}@{s}"
+        return self._hlabels.get(raw, raw)
+
+    def _render_topology(self, raw: dict) -> None:
+        """Render 2D + 3D topology PNGs in the background, then show them in ①."""
+        self.fig2d.configure(text="Rendering 2D…", image="")
+        self.fig3d.configure(text="Rendering 3D…", image="")
+        if self._fig_dir is None:
+            import tempfile
+            self._fig_dir = tempfile.mkdtemp(prefix="orchard_topology_")
+        p2d = str(Path(self._fig_dir) / "topology_2d.png")
+        p3d = str(Path(self._fig_dir) / "topology_3d.png")
+
+        def worker() -> None:
+            try:
+                from orchard_fem.visualization.rendering import plot_geometry
+                from orchard_fem.visualization.scene3d import plot_tree_3d
+                plot_geometry(raw, Path(p2d), show=False)
+                plot_tree_3d(raw, show=False, output_path=p3d)
+                try:
+                    import matplotlib.pyplot as plt
+                    plt.close("all")
+                except Exception:  # noqa: BLE001
+                    pass
+                self._post("figs_done", (p2d, p3d))
+            except Exception as e:  # noqa: BLE001
+                self._post("figs_done", e)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_figures(self, payload) -> None:
+        if isinstance(payload, Exception):
+            self.fig2d.configure(text=f"2D render failed:\n{payload}", image="")
+            self.fig3d.configure(text="", image="")
+            self.log(f"Topology render failed: {payload}")
+            return
+        p2d, p3d = payload
+        try:
+            from PIL import Image, ImageTk
+        except Exception as e:  # noqa: BLE001
+            self.fig2d.configure(text=f"Pillow unavailable: {e}", image="")
+            return
+        for label, path in ((self.fig2d, p2d), (self.fig3d, p3d)):
+            try:
+                img = Image.open(path)
+                img.thumbnail((520, 520))
+                photo = ImageTk.PhotoImage(img)
+                self._fig_imgs[path] = photo       # keep a ref so Tk doesn't GC it
+                label.configure(image=photo, text="")
+            except Exception as e:  # noqa: BLE001
+                label.configure(text=f"render failed: {e}", image="")
+        self.log("Topology rendered (2D + 3D).")
 
     # ------------------------------------------------------------------ #
     # ② 仿真推荐
@@ -233,10 +508,10 @@ class HarvestConsole:
 
     def _build_tab_sim(self) -> None:
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text=" ② 仿真推荐 ")
+        self.nb.add(tab, text="  ② Simulation  ")
 
-        opts = ttk.LabelFrame(tab, text="仿真设置")
-        opts.pack(fill="x", padx=8, pady=6)
+        opts = ttk.LabelFrame(tab, text="Simulation settings")
+        opts.pack(fill="x", padx=6, pady=4)
         pad = dict(padx=4, pady=3)
         self.var_band_lo = tk.DoubleVar(value=3.0)
         self.var_band_hi = tk.DoubleVar(value=20.0)
@@ -245,59 +520,80 @@ class HarvestConsole:
         self.var_dense = tk.BooleanVar(value=True)
         self.var_spacing = tk.DoubleVar(value=0.05)
         self.var_ddet = tk.DoubleVar(value=2.0)
-        self.var_duration = tk.DoubleVar(value=10.0)
+        self.var_ncycles = tk.DoubleVar(value=50.0)
         self.var_coverage = tk.StringVar(value="branch")
 
         g = ttk.Frame(opts)
         g.pack(fill="x")
-        ttk.Label(g, text="频带 Hz").grid(row=0, column=0, **pad)
+        ttk.Label(g, text="Band (Hz)").grid(row=0, column=0, **pad)
         ttk.Entry(g, textvariable=self.var_band_lo, width=5).grid(row=0, column=1, **pad)
         ttk.Label(g, text="–").grid(row=0, column=2)
         ttk.Entry(g, textvariable=self.var_band_hi, width=5).grid(row=0, column=3, **pad)
-        ttk.Label(g, text="扫频步数").grid(row=0, column=4, **pad)
+        ttk.Label(g, text="Sweep steps").grid(row=0, column=4, **pad)
         ttk.Entry(g, textvariable=self.var_steps, width=5).grid(row=0, column=5, **pad)
-        ttk.Label(g, text="幅值候选 A (mm)").grid(row=0, column=6, **pad)
+        ttk.Label(g, text="Amplitude A (mm)").grid(row=0, column=6, **pad)
         ttk.Entry(g, textvariable=self.var_agrid, width=16).grid(row=0, column=7, **pad)
-        ttk.Label(g, text="覆盖率口径").grid(row=0, column=8, **pad)
+        ttk.Label(g, text="Coverage").grid(row=0, column=8, **pad)
         ttk.Combobox(g, textvariable=self.var_coverage, width=7, state="readonly",
                      values=["branch", "fruit"]).grid(row=0, column=9, **pad)
-        ttk.Checkbutton(g, text="密集布果, 间距", variable=self.var_dense,
+        ttk.Checkbutton(g, text="Dense fruit, spacing", variable=self.var_dense,
                         ).grid(row=1, column=0, columnspan=2, **pad)
         ttk.Entry(g, textvariable=self.var_spacing, width=5).grid(row=1, column=2, columnspan=2, **pad)
-        ttk.Label(g, text="脱落位移 mm").grid(row=1, column=4, **pad)
+        ttk.Label(g, text="Detachment (mm)").grid(row=1, column=4, **pad)
         ttk.Entry(g, textvariable=self.var_ddet, width=5).grid(row=1, column=5, **pad)
-        ttk.Label(g, text="作业时长 s").grid(row=1, column=6, **pad)
-        ttk.Entry(g, textvariable=self.var_duration, width=6).grid(row=1, column=7, **pad)
+        ttk.Label(g, text="Detach cycles").grid(row=1, column=6, **pad)
+        ttk.Entry(g, textvariable=self.var_ncycles, width=6).grid(row=1, column=7, **pad)
 
         mid = ttk.Frame(tab)
-        mid.pack(fill="x", padx=8)
-        clamp_box = ttk.LabelFrame(mid, text="候选夹持位置(多选)")
+        mid.pack(fill="x", padx=6)
+        clamp_box = ttk.LabelFrame(mid, text="Candidate clamp points (multi-select)")
         clamp_box.pack(side="left", fill="y")
-        self.clamp_list = tk.Listbox(clamp_box, selectmode="multiple", height=6,
-                                     exportselection=False, width=22)
-        self.clamp_list.pack(padx=4, pady=4)
+        clamp_inner = ttk.Frame(clamp_box)
+        clamp_inner.pack(fill="both", expand=True, padx=4, pady=4)
+        self.clamp_list = tk.Listbox(
+            clamp_inner, selectmode="multiple", height=7, width=22,
+            exportselection=False, activestyle="none", font=(self.ui_font, 10),
+            relief="flat", borderwidth=0, highlightthickness=1,
+            highlightbackground=PALETTE["border"], highlightcolor=PALETTE["primary"],
+            bg=PALETTE["surface"], fg=PALETTE["text"],
+            selectbackground=PALETTE["sel"], selectforeground=PALETTE["text"])
+        clamp_sb = ttk.Scrollbar(clamp_inner, orient="vertical",
+                                 command=self.clamp_list.yview)
+        self.clamp_list.configure(yscrollcommand=clamp_sb.set)
+        self.clamp_list.pack(side="left", fill="both", expand=True)
+        clamp_sb.pack(side="left", fill="y")
         btns = ttk.Frame(mid)
         btns.pack(side="left", fill="x", padx=10)
-        self.btn_sim = ttk.Button(btns, text="▶ 运行仿真", command=self.on_run_sim)
-        self.btn_sim.pack(fill="x", pady=2)
-        self.btn_sim_cancel = ttk.Button(btns, text="取消", state="disabled",
+        self.btn_sim = ttk.Button(btns, text="▶ Run simulation", style="Accent.TButton",
+                                  command=self.on_run_sim)
+        self.btn_sim.pack(fill="x", pady=3)
+        self.btn_sim_cancel = ttk.Button(btns, text="Cancel", state="disabled",
                                          command=lambda: self._sim_cancel.set())
-        self.btn_sim_cancel.pack(fill="x", pady=2)
-        ttk.Button(btns, text="导出推荐结果 JSON…",
+        self.btn_sim_cancel.pack(fill="x", pady=3)
+        ttk.Button(btns, text="Export result JSON…",
                    command=self.on_export_result).pack(fill="x", pady=2)
-        ttk.Button(btns, text="加载推荐结果 JSON…",
+        ttk.Button(btns, text="Load result JSON…",
                    command=self.on_import_result).pack(fill="x", pady=2)
-        self.lbl_recommend = ttk.Label(mid, text="—", font=(self.ui_font, 10, "bold"),
-                                       foreground="#1b5e20", wraplength=420)
-        self.lbl_recommend.pack(side="left", padx=10)
+        # One result panel: shows the recommended point, then the schedule once built.
+        self.info_text = tk.Text(
+            mid, font=("Consolas", 10), height=8, wrap="none",
+            bg=PALETTE["surface"], fg=PALETTE["text"], relief="flat", borderwidth=0,
+            highlightthickness=1, highlightbackground=PALETTE["border"],
+            padx=8, pady=6, state="disabled")
+        self.info_text.pack(side="left", fill="both", expand=True)
+        self._set_panel(self.info_text,
+                        "Run a simulation to get the recommended schedule.")
 
-        table_box = ttk.LabelFrame(tab, text="候选工作点(★=推荐 knee,◆=Pareto 前沿;灰=超出电动缸包络)")
-        table_box.pack(fill="both", expand=True, padx=8, pady=6)
+        table_box = ttk.LabelFrame(
+            tab, text="Candidate working points "
+                      "(★ = recommended knee,  ◆ = Pareto front,  grey = outside rig envelope)")
+        table_box.pack(fill="both", expand=True, padx=6, pady=4)
         cols = ("clamp", "f", "A", "stroke", "cov", "stress", "env", "mark")
         self.tree = ttk.Treeview(table_box, columns=cols, show="headings", height=10)
-        headings = [("clamp", "夹持", 130), ("f", "f (Hz)", 70), ("A", "A (mm)", 70),
-                    ("stroke", "行程 (mm)", 80), ("cov", "覆盖率", 70),
-                    ("stress", "σ主干 (MPa)", 90), ("env", "包络内", 60), ("mark", "标记", 60)]
+        headings = [("clamp", "Clamp", 140), ("f", "f (Hz)", 70), ("A", "A (mm)", 70),
+                    ("stroke", "Stroke (mm)", 90), ("cov", "Coverage", 80),
+                    ("stress", "σ trunk (MPa)", 100), ("env", "In env.", 65),
+                    ("mark", "Mark", 60)]
         for cid, text, width in headings:
             self.tree.heading(cid, text=text)
             self.tree.column(cid, width=width, anchor="center")
@@ -305,12 +601,10 @@ class HarvestConsole:
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
-        self.tree.tag_configure("knee", background="#c8e6c9")
-        self.tree.tag_configure("front", background="#e8f5e9")
-        self.tree.tag_configure("infeasible", foreground="#9e9e9e")
-        self.tree.bind("<Double-1>", lambda _e: self.on_adopt_point())
-        ttk.Button(tab, text="采用选中工作点 → ③ 执行计划",
-                   command=self.on_adopt_point).pack(pady=(0, 6))
+        self.tree.tag_configure("knee", background=PALETTE["sel"],
+                                foreground=PALETTE["primary_dark"])
+        self.tree.tag_configure("front", background=PALETTE["primary_soft"])
+        self.tree.tag_configure("infeasible", foreground="#9aa8a1")
 
     def _sim_options(self) -> RecommendationOptions:
         a_grid = tuple(float(x) for x in
@@ -323,35 +617,38 @@ class HarvestConsole:
                                  if self.var_dense.get() else None),
             detachment_displacement_m=float(self.var_ddet.get()) / 1000.0,
             coverage_mode=self.var_coverage.get(),
-            duration_s=float(self.var_duration.get()),
             limits=LIMITS,
         )
 
     def on_run_sim(self) -> None:
         if self.model is None:
-            messagebox.showwarning("提示", "请先在 ① 加载树模型")
+            self._notify("Notice", "Load a tree model in ① first.", warn=True)
             return
         if self._sim_running:
+            self.log("Simulation already running — please wait or press [Cancel].")
             return
         if not _has("dolfinx"):
-            messagebox.showerror(
-                "缺少求解后端",
-                "本机没有 dolfinx(FEniCSx),无法运行仿真。\n"
-                "请在 orchard-fenicsx 环境运行本程序,或加载已导出的推荐结果 JSON。")
+            self._notify(
+                "Solver backend missing",
+                "dolfinx (FEniCSx) is not available, so the simulation cannot run.\n"
+                "Run this app in the orchard-fenicsx environment, or load an "
+                "exported result JSON instead.")
             return
         try:
             options = self._sim_options()
-            selected = [self.clamp_list.get(i) for i in self.clamp_list.curselection()]
+            # use the RAW "branch_id@s" (the list shows hierarchical labels)
+            selected = [self._clamp_raw[i] for i in self.clamp_list.curselection()]
             if not selected:
-                raise ValueError("请至少选择一个夹持位置")
+                raise ValueError("Select at least one clamp point in the ② candidate list.")
         except Exception as e:  # noqa: BLE001
-            messagebox.showerror("参数错误", str(e))
+            self._notify("Invalid parameters", str(e))
             return
         self._sim_cancel.clear()
         self._sim_running = True
         self.btn_sim.configure(state="disabled")
         self.btn_sim_cancel.configure(state="normal")
-        self.log(f"开始仿真推荐({len(selected)} 个夹持候选)…")
+        self.log(f"Starting simulation ({len(selected)} candidate clamps)…")
+        self.root.update_idletasks()        # paint the "started" state immediately
 
         model, path = self.model, self.model_path
         # 夹持候选由界面选择决定
@@ -381,13 +678,97 @@ class HarvestConsole:
         self.progress["value"] = 0
         if isinstance(payload, Exception):
             msg = str(payload)
-            self.log(f"仿真{'已取消' if msg == 'cancelled' else f'失败: {msg}'}")
+            self.log("Simulation cancelled" if msg == "cancelled"
+                     else f"Simulation failed: {msg}")
             if msg != "cancelled":
-                messagebox.showerror("仿真失败", msg)
+                messagebox.showerror("Simulation failed", msg)
             return
         self.result = payload
         self._fill_result_table(payload)
-        self.log(f"仿真完成,用时 {payload.elapsed_s:.0f} s")
+        self.log(f"Simulation complete in {payload.elapsed_s:.0f} s")
+        # 同一条流水线:仿真出最佳夹持后,自动在其上构建调参序列(无需第二个按钮)
+        if self.model is not None and _has("dolfinx") and payload.recommended is not None:
+            self.on_compute_schedule()
+
+    # ---- 调参序列(多阶段),作为 run simulation 的后半段自动执行 ----
+    def on_compute_schedule(self) -> None:
+        if self.result is None or self.model is None or self.result.recommended is None:
+            messagebox.showwarning("Notice", "Run the simulation first.")
+            return
+        if not _has("dolfinx"):
+            messagebox.showerror("Solver backend missing",
+                                 "Building the schedule needs dolfinx "
+                                 "(run in the orchard-fenicsx environment).")
+            return
+        rec = self.result.recommended
+        opt = self._sim_options()
+        f_grid = list(self.result.frequency_grid_hz)
+        a_grid = list(self.result.amplitude_grid_mm)
+        ncyc = float(self.var_ncycles.get())
+        model = self.model
+        clamp = rec.clamp_label
+        self.btn_sim.configure(state="disabled")    # keep the pipeline locked
+        self.log(f"Building schedule (best clamp {clamp}, "
+                 f"{len(f_grid)}×{len(a_grid)} grid)…")
+
+        def worker() -> None:
+            try:
+                from dataclasses import replace
+                from orchard_fem.workflows.harvest_recommendation import generate_linear_fruits
+                from orchard_fem.workflows.harvest_schedule import (
+                    StageDurationModel,
+                    build_branch_outcome_grid,
+                    compute_harvest_schedule,
+                )
+                # 复刻推荐时的布果,保证覆盖率分母一致
+                m = model
+                if opt.detachment_displacement_m is not None and m.fruit_policy is not None:
+                    m = replace(m, fruit_policy=replace(
+                        m.fruit_policy,
+                        detachment_displacement_m=float(opt.detachment_displacement_m)))
+                if opt.dense_fruit_spacing is not None and m.fruit_policy is not None:
+                    m = replace(m, fruits=generate_linear_fruits(
+                        m, m.fruit_policy, opt.dense_fruit_spacing))
+                n_branches = len({f.branch_id for f in m.fruits})
+                grid = build_branch_outcome_grid(
+                    m, clamp, f_grid, a_grid,
+                    progress_cb=lambda msg, fr: (self._post("log", msg),
+                                                 self._post("progress", fr)))
+                sched = compute_harvest_schedule(
+                    grid, n_fruit_branches=n_branches, clamp_label=clamp,
+                    target_coverage=0.95, limits=LIMITS,
+                    duration_model=StageDurationModel(reference_cycles=ncyc))
+                self._post("log", f"Stage durations from {ncyc:g} detach-cycles "
+                                  f"(at threshold) ÷ frequency.")
+                self._post("sched_done", sched)
+            except Exception as e:  # noqa: BLE001
+                self._post("sched_done", e)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _set_panel(self, widget: tk.Text, text: str) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("end", text)
+        widget.configure(state="disabled")
+
+    def _on_sched_done(self, payload) -> None:
+        self.btn_sim.configure(state="normal")     # pipeline finished → unlock
+        self.progress["value"] = 0
+        if isinstance(payload, Exception):
+            self._set_panel(self.info_text, f"Schedule build failed:\n{payload}")
+            self.log(f"Schedule build failed: {payload}")
+            messagebox.showerror("Failed", str(payload))
+            return
+        self.schedule = payload
+        self._set_panel(self.info_text, payload.summary())
+        if payload.feasible:
+            self.btn_run.configure(
+                state="normal" if self.drv.connected else "disabled")
+            self.log(f"Schedule built: {len(payload.stages)} stages, "
+                     f"{payload.total_duration_s:.1f} s — run it in ③ Execution.")
+        else:
+            self.log("⚠ Schedule empty or has stages outside the rig envelope — not executable")
 
     def _fill_result_table(self, result: RecommendationResult) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -399,53 +780,31 @@ class HarvestConsole:
                         else ("infeasible",) if not p.rig_feasible else ())
                 self.tree.insert(
                     "", "end", iid=f"{ci}:{pi}", tags=tags,
-                    values=(p.clamp_label, f"{p.frequency_hz:.2f}",
+                    values=(self._display_clamp(p.clamp_label), f"{p.frequency_hz:.2f}",
                             f"{p.amplitude_mm:g}", f"{p.stroke_mm:g}",
                             f"{p.coverage:.2f}", f"{p.trunk_stress_pa / 1e6:.2f}",
-                            "是" if p.rig_feasible else "否", mark))
+                            "Yes" if p.rig_feasible else "No", mark))
         rec = result.recommended
         if rec is not None:
-            self.lbl_recommend.configure(text=(
-                f"推荐: 夹持 {rec.clamp_label}  f={rec.frequency_hz:.2f} Hz  "
-                f"A={rec.amplitude_mm:g} mm(行程 {rec.stroke_mm:g} mm)  "
-                f"覆盖率 {rec.coverage:.2f}  σ={rec.trunk_stress_pa / 1e6:.2f} MPa  "
-                f"时长 {result.duration_s:g} s"))
-
-    def on_adopt_point(self) -> None:
-        if self.result is None:
-            messagebox.showwarning("提示", "还没有仿真结果")
-            return
-        sel = self.tree.selection()
-        if sel:
-            ci, pi = (int(x) for x in sel[0].split(":"))
-            point = self.result.clamps[ci].points[pi]
+            self._set_panel(self.info_text, (
+                "Recommended working point  (building schedule…)\n"
+                f"  Clamp       {rec.clamp_label}\n"
+                f"  Frequency   {rec.frequency_hz:.2f} Hz\n"
+                f"  Amplitude   {rec.amplitude_mm:g} mm  (stroke {rec.stroke_mm:g} mm)\n"
+                f"  Coverage    {rec.coverage:.2f}\n"
+                f"  Trunk σ     {rec.trunk_stress_pa / 1e6:.2f} MPa"))
         else:
-            point = self.result.recommended
-            if point is None:
-                messagebox.showwarning("提示", "无推荐点,请在表中选择")
-                return
-        if not point.rig_feasible:
-            if not messagebox.askyesno(
-                    "超出包络", "该工作点超出电动缸包络,采用后需在 ③ 收紧。继续?"):
-                return
-        self.var_freq.set(point.frequency_hz)
-        self.var_amp.set(point.amplitude_mm)
-        self.var_plan_duration.set(self.result.duration_s)
-        self.var_label.set(point.clamp_label)
-        self.log(f"已采用工作点 {point.clamp_label} f={point.frequency_hz:g} Hz "
-                 f"A={point.amplitude_mm:g} mm → ③")
-        self.nb.select(2)
-        self.on_make_plan()
+            self._set_panel(self.info_text, "No feasible working point found.")
 
     def on_export_result(self) -> None:
         if self.result is None:
-            messagebox.showwarning("提示", "还没有仿真结果")
+            messagebox.showwarning("Notice", "No simulation result yet.")
             return
         path = filedialog.asksaveasfilename(
             defaultextension=".json", initialfile="recommendation.json")
         if path:
             self.result.save_json(path)
-            self.log(f"推荐结果已导出 → {path}")
+            self.log(f"Result exported → {path}")
 
     def on_import_result(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("Recommendation JSON", "*.json")])
@@ -454,210 +813,90 @@ class HarvestConsole:
         try:
             self.result = RecommendationResult.load_json(path)
         except Exception as e:  # noqa: BLE001
-            messagebox.showerror("加载失败", str(e))
+            messagebox.showerror("Load failed", str(e))
             return
         self._fill_result_table(self.result)
         for step in self.result.steps:
-            self.log(f"[导入] {step}")
-        self.log(f"已加载推荐结果({self.result.model_name})")
+            self.log(f"[imported] {step}")
+        self.log(f"Result loaded ({self.result.model_name})")
 
     # ------------------------------------------------------------------ #
-    # ③ 执行计划
-    # ------------------------------------------------------------------ #
-
-    def _build_tab_plan(self) -> None:
-        tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text=" ③ 执行计划 ")
-        pad = dict(padx=5, pady=4)
-        box = ttk.LabelFrame(tab, text="工作参数(可手动修改)")
-        box.pack(fill="x", padx=8, pady=8)
-        self.var_freq = tk.DoubleVar(value=2.0)
-        self.var_amp = tk.DoubleVar(value=2.5)
-        self.var_plan_duration = tk.DoubleVar(value=10.0)
-        self.var_accel = tk.IntVar(value=10)
-        self.var_label = tk.StringVar(value="")
-        ttk.Label(box, text="频率 f (Hz)").grid(row=0, column=0, **pad)
-        ttk.Entry(box, textvariable=self.var_freq, width=8).grid(row=0, column=1, **pad)
-        ttk.Label(box, text="位移幅值 A (mm, 半峰峰)").grid(row=0, column=2, **pad)
-        ttk.Entry(box, textvariable=self.var_amp, width=8).grid(row=0, column=3, **pad)
-        ttk.Label(box, text="→ 行程 S=2A").grid(row=0, column=4, **pad)
-        self.lbl_stroke = ttk.Label(box, text="5 mm", font=(self.ui_font, 9, "bold"))
-        self.lbl_stroke.grid(row=0, column=5, **pad)
-        ttk.Label(box, text="时长 (s)").grid(row=1, column=0, **pad)
-        ttk.Entry(box, textvariable=self.var_plan_duration, width=8).grid(row=1, column=1, **pad)
-        ttk.Label(box, text="加减速 (ms)").grid(row=1, column=2, **pad)
-        ttk.Entry(box, textvariable=self.var_accel, width=8).grid(row=1, column=3, **pad)
-        ttk.Label(box, text="激励位置标签").grid(row=1, column=4, **pad)
-        ttk.Entry(box, textvariable=self.var_label, width=16).grid(row=1, column=5, **pad)
-
-        btns = ttk.Frame(tab)
-        btns.pack(fill="x", padx=8)
-        ttk.Button(btns, text="生成执行计划", command=self.on_make_plan,
-                   ).pack(side="left", padx=4)
-        ttk.Button(btns, text="收紧到包络", command=self.on_clamp_to_envelope,
-                   ).pack(side="left", padx=4)
-        ttk.Button(btns, text="导出参数 JSON…", command=self.on_export_params,
-                   ).pack(side="left", padx=4)
-        ttk.Button(btns, text="加载参数 JSON…", command=self.on_import_params,
-                   ).pack(side="left", padx=4)
-
-        plan_box = ttk.LabelFrame(tab, text="计划与可行性")
-        plan_box.pack(fill="both", expand=True, padx=8, pady=8)
-        self.plan_info = tk.Text(plan_box, state="disabled", height=10,
-                                 font=("Consolas", 10), bg="#fcfcfc")
-        self.plan_info.pack(fill="both", expand=True, padx=4, pady=4)
-
-    def _show_plan(self, text: str) -> None:
-        self.plan_info.configure(state="normal")
-        self.plan_info.delete("1.0", "end")
-        self.plan_info.insert("end", text)
-        self.plan_info.configure(state="disabled")
-
-    def on_make_plan(self) -> None:
-        try:
-            amp = float(self.var_amp.get())
-            self.lbl_stroke.configure(text=f"{2 * amp:g} mm")
-            self.plan = plan_harvest_execution(
-                frequency_hz=float(self.var_freq.get()),
-                clamp_peak_to_peak_mm=2.0 * amp,
-                duration_s=float(self.var_plan_duration.get()),
-                accel_ms=int(self.var_accel.get()),
-                excitation_label=self.var_label.get(),
-                limits=LIMITS,
-            )
-        except Exception as e:  # noqa: BLE001
-            self.plan = None
-            messagebox.showerror("参数错误", str(e))
-            return
-        self._show_plan(self.plan.summary())
-        self.log("执行计划: " + ("可行" if self.plan.feasible else "不可行(见 ③)"))
-        if self.plan.feasible:
-            self.btn_rig_run.configure(state="normal" if self.drv.connected else "disabled")
-
-    def on_clamp_to_envelope(self) -> None:
-        """自动调整:行程超限 → A=上限/2;频率不可达 → 降到该行程可达上限的95%。"""
-        amp = float(self.var_amp.get())
-        freq = float(self.var_freq.get())
-        adjusted = []
-        if 2.0 * amp > LIMITS.max_stroke_mm:
-            amp = LIMITS.max_stroke_mm / 2.0
-            adjusted.append(f"A → {amp:g} mm(行程上限 {LIMITS.max_stroke_mm:g} mm)")
-        stroke = 2.0 * amp
-        if LIMITS.seed_rpm(stroke, freq) is None:
-            freq = round(0.95 * LIMITS.max_frequency_at_stroke(stroke), 2)
-            adjusted.append(f"f → {freq:g} Hz(该行程可达上限的 95%)")
-        if not adjusted:
-            self.log("参数已在包络内,无需调整")
-            return
-        self.var_amp.set(amp)
-        self.var_freq.set(freq)
-        for a in adjusted:
-            self.log("包络收紧: " + a)
-        self.on_make_plan()
-
-    def _params_dict(self) -> dict:
-        return {
-            "frequency_hz": float(self.var_freq.get()),
-            "displacement_amplitude_m": float(self.var_amp.get()) / 1000.0,
-            "duration_s": float(self.var_plan_duration.get()),
-            "excitation_label": self.var_label.get(),
-        }
-
-    def on_export_params(self) -> None:
-        path = filedialog.asksaveasfilename(
-            defaultextension=".json", initialfile="harvest_params.json")
-        if path:
-            Path(path).write_text(json.dumps(self._params_dict(), ensure_ascii=False,
-                                             indent=1), encoding="utf-8")
-            self.log(f"参数已导出 → {path}")
-
-    def on_import_params(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("Params JSON", "*.json")])
-        if not path:
-            return
-        try:
-            d = json.loads(Path(path).read_text(encoding="utf-8"))
-            self.var_freq.set(float(d["frequency_hz"]))
-            if "displacement_amplitude_m" in d:
-                self.var_amp.set(float(d["displacement_amplitude_m"]) * 1000.0)
-            elif "clamp_peak_to_peak_mm" in d:
-                self.var_amp.set(float(d["clamp_peak_to_peak_mm"]) / 2.0)
-            self.var_plan_duration.set(float(d.get("duration_s", 10.0)))
-            self.var_label.set(str(d.get("excitation_label", "")))
-        except Exception as e:  # noqa: BLE001
-            messagebox.showerror("加载失败", str(e))
-            return
-        self.on_make_plan()
-
-    # ------------------------------------------------------------------ #
-    # ④ 电动缸执行
+    # ③ Execution (working point + plan + run)
     # ------------------------------------------------------------------ #
 
     def _build_tab_rig(self) -> None:
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text=" ④ 电动缸执行 ")
-        pad = dict(padx=5, pady=4)
+        self.nb.add(tab, text="  ③ Execution  ")
+        pad = dict(padx=4, pady=3)
 
-        conn = ttk.LabelFrame(tab, text="串口连接(RS232 出厂 19200-8-E-1)")
-        conn.pack(fill="x", padx=8, pady=6)
+        ttk.Label(tab, text="Connect the rig and press RUN to execute the schedule "
+                            "built in ② Simulation.", style="Muted.TLabel",
+                  ).pack(anchor="w", padx=8, pady=(6, 0))
+
+        conn = ttk.LabelFrame(tab, text="Serial connection (RS232 factory default 19200-8-E-1)")
+        conn.pack(fill="x", padx=6, pady=4)
         default_port = "COM8" if sys.platform.startswith("win") else "/dev/ttyUSB0"
         self.var_port = tk.StringVar(value=default_port)
         self.var_baud = tk.StringVar(value="19200")
         self.var_parity = tk.StringVar(value="E")
         self.var_stop = tk.StringVar(value="1")
-        ttk.Label(conn, text="端口").grid(row=0, column=0, **pad)
+        ttk.Label(conn, text="Port").grid(row=0, column=0, **pad)
         ttk.Entry(conn, textvariable=self.var_port, width=12).grid(row=0, column=1, **pad)
-        ttk.Label(conn, text="波特率").grid(row=0, column=2, **pad)
+        ttk.Label(conn, text="Baud").grid(row=0, column=2, **pad)
         ttk.Combobox(conn, textvariable=self.var_baud, width=7,
                      values=["9600", "19200", "38400"]).grid(row=0, column=3, **pad)
-        ttk.Label(conn, text="校验").grid(row=0, column=4, **pad)
+        ttk.Label(conn, text="Parity").grid(row=0, column=4, **pad)
         ttk.Combobox(conn, textvariable=self.var_parity, width=3,
                      values=["E", "O", "N"]).grid(row=0, column=5, **pad)
-        ttk.Label(conn, text="停止位").grid(row=0, column=6, **pad)
+        ttk.Label(conn, text="Stop bits").grid(row=0, column=6, **pad)
         ttk.Combobox(conn, textvariable=self.var_stop, width=3,
                      values=["1", "2"]).grid(row=0, column=7, **pad)
-        self.btn_conn = ttk.Button(conn, text="连接", command=self.on_connect)
+        self.btn_conn = ttk.Button(conn, text="Connect", command=self.on_connect)
         self.btn_conn.grid(row=0, column=8, **pad)
-        self.btn_alarm = ttk.Button(conn, text="清除报警", state="disabled",
+        self.btn_alarm = ttk.Button(conn, text="Clear alarm", state="disabled",
                                     command=self.on_clear_alarm)
         self.btn_alarm.grid(row=0, column=9, **pad)
 
-        home = ttk.LabelFrame(tab, text="回中(触停回零;P9-21 首次启用需驱动器断电重启)")
-        home.pack(fill="x", padx=8, pady=6)
+        home = ttk.LabelFrame(
+            tab, text="Centering (touch-stop homing; first P9-21 enable needs a drive power cycle)")
+        home.pack(fill="x", padx=6, pady=4)
         self.var_home = tk.BooleanVar(value=True)
         self.var_homeoff = tk.DoubleVar(value=25.8)
         self.var_homerev = tk.BooleanVar(value=False)
-        ttk.Checkbutton(home, text="执行前自动回中", variable=self.var_home,
+        self.var_calibrate = tk.BooleanVar(value=False)
+        ttk.Checkbutton(home, text="Auto-center before run", variable=self.var_home,
                         ).pack(side="left", **pad)
-        ttk.Label(home, text="限位→中点偏移 (mm)").pack(side="left", **pad)
+        ttk.Label(home, text="Limit→center offset (mm)").pack(side="left", **pad)
         ttk.Entry(home, textvariable=self.var_homeoff, width=6).pack(side="left", **pad)
-        ttk.Checkbutton(home, text="反向触停", variable=self.var_homerev,
+        ttk.Checkbutton(home, text="Reverse touch-stop", variable=self.var_homerev,
                         ).pack(side="left", **pad)
+        ttk.Checkbutton(
+            home, text="Online freq. calibration (adds 5–23 s; off = exact duration)",
+            variable=self.var_calibrate).pack(side="left", **pad)
 
         ctl = ttk.Frame(tab)
-        ctl.pack(fill="x", padx=8, pady=10)
-        self.btn_rig_run = tk.Button(
-            ctl, text="▶  执 行 计 划", font=(self.ui_font, 13, "bold"),
-            bg="#2e7d32", fg="white", relief="flat", state="disabled",
-            disabledforeground="#9e9e9e", command=self.on_rig_run)
-        self.btn_rig_run.pack(side="left", expand=True, fill="x", padx=8, ipady=10)
-        self.btn_rig_stop = tk.Button(
-            ctl, text="■  停 止", font=(self.ui_font, 13, "bold"),
-            bg="#c62828", fg="white", relief="flat", state="disabled",
-            disabledforeground="#9e9e9e", command=self.on_rig_stop)
-        self.btn_rig_stop.pack(side="left", expand=True, fill="x", padx=8, ipady=10)
+        ctl.pack(fill="x", padx=6, pady=8)
+        self.btn_run = self._big_button(
+            ctl, "▶  RUN", PALETTE["primary"], PALETTE["primary_hover"], self.on_run)
+        self.btn_run.pack(side="left", expand=True, fill="x", padx=6, ipady=12)
+        self.btn_rig_stop = self._big_button(
+            ctl, "■  STOP", PALETTE["danger"], PALETTE["danger_hover"],
+            self.on_rig_stop)
+        self.btn_rig_stop.pack(side="left", expand=True, fill="x", padx=6, ipady=12)
 
-        info = ttk.LabelFrame(tab, text="执行前检查")
-        info.pack(fill="both", expand=True, padx=8, pady=4)
-        check = tk.Text(info, height=7, font=(self.ui_font, 10), bg="#fffde7")
+        info = ttk.LabelFrame(tab, text="Pre-run checklist")
+        info.pack(fill="both", expand=True, padx=6, pady=3)
+        check = tk.Text(info, height=5, font=(self.ui_font, 10), bg="#fffdf3",
+                        fg=PALETTE["text"], relief="flat", borderwidth=0,
+                        highlightthickness=1, highlightbackground=PALETTE["border"],
+                        padx=10, pady=6)
         check.insert("end",
-                     "1) 计划可行(③ 生成且 FEASIBLE),低频(1–2 Hz)先行验证再上推荐频率;\n"
-                     "2) 夹持机构按推荐位置固定,缸杆大致位于行程中点;\n"
-                     "3) 连接后报警码为 0(否则先清除);\n"
-                     "4) 首次启用回零需给驱动器断电重启一次;\n"
-                     "5) 桌面物理电源开关随手可及(急停);\n"
-                     "6) 执行中在线标定会微调转速,结果自动存入标定表;\n"
-                     "7) 每次运行记录归档于 results/harvest_runs/。")
+                     "1) Schedule built in ② and FEASIBLE; validate at low frequency first.   "
+                     "2) Clamp mounted at the chosen point; rod near mid-stroke.\n"
+                     "3) Alarm code 0 after connecting (clear it otherwise).   "
+                     "4) First-time homing needs one drive power cycle.\n"
+                     "5) Physical power switch within reach (emergency stop).   "
+                     "6) Every run is archived under results/harvest_runs/.")
         check.configure(state="disabled")
         check.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -668,61 +907,78 @@ class HarvestConsole:
             except Exception:  # noqa: BLE001
                 pass
             self.drv.close()
-            self.btn_conn.configure(text="连接")
+            self.btn_conn.configure(text="Connect")
             self.btn_alarm.configure(state="disabled")
-            self.btn_rig_run.configure(state="disabled")
-            self.log("已断开串口")
+            self.btn_run.configure(state="disabled")
+            self.log("Serial disconnected")
             return
         try:
             self.drv.connect(self.var_port.get().strip(), int(self.var_baud.get()),
                              self.var_parity.get(), int(self.var_stop.get()))
             alm = self.drv.alarm()
         except Exception as e:  # noqa: BLE001
-            messagebox.showerror("连接失败", str(e))
-            self.log(f"连接失败: {e}")
+            messagebox.showerror("Connection failed", str(e))
+            self.log(f"Connection failed: {e}")
             return
-        self.btn_conn.configure(text="断开")
+        self.btn_conn.configure(text="Disconnect")
         self.btn_alarm.configure(state="normal")
-        if self.plan is not None and self.plan.feasible:
-            self.btn_rig_run.configure(state="normal")
-        self.log("串口已连接"
-                 + (f",当前报警 E-{alm:03d},请先清除" if alm else ",无报警"))
+        if self.schedule is not None and self.schedule.feasible:
+            self.btn_run.configure(state="normal")
+        self.log("Serial connected"
+                 + (f"; active alarm E-{alm:03d}, clear it first" if alm else "; no alarm"))
 
     def on_clear_alarm(self) -> None:
         try:
             alm = self.drv.clear_alarm()
         except Exception as e:  # noqa: BLE001
-            messagebox.showerror("操作失败", str(e))
+            messagebox.showerror("Operation failed", str(e))
             return
-        self.log("报警已清除" if alm == 0 else f"报警 E-{alm:03d} 仍在(可能需断电重启)")
+        self.log("Alarm cleared" if alm == 0
+                 else f"Alarm E-{alm:03d} persists (may need a power cycle)")
 
-    def on_rig_run(self) -> None:
+    def on_run(self) -> None:
+        """RUN the schedule built in ② (1 stage if one excitation suffices, else N)."""
         if self._rig_running:
             return
-        if self.plan is None or not self.plan.feasible:
-            messagebox.showwarning("提示", "请先在 ③ 生成可行的执行计划")
+        if self.schedule is not None and self.schedule.feasible:
+            self.on_run_schedule()
+        else:
+            messagebox.showwarning(
+                "Notice", "Run a simulation in ② first to build an executable schedule.")
+
+    def on_run_schedule(self) -> None:
+        if self._rig_running:
+            return
+        if self.schedule is None or not self.schedule.feasible:
+            messagebox.showwarning("Notice", "Build an executable schedule in ② first.")
             return
         if not self.drv.connected:
-            messagebox.showwarning("提示", "请先连接串口")
+            messagebox.showwarning("Notice", "Connect the serial port first.")
             return
-        if not messagebox.askyesno(
-                "确认执行",
-                self.plan.summary() + "\n\n确认电动缸即将运动,夹持/场地安全?"):
+        if not self._confirm(
+                "Confirm schedule run",
+                self.schedule.summary()
+                + "\n\nThe actuator will run the stages above in sequence — proceed?",
+                ok_text="Run schedule"):
             return
         self._rig_stop.clear()
         self._rig_running = True
-        self.btn_rig_run.configure(state="disabled")
+        self.btn_run.configure(state="disabled")
         self.btn_rig_stop.configure(state="normal")
-        plan, drv = self.plan, self.drv
+        schedule, drv = self.schedule, self.drv
         home, off, rev = (bool(self.var_home.get()),
                           float(self.var_homeoff.get()), bool(self.var_homerev.get()))
+        calib = bool(self.var_calibrate.get())
 
         def worker() -> None:
             try:
-                outcome = run_harvest_plan_on_rig(
-                    plan, driver=drv,
-                    home=home, home_offset_mm=off, home_reverse=rev,
+                outcome = run_harvest_schedule_on_rig(
+                    schedule, driver=drv,
+                    home=home, home_offset_mm=off, home_reverse=rev, calibrate=calib,
                     status_cb=lambda m: self._post("log", m),
+                    on_stage=lambda s: self._post(
+                        "log", f"▶ Stage {s.index}: {s.plan.frequency_hz:.2f} Hz, "
+                               f"stroke {s.plan.stroke_mm:.1f} mm, {s.plan.duration_s:g} s"),
                     should_stop=self._rig_stop.is_set,
                 )
                 self._post("rig_done", outcome)
@@ -734,44 +990,46 @@ class HarvestConsole:
     def on_rig_stop(self) -> None:
         self._rig_stop.set()
         try:
-            self.drv.stop()           # 立即断使能,不等轮询周期
-            self.log("已发送停止(伺服断使能)")
+            self.drv.stop()           # disable the servo at once, don't wait for the poll
+            self.log("Stop sent (servo disabled)")
         except Exception as e:  # noqa: BLE001
-            messagebox.showerror("停止指令失败", f"{e}\n请立即使用物理电源开关!")
+            messagebox.showerror("Stop command failed",
+                                 f"{e}\nUse the physical power switch immediately!")
 
     def _on_rig_done(self, payload) -> None:
         self._rig_running = False
         self.btn_rig_stop.configure(state="disabled")
-        self.btn_rig_run.configure(
-            state="normal" if (self.drv.connected and self.plan
-                               and self.plan.feasible) else "disabled")
+        runnable = self.drv.connected and self.schedule is not None and self.schedule.feasible
+        self.btn_run.configure(state="normal" if runnable else "disabled")
         if isinstance(payload, Exception):
-            self.log(f"执行失败: {payload}")
-            messagebox.showerror("执行失败", str(payload))
+            self.log(f"Run failed: {payload}")
+            messagebox.showerror("Run failed", str(payload))
             self._save_run_record("error", str(payload))
             return
-        zh = {"completed": "完成", "alarm_stop": "报警停机", "user_stop": "人工停止"}
-        self.log(f"执行结束: {zh.get(payload, payload)}")
+        labels = {"completed": "completed", "alarm_stop": "alarm stop",
+                  "user_stop": "user stop"}
+        self.log(f"Run finished: {labels.get(payload, payload)}")
         self._save_run_record(payload)
 
     def _save_run_record(self, outcome: str, detail: str = "") -> None:
-        """运行档案:模型、计划、结果,便于追溯与论文数据整理。"""
+        """运行档案:模型、调参序列、结果,便于追溯与论文数据整理。"""
         try:
             RUNS_DIR.mkdir(parents=True, exist_ok=True)
             record = {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "model_path": str(self.model_path) if self.model_path else
                               (self.result.model_path if self.result else ""),
-                "plan": dataclasses.asdict(self.plan) if self.plan else None,
+                "schedule": (dataclasses.asdict(self.schedule)
+                             if self.schedule else None),
                 "outcome": outcome,
                 "detail": detail,
             }
             path = RUNS_DIR / f"run_{time.strftime('%Y%m%d_%H%M%S')}.json"
             path.write_text(json.dumps(record, ensure_ascii=False, indent=1),
                             encoding="utf-8")
-            self.log(f"运行记录 → {path.relative_to(REPO_ROOT)}")
+            self.log(f"Run record → {path.relative_to(REPO_ROOT)}")
         except Exception as e:  # noqa: BLE001
-            self.log(f"运行记录保存失败: {e}")
+            self.log(f"Failed to save run record: {e}")
 
     # ------------------------------------------------------------------ #
 

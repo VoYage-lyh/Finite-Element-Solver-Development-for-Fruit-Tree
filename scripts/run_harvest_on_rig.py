@@ -76,6 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="hard-stop → mid-stroke offset")
     rig.add_argument("--home-reverse", action="store_true",
                      help="probe the reverse hard stop when homing")
+    rig.add_argument("--calibrate", action="store_true",
+                     help="enable online frequency calibration (adds 5–23 s of "
+                          "vibration; off by default so the run lasts exactly the "
+                          "computed duration)")
     rig.add_argument("--dry-run", action="store_true",
                      help="translate + feasibility-check only; no hardware")
     return p
@@ -134,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         home=not args.no_home,
         home_offset_mm=args.home_offset_mm,
         home_reverse=args.home_reverse,
+        calibrate=args.calibrate,
         status_cb=print,
     )
     print(f"Outcome: {outcome}")

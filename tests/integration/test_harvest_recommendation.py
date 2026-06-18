@@ -44,7 +44,7 @@ def test_summarize_model(model):
     assert s.height_m > 0
     assert s.n_materials == len(model.materials)
     text = "\n".join(s.lines())
-    assert s.name in text and "分枝数" in text
+    assert s.name in text and "Branches:" in text
 
 
 def test_candidate_clamp_labels_override(model):
@@ -138,7 +138,7 @@ def test_pipeline_finds_resonance_and_knee(model):
     assert rec.rig_feasible
     # 30 mm amplitude (60 mm stroke) must have been dropped from the grid
     assert 30.0 not in result.amplitude_grid_mm
-    assert any("行程" in s and "30" in s for s in result.steps)
+    assert any("stroke" in s and "30" in s for s in result.steps)
 
 
 def test_pipeline_knee_points_within_envelope(model):
@@ -152,7 +152,8 @@ def test_pipeline_knee_points_within_envelope(model):
 def test_pipeline_steps_trace(model):
     result = _run(model)
     text = "\n".join(result.steps)
-    assert "FRF 扫频" in text and "主共振" in text and "推荐工作点" in text
+    assert "FRF sweep" in text and "Primary resonance" in text \
+        and "Recommended working point" in text
 
 
 def test_pipeline_progress_and_cancel(model):

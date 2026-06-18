@@ -500,3 +500,186 @@ def execute_harvest_plan(
         driver.stop()
         status("Servo stopped.")
     return outcome
+
+
+# --------------------------------------------------------------------------- #
+# Multi-stage schedule (the simulation's staged-adjustment sequence)
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class HarvestStage:
+    """One stage of a multi-stage harvest sequence.
+
+    A single ``(f, A)`` only resonates a subset of branches, so the optimiser
+    emits a *sequence* of work points, each tuned to the branches still holding
+    fruit.  This is the machine-ready form of one such step.
+
+    Parameters
+    ----------
+    index:
+        1-based stage number.
+    plan:
+        The :class:`HarvestPlan` to run for this stage (carries stroke, seed
+        rpm, frequency, and the fatigue-derived ``duration_s``).
+    new_branches:
+        Branch ids this stage newly activates (not covered by earlier stages).
+    cumulative_coverage:
+        Fraction of fruit-bearing branches activated through this stage ∈ [0, 1].
+    trunk_stress_pa:
+        Peak trunk bending stress at this stage's work point [Pa].
+    n_detached_fruits:
+        Fruit detached at this stage's work point (single-stage count).
+    """
+
+    index: int
+    plan: HarvestPlan
+    new_branches: tuple[str, ...]
+    cumulative_coverage: float
+    trunk_stress_pa: float
+    n_detached_fruits: int
+
+
+@dataclass(frozen=True)
+class HarvestSchedule:
+    """An ordered multi-stage harvest sequence on one clamp."""
+
+    stages: tuple[HarvestStage, ...]
+    clamp_label: str
+    target_coverage: float
+
+    @property
+    def feasible(self) -> bool:
+        """``True`` only when every stage's plan is within the rig envelope."""
+        return bool(self.stages) and all(s.plan.feasible for s in self.stages)
+
+    @property
+    def total_duration_s(self) -> float:
+        return sum(s.plan.duration_s for s in self.stages)
+
+    @property
+    def final_coverage(self) -> float:
+        return self.stages[-1].cumulative_coverage if self.stages else 0.0
+
+    def summary(self) -> str:
+        """Aligned monospace table (render with a fixed-width font)."""
+        head = (f"Harvest schedule @ {self.clamp_label}\n"
+                f"{len(self.stages)} stages, {self.total_duration_s:.1f} s total "
+                f"→ {self.final_coverage:.0%} branch coverage "
+                f"(target {self.target_coverage:.0%})")
+        hdr = "  #   f(Hz)  dur(s)  stroke   new   cum   σ(MPa)"
+        rows = [
+            f"  {s.index:<2} {s.plan.frequency_hz:6.2f} {s.plan.duration_s:6.1f}  "
+            f"{s.plan.stroke_mm:5.1f}mm   +{len(s.new_branches):<2} "
+            f"{s.cumulative_coverage:4.0%}  {s.trunk_stress_pa / 1e6:6.2f}"
+            + ("" if s.plan.feasible else "  [INFEASIBLE]")
+            for s in self.stages
+        ]
+        return head + "\n\n" + hdr + "\n" + "\n".join(rows)
+
+
+def _run_for_duration(
+    driver: VibrationDriver,
+    duration_s: float,
+    *,
+    now: Callable[[], float],
+    sleep: Callable[[float], None],
+    should_stop: Callable[[], bool] | None,
+    alarm_poll_s: float,
+    status: Callable[[str], None],
+) -> str:
+    """Poll alarm/stop for *duration_s*; returns the run outcome string."""
+    t0 = now()
+    while now() - t0 < duration_s:
+        if should_stop is not None and should_stop():
+            status("Stop requested — stopping.")
+            return "user_stop"
+        if driver.alarm() != 0:
+            status("Alarm raised — stopping.")
+            return "alarm_stop"
+        sleep(alarm_poll_s)
+    return "completed"
+
+
+def execute_harvest_schedule(
+    schedule: HarvestSchedule,
+    driver: VibrationDriver,
+    *,
+    home: Callable[[], None] | None = None,
+    calibrate: bool = True,
+    limits: DS5L1Limits | None = None,
+    alarm_poll_s: float = 0.2,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.monotonic,
+    on_status: Callable[[str], None] | None = None,
+    on_stage: Callable[[HarvestStage], None] | None = None,
+    on_calibrated: Callable[[CalibrationOutcome], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    calibration_kwargs: dict | None = None,
+) -> str:
+    """Run a multi-stage :class:`HarvestSchedule` on the rig, stage by stage.
+
+    The drive is started once; between stages the segments are rewritten **live**
+    via :meth:`set_vibration` (no stop), so the cylinder flows from one work
+    point to the next.  Each stage optionally re-locks its frequency by online
+    calibration, then runs for its own ``duration_s`` while polling the alarm and
+    the stop request.  An alarm or a stop request aborts the **whole** schedule.
+
+    Returns ``"completed"``, ``"alarm_stop"``, or ``"user_stop"``.
+
+    Parameters
+    ----------
+    schedule:
+        Output of :func:`orchard_fem.workflows.harvest_schedule.compute_harvest_schedule`;
+        refused if not ``feasible``.
+    on_stage:
+        Called at the start of each stage (e.g. to show "stage k/n" in a UI).
+
+    Raises
+    ------
+    ValueError
+        If *schedule* is empty or any stage is infeasible.
+    """
+    if not schedule.feasible:
+        raise ValueError("Refusing to execute an infeasible/empty schedule:\n"
+                         + schedule.summary())
+
+    def status(msg: str) -> None:
+        if on_status is not None:
+            on_status(msg)
+
+    status("Initialising internal-position mode (servo disabled)…")
+    driver.init_mode(0)
+    if home is not None:
+        status("Centring to mid-stroke…")
+        home()
+
+    outcome = "completed"
+    started = False
+    try:
+        for stage in schedule.stages:
+            plan = stage.plan
+            status(f"Stage {stage.index}/{len(schedule.stages)}: "
+                   f"{plan.frequency_hz:.2f} Hz, stroke {plan.stroke_mm:.1f} mm, "
+                   f"{plan.duration_s:g} s (+{len(stage.new_branches)} branches).")
+            if on_stage is not None:
+                on_stage(stage)
+            driver.set_vibration(plan.stroke_mm, plan.seed_rpm, plan.accel_ms)
+            if not started:
+                driver.start()
+                started = True
+            if calibrate:
+                cal = calibrate_frequency(driver, plan, limits=limits,
+                                          **(calibration_kwargs or {}))
+                if on_calibrated is not None:
+                    on_calibrated(cal)
+            outcome = _run_for_duration(
+                driver, plan.duration_s, now=now, sleep=sleep,
+                should_stop=should_stop, alarm_poll_s=alarm_poll_s, status=status,
+            )
+            if outcome != "completed":
+                break               # alarm / user stop aborts the whole sequence
+    finally:
+        driver.stop()
+        status("Servo stopped.")
+    return outcome

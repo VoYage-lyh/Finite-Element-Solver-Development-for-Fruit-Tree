@@ -85,19 +85,20 @@ class ModelSummary:
     def lines(self) -> list[str]:
         """Key/value lines for plain-text display."""
         return [
-            f"模型名称: {self.name}",
-            f"文件: {self.path}",
-            f"分枝数: {self.n_branches}  (层级数 {self.n_levels}, 树高 {self.height_m:.2f} m)",
-            f"果实: {self.n_fruits} 个, 总质量 {self.fruit_mass_total_kg:.2f} kg "
-            f"(均值 {self.fruit_mass_mean_kg * 1000:.0f} g)",
-            "脱落位移: "
+            f"Model:        {self.name}",
+            f"File:         {self.path}",
+            f"Branches:     {self.n_branches}  ({self.n_levels} levels, "
+            f"height {self.height_m:.2f} m)",
+            f"Fruits:       {self.n_fruits}, total mass {self.fruit_mass_total_kg:.2f} kg "
+            f"(mean {self.fruit_mass_mean_kg * 1000:.0f} g)",
+            "Detachment:   "
             + (f"{self.detachment_displacement_m * 1000:.1f} mm"
-               if self.detachment_displacement_m is not None else "未定义"),
-            f"材料: {self.n_materials} 种 ({', '.join(self.material_names)})",
-            f"约束(夹持)枝: {', '.join(self.clamp_branches) or '无'}",
-            f"默认激励: {self.excitation_kind} @ {self.excitation_target}",
-            f"分析频带: {self.frequency_band_hz[0]:g}–{self.frequency_band_hz[1]:g} Hz",
-        ] + ([f"备注: {self.notes}"] if self.notes else [])
+               if self.detachment_displacement_m is not None else "undefined"),
+            f"Materials:    {self.n_materials} ({', '.join(self.material_names)})",
+            f"Clamp branch: {', '.join(self.clamp_branches) or 'none'}",
+            f"Excitation:   {self.excitation_kind} @ {self.excitation_target}",
+            f"Analysis band:{self.frequency_band_hz[0]:g}–{self.frequency_band_hz[1]:g} Hz",
+        ] + ([f"Notes:        {self.notes}"] if self.notes else [])
 
 
 def summarize_orchard_model(model: Any, path: str | Path = "") -> ModelSummary:
@@ -153,9 +154,12 @@ class RecommendationOptions:
         Feasible mechanical band searched for resonances.
     sweep_steps:
         Frequency steps of the coarse FRF sweep over ``sweep_range_hz``.
-    trunk_clamp_s / include_child_clamps:
-        Candidate clamp positions: trunk arc-length fractions, plus the root of
-        every branch joined directly to the trunk.
+    trunk_clamp_s / include_child_clamps / primary_clamp_s:
+        Candidate clamp positions: trunk arc-length fractions, plus
+        ``primary_clamp_s`` along every primary branch (one joined directly to
+        the trunk).  Primary defaults are the **root** (``s=0``), **quarter**
+        (``s=0.25``) and **mid** (``s=0.5``) — reachable, low spots near the
+        trunk; the far tip (``s=1``) is excluded as unreachable for the clamp.
     clamp_labels:
         Explicit clamp-label override (e.g. a front-end selection); when set,
         the automatic enumeration above is skipped.
@@ -182,8 +186,9 @@ class RecommendationOptions:
     band_hz: tuple[float, float] = (3.0, 20.0)
     sweep_range_hz: tuple[float, float] = (0.5, 30.0)
     sweep_steps: int = 60
-    trunk_clamp_s: tuple[float, ...] = (0.25, 0.40, 0.55, 0.70, 0.85)
+    trunk_clamp_s: tuple[float, ...] = (0.25, 0.55, 0.85)
     include_child_clamps: bool = True
+    primary_clamp_s: tuple[float, ...] = (0.0, 0.25, 0.5)   # root / quarter / mid of each primary branch
     clamp_labels: tuple[str, ...] | None = None
     amplitude_grid_mm: tuple[float, ...] = (2.5, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0)
     dense_fruit_spacing: float | None = 0.05
@@ -403,13 +408,20 @@ def find_in_band_peaks(
 
 
 def candidate_clamp_labels(model: Any, options: RecommendationOptions) -> list[str]:
-    """Clamp candidates: explicit override, else trunk fractions + child roots."""
+    """Clamp candidates: explicit override, else trunk fractions + primary root/mid.
+
+    Primary branches are those joined directly to the trunk; the clamp candidates
+    on them are ``options.primary_clamp_s`` (default root ``s=0`` and mid
+    ``s=0.5``) — reachable spots near the trunk, not the high far tip.
+    """
     if options.clamp_labels is not None:
         return list(options.clamp_labels)
     labels = [f"trunk@{s:.2f}" for s in options.trunk_clamp_s]
     if options.include_child_clamps:
         trunk_node = model.topology.require_node("trunk")
-        labels += [f"{bid}@0.00" for bid in trunk_node.child_branch_ids]
+        labels += [f"{bid}@{s:.2f}"
+                   for bid in trunk_node.child_branch_ids
+                   for s in options.primary_clamp_s]
     return labels
 
 
@@ -544,26 +556,28 @@ def recommend_harvest_parameters(
             model.fruit_policy,
             detachment_displacement_m=float(opt.detachment_displacement_m),
         ))
-        log(f"脱落位移设为 {opt.detachment_displacement_m * 1000:g} mm", 0.02)
+        log(f"Detachment displacement set to {opt.detachment_displacement_m * 1000:g} mm", 0.02)
     if opt.dense_fruit_spacing is not None:
         if model.fruit_policy is None:
             raise ValueError("dense_fruit_spacing requires a fruit policy on the model.")
         fruits = generate_linear_fruits(model, model.fruit_policy, opt.dense_fruit_spacing)
         model = replace(model, fruits=fruits)
-        log(f"密集布果: 每 {opt.dense_fruit_spacing * 100:g}% 弧长 1 果, 共 {len(fruits)} 果", 0.04)
+        log(f"Dense fruit placement: 1 fruit per {opt.dense_fruit_spacing * 100:g}% arc "
+            f"length, {len(fruits)} total", 0.04)
 
     # -- 2. coarse FRF sweep → resonance candidates ---------------------------
     check_cancel()
-    log(f"FRF 扫频 {opt.sweep_range_hz[0]:g}–{opt.sweep_range_hz[1]:g} Hz "
-        f"({opt.sweep_steps} 步)…", 0.05)
+    log(f"FRF sweep {opt.sweep_range_hz[0]:g}–{opt.sweep_range_hz[1]:g} Hz "
+        f"({opt.sweep_steps} steps)…", 0.05)
     freqs, mags = sweep(model, opt.sweep_range_hz[0], opt.sweep_range_hz[1], opt.sweep_steps)
     peak_idx, genuine = find_in_band_resonance(freqs, mags, opt.band_hz)
     f_res = float(freqs[peak_idx])
-    log(f"主共振 {f_res:.2f} Hz ({'局部极大' if genuine else '曲率拐点'})", 0.20)
+    log(f"Primary resonance {f_res:.2f} Hz "
+        f"({'local maximum' if genuine else 'curvature inflection'})", 0.20)
     sec_idx = find_in_band_peaks(freqs, mags, opt.band_hz)
     secondary = [float(freqs[k]) for k in sec_idx if int(k) != peak_idx]
     if secondary:
-        log(f"次级峰 {', '.join(f'{f:.2f}' for f in secondary)} Hz", 0.21)
+        log(f"Secondary peak(s) {', '.join(f'{f:.2f}' for f in secondary)} Hz", 0.21)
 
     # -- 3. (f, A) grid with the rig envelope ---------------------------------
     f_grid = build_frequency_grid(f_res, secondary, opt.band_hz)
@@ -571,21 +585,22 @@ def recommend_harvest_parameters(
     a_grid = [a for a in a_all if 2.0 * a <= opt.limits.max_stroke_mm]
     dropped = [a for a in a_all if a not in a_grid]
     if dropped:
-        log(f"幅值候选剔除 {', '.join(f'{a:g}' for a in dropped)} mm: "
-            f"行程 2A 超过缸上限 {opt.limits.max_stroke_mm:g} mm", 0.22)
+        log(f"Amplitudes dropped {', '.join(f'{a:g}' for a in dropped)} mm: "
+            f"stroke 2A exceeds the {opt.limits.max_stroke_mm:g} mm cylinder limit", 0.22)
     if not a_grid:
         raise ValueError("All amplitude candidates exceed the rig stroke limit.")
     n_unreach = sum(1 for f in f_grid for a in a_grid
                     if not rig_feasible(f, a, opt.limits))
     if n_unreach:
-        log(f"{n_unreach} 个 (f,A) 点超出缸频率包络, 标记为不可执行", 0.23)
-    log(f"工作点网格: |f|={len(f_grid)} × |A|={len(a_grid)}", 0.24)
+        log(f"{n_unreach} (f,A) points outside the cylinder frequency envelope, "
+            f"marked non-executable", 0.23)
+    log(f"Working-point grid: |f|={len(f_grid)} × |A|={len(a_grid)}", 0.24)
 
     # -- 4. per-clamp Pareto sweep --------------------------------------------
     clamp_labels = candidate_clamp_labels(model, opt)
     evaluate = make_evaluator(model, opt)
     n_total = len(clamp_labels) * len(f_grid) * len(a_grid)
-    log(f"候选夹持 {len(clamp_labels)} 处, 共 {n_total} 次单点求解", 0.25)
+    log(f"{len(clamp_labels)} candidate clamps, {n_total} single-point solves", 0.25)
 
     clamps: list[ClampRecommendation] = []
     n_done = 0
@@ -598,7 +613,7 @@ def recommend_harvest_parameters(
                 try:
                     coverage, stress = evaluate(float(f), float(a), clamp_label)
                 except Exception as exc:  # noqa: BLE001 - skip pathological clamp
-                    log(f"跳过夹持 {clamp_label}: {exc}", 0.25 + 0.70 * n_done / n_total)
+                    log(f"Skipping clamp {clamp_label}: {exc}", 0.25 + 0.70 * n_done / n_total)
                     failed = True
                     break
                 n_done += 1
@@ -612,7 +627,7 @@ def recommend_harvest_parameters(
                 ))
                 progress_cb(
                     f"{clamp_label}: f={f:g} Hz A={a:g} mm → "
-                    f"覆盖率 {coverage:.2f}, σ {stress / 1e6:.2f} MPa",
+                    f"coverage {coverage:.2f}, σ {stress / 1e6:.2f} MPa",
                     0.25 + 0.70 * n_done / n_total,
                 )
             if failed:
@@ -658,9 +673,9 @@ def recommend_harvest_parameters(
     best_idx = clamps.index(best)
     k = best.knee
     log(
-        f"推荐工作点: 夹持 {best.clamp_label}, f={k.frequency_hz:.2f} Hz, "
-        f"A={k.amplitude_mm:g} mm (行程 {k.stroke_mm:g} mm), "
-        f"覆盖率 {k.coverage:.2f}, 主干应力 {k.trunk_stress_pa / 1e6:.2f} MPa",
+        f"Recommended working point: clamp {best.clamp_label}, f={k.frequency_hz:.2f} Hz, "
+        f"A={k.amplitude_mm:g} mm (stroke {k.stroke_mm:g} mm), "
+        f"coverage {k.coverage:.2f}, trunk stress {k.trunk_stress_pa / 1e6:.2f} MPa",
         0.99,
     )
 

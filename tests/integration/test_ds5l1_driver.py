@@ -15,12 +15,17 @@ from orchard_fem.actuator.ds5l1 import (
     crc16,
     load_calib,
     run_harvest_plan_on_rig,
+    run_harvest_schedule_on_rig,
     s16,
     save_calib,
     split_pulses,
     u16,
 )
-from orchard_fem.actuator.harvest_bridge import plan_harvest_execution
+from orchard_fem.actuator.harvest_bridge import (
+    HarvestSchedule,
+    HarvestStage,
+    plan_harvest_execution,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +230,7 @@ def test_linkage_full_run_saves_calibration(tmp_path):
     calib_file = tmp_path / "calib.json"
     drv = FakeRigDriver(measured_hz=2.0)
     outcome = run_harvest_plan_on_rig(
-        _plan(), driver=drv, calib_path=calib_file,
+        _plan(), driver=drv, calib_path=calib_file, calibrate=True,
     )
     assert outcome == "completed"
     names = [c[0] for c in drv.calls]
@@ -235,6 +240,15 @@ def test_linkage_full_run_saves_calibration(tmp_path):
     table = json.loads(calib_file.read_text(encoding="utf-8"))
     assert calib_key(4.0, 2.0) in table
     assert table[calib_key(4.0, 2.0)]["f_act"] == pytest.approx(2.0)
+
+
+def test_linkage_no_online_calibration_by_default(tmp_path):
+    # default calibrate=False → exact duration, no measure_freq, nothing saved
+    calib_file = tmp_path / "calib.json"
+    drv = FakeRigDriver(measured_hz=2.0)
+    outcome = run_harvest_plan_on_rig(_plan(), driver=drv, calib_path=calib_file)
+    assert outcome == "completed"
+    assert not calib_file.exists()
 
 
 def test_linkage_seeds_rpm_from_calibration_cache(tmp_path):
@@ -262,3 +276,51 @@ def test_linkage_unclearable_alarm_refuses_to_run(tmp_path):
     with pytest.raises(IOError, match="E-161"):
         run_harvest_plan_on_rig(_plan(), driver=drv, calib_path=tmp_path / "c.json")
     assert ("start",) not in drv.calls
+
+
+# ---------------------------------------------------------------------------
+# Multi-stage schedule → rig linkage (fake driver)
+# ---------------------------------------------------------------------------
+
+def _sched(freq=2.0, stroke_pp=4.0, duration=0.2):
+    plan = plan_harvest_execution(
+        frequency_hz=freq, clamp_peak_to_peak_mm=stroke_pp, duration_s=duration)
+    return HarvestSchedule(
+        stages=(HarvestStage(1, plan, ("b1", "b2"), 0.5, 1.0e6, 4),),
+        clamp_label="trunk@0.40", target_coverage=0.95,
+    )
+
+
+def test_schedule_linkage_runs_and_saves_calibration(tmp_path):
+    calib_file = tmp_path / "c.json"
+    drv = FakeRigDriver(measured_hz=2.0)               # matches stage freq → converges
+    outcome = run_harvest_schedule_on_rig(
+        _sched(freq=2.0), driver=drv, calib_path=calib_file, calibrate=True)
+    assert outcome == "completed"
+    names = [c[0] for c in drv.calls]
+    assert names.index("init_mode") < names.index("home_center") < names.index("set_vibration")
+    assert names.count("start") == 1
+    assert names[-1] == "stop"
+    table = json.loads(calib_file.read_text(encoding="utf-8"))
+    assert calib_key(4.0, 2.0) in table                # stage's (S, f) saved
+
+
+def test_schedule_linkage_seeds_each_stage_from_cache(tmp_path):
+    calib_file = tmp_path / "c.json"
+    save_calib({calib_key(4.0, 2.0): {"rpm": 98.8, "f_act": 1.99, "accel": 10}}, calib_file)
+    drv = FakeRigDriver(measured_hz=2.0)
+    run_harvest_schedule_on_rig(_sched(freq=2.0), driver=drv, calib_path=calib_file, home=False)
+    first_seg = next(c for c in drv.calls if c[0] == "set_vibration")
+    assert first_seg[2] == pytest.approx(98.8)         # seeded from cache, not the model
+
+
+def test_schedule_linkage_refuses_infeasible(tmp_path):
+    bad = plan_harvest_execution(
+        frequency_hz=2.0, clamp_peak_to_peak_mm=30.0, duration_s=1.0)
+    sched = HarvestSchedule(
+        stages=(HarvestStage(1, bad, ("b1",), 1.0, 1.0e6, 1),),
+        clamp_label="x", target_coverage=0.95,
+    )
+    with pytest.raises(ValueError, match="infeasible"):
+        run_harvest_schedule_on_rig(
+            sched, driver=FakeRigDriver(measured_hz=2.0), calib_path=tmp_path / "c.json")
