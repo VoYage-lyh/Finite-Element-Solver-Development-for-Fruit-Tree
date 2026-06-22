@@ -26,7 +26,7 @@ imports happen on first invocation, keeping module import cheap.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 import numpy as np
@@ -502,7 +502,150 @@ def build_fenicsx_pareto_evaluator(
     return evaluator
 
 
+@dataclass(frozen=True)
+class HarvestOutcome:
+    """Everything one harmonic FE solve yields at a ``(clamp, f, A)`` work point.
+
+    The fruit-attachment links go nonlinear above the detachment displacement,
+    so the response is **not** linear in amplitude and each ``(f, A)`` needs its
+    own solve.  But coverage, trunk stress, and the per-branch detachment ratios
+    all come from the *same* displacement field, so this one struct serves both
+    the recommendation Pareto sweep and the harvest-schedule outcome grid — the
+    schedule no longer needs a second solve just for stress.
+    """
+
+    coverage: float
+    trunk_stress_pa: float
+    branch_governing_ratio: dict          # branch_id → min inertia/detach ratio (detached only)
+    n_detached_fruits: int
+
+    @property
+    def detached_branches(self) -> frozenset:
+        return frozenset(self.branch_governing_ratio)
+
+
+def build_outcome_solver(
+    model,
+    *,
+    polynomial_degree: int = 1,
+    amplitude_unit: str = "mm",
+    trunk_branch_id: str = "trunk",
+    coverage_mode: str = "branch",
+):
+    """Return ``solve(params, frequency_hz, amplitude, clamp_label) -> HarvestOutcome``.
+
+    One harmonic FE solve per work point, returning coverage + trunk stress +
+    per-branch detachment from a single displacement field.  This is the shared
+    FE primitive behind both :func:`recommend_harvest_parameters` and
+    :func:`~orchard_fem.workflows.harvest_schedule.build_branch_outcome_grid`;
+    it merges what used to be the Pareto evaluator's solve and the schedule's
+    *separate* fruit-detachment and stress solves into one, and the work points
+    are independent so they parallelise across processes.
+
+    The model's excitation should already be displacement-driven; the solver
+    only reroutes the clamp / frequency / amplitude.
+    """
+    if amplitude_unit not in ("mm", "m"):
+        raise ValueError("amplitude_unit must be 'mm' or 'm'.")
+    if coverage_mode not in ("fruit", "branch"):
+        raise ValueError("coverage_mode must be 'fruit' or 'branch'.")
+    A_scale = 1.0e-3 if amplitude_unit == "mm" else 1.0
+
+    r_outer = _trunk_outer_radius(model, trunk_branch_id)
+    delta_s = _trunk_first_segment_length(model, trunk_branch_id)
+
+    def solve(params, frequency_hz, amplitude, clamp_label) -> HarvestOutcome:
+        from orchard_fem.fenicsx.frequency_response import (
+            solve_embedded_beam_frequency_response_experiment,
+        )
+
+        cloned = _apply_theta_to_model(model, params)
+        branch_id, target_s = _parse_clamp_label(clamp_label)
+        cloned = replace(cloned, excitation=replace(
+            cloned.excitation,
+            target_branch_id=branch_id,
+            target_s=target_s if target_s is not None else cloned.excitation.target_s,
+            amplitude=float(amplitude) * A_scale,
+            driving_frequency_hz=float(frequency_hz),
+        ))
+        cloned = replace(cloned, analysis=replace(
+            cloned.analysis,
+            frequency_start_hz=float(frequency_hz),
+            frequency_end_hz=float(frequency_hz) + 1.0e-6,
+            frequency_steps=1,
+        ))
+        cloned, fruit_keys, trunk_keys = _augment_observations_for_evaluation(
+            cloned, trunk_branch_id,
+        )
+        frf_exp = solve_embedded_beam_frequency_response_experiment(
+            cloned, polynomial_degree=polynomial_degree,
+        )
+        point = frf_exp.result.points[0]
+        names = frf_exp.result.observation_names
+        omega = 2.0 * np.pi * float(frequency_hz)
+        d_detach = 0.010
+        if cloned.fruit_policy is not None:
+            d_detach = float(cloned.fruit_policy.detachment_displacement_m)
+        name_to_idx = {n: i for i, n in enumerate(names)}
+        cplx = point.observation_complex
+        if cplx is None:
+            cplx = tuple(complex(m, 0.0) for m in point.observation_magnitudes)
+        fruit_lookup = {f.fruit_id: f for f in cloned.fruits}
+
+        governing: dict = {}
+        n_detached = 0
+        n_total = 0
+        branches_with_fruit: set = set()
+        for obs_id, fruit_id in fruit_keys:
+            fruit = fruit_lookup.get(fruit_id)
+            if fruit is None or fruit.mass <= 0.0 or fruit.stiffness <= 0.0:
+                continue
+            idx = name_to_idx.get(obs_id)
+            if idx is None:
+                continue
+            n_total += 1
+            branches_with_fruit.add(fruit.branch_id)
+            u_mag = float(abs(cplx[idx]))
+            inertia = fruit.mass * omega * omega * u_mag
+            detach_force = fruit.stiffness * d_detach
+            if detach_force <= 0.0:
+                continue
+            ratio = inertia / detach_force
+            if ratio >= 1.0:
+                n_detached += 1
+                prev = governing.get(fruit.branch_id)
+                governing[fruit.branch_id] = ratio if prev is None else min(prev, ratio)
+
+        if coverage_mode == "branch":
+            coverage = (len(governing) / len(branches_with_fruit)
+                        if branches_with_fruit else 0.0)
+        else:  # "fruit"
+            coverage = n_detached / n_total if n_total else 0.0
+
+        root_rot = _component_complex(point, names, trunk_keys[0], ("ry", "rz"))
+        next_rot = _component_complex(point, names, trunk_keys[1], ("ry", "rz"))
+        if root_rot and next_rot:
+            d_ry = next_rot.get("ry", 0.0) - root_rot.get("ry", 0.0)
+            d_rz = next_rot.get("rz", 0.0) - root_rot.get("rz", 0.0)
+            kappa_mag = (abs(d_ry) ** 2 + abs(d_rz) ** 2) ** 0.5 / max(delta_s, 1.0e-9)
+        else:
+            kappa_mag = 0.0
+        E = float(params.get("E", 1.0e10))
+        stress = E * r_outer * kappa_mag
+
+        return HarvestOutcome(
+            coverage=float(coverage),
+            trunk_stress_pa=float(stress),
+            branch_governing_ratio=governing,
+            n_detached_fruits=n_detached,
+        )
+
+    return solve
+
+
 __all__ = [
+    "HarvestOutcome",
     "build_fenicsx_forward_operator",
     "build_fenicsx_pareto_evaluator",
+    "build_outcome_solver",
 ]

@@ -561,6 +561,36 @@ class HarvestSchedule:
     def final_coverage(self) -> float:
         return self.stages[-1].cumulative_coverage if self.stages else 0.0
 
+    def to_dict(self) -> dict:
+        """JSON-friendly dict (tuples → lists) for export alongside the result."""
+        import dataclasses
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "HarvestSchedule":
+        """Rebuild a schedule from :meth:`to_dict` output (offline execution machine)."""
+        def _plan(p: dict) -> HarvestPlan:
+            return HarvestPlan(
+                stroke_mm=float(p["stroke_mm"]), seed_rpm=float(p["seed_rpm"]),
+                accel_ms=int(p["accel_ms"]), frequency_hz=float(p["frequency_hz"]),
+                duration_s=float(p["duration_s"]), n_cycles=float(p["n_cycles"]),
+                feasible=bool(p["feasible"]), notes=tuple(p.get("notes", ())),
+                excitation_label=p.get("excitation_label", ""),
+                requested_stroke_mm=float(p.get("requested_stroke_mm", 0.0)))
+        stages = tuple(
+            HarvestStage(
+                index=int(s["index"]), plan=_plan(s["plan"]),
+                new_branches=tuple(s["new_branches"]),
+                cumulative_coverage=float(s["cumulative_coverage"]),
+                trunk_stress_pa=float(s["trunk_stress_pa"]),
+                n_detached_fruits=int(s["n_detached_fruits"]),
+            )
+            for s in d.get("stages", [])
+        )
+        return HarvestSchedule(
+            stages=stages, clamp_label=d.get("clamp_label", ""),
+            target_coverage=float(d.get("target_coverage", 0.95)))
+
     def summary(self) -> str:
         """Aligned monospace table (render with a fixed-width font)."""
         head = (f"Harvest schedule @ {self.clamp_label}\n"
@@ -606,6 +636,7 @@ def execute_harvest_schedule(
     driver: VibrationDriver,
     *,
     home: Callable[[], None] | None = None,
+    recenter: Callable[[], None] | None = None,
     calibrate: bool = True,
     limits: DS5L1Limits | None = None,
     alarm_poll_s: float = 0.2,
@@ -619,10 +650,13 @@ def execute_harvest_schedule(
 ) -> str:
     """Run a multi-stage :class:`HarvestSchedule` on the rig, stage by stage.
 
-    The drive is started once; between stages the segments are rewritten **live**
-    via :meth:`set_vibration` (no stop), so the cylinder flows from one work
-    point to the next.  Each stage optionally re-locks its frequency by online
-    calibration, then runs for its own ``duration_s`` while polling the alarm and
+    When *recenter* is given, the drive is stopped and the rod returned to
+    mid-stroke between stages, so each stage starts from centre with full travel
+    (a larger-stroke stage that began from an off-centre rest position would
+    otherwise overrun the cylinder end and trip an alarm).  Without *recenter*
+    the drive is started once and segments are rewritten live (legacy flow).
+    Each stage optionally re-locks its frequency by online calibration, then runs
+    for its own ``duration_s`` while polling the alarm and
     the stop request.  An alarm or a stop request aborts the **whole** schedule.
 
     Returns ``"completed"``, ``"alarm_stop"``, or ``"user_stop"``.
@@ -659,6 +693,15 @@ def execute_harvest_schedule(
     try:
         for stage in schedule.stages:
             plan = stage.plan
+            # Between stages, stop and return the rod to mid-stroke so the next
+            # (possibly larger) stroke has full symmetric travel — otherwise it
+            # oscillates from wherever the previous stage stopped and a big stroke
+            # runs the rod into the cylinder end (alarm / unexpected stop).
+            if started and recenter is not None:
+                status("Re-centring to mid-stroke before the next stage…")
+                driver.stop()
+                started = False
+                recenter()
             status(f"Stage {stage.index}/{len(schedule.stages)}: "
                    f"{plan.frequency_hz:.2f} Hz, stroke {plan.stroke_mm:.1f} mm, "
                    f"{plan.duration_s:g} s (+{len(stage.new_branches)} branches).")

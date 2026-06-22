@@ -196,12 +196,21 @@ class FakeRigDriver:
 
     def home_center(self, status_cb=None, **kw) -> None:
         self.calls.append(("home_center",))
+        self._enc = 0                       # mid-stroke reference
+
+    def enc_pos(self) -> int:
+        return getattr(self, "_enc", 0)
+
+    def move_relative(self, delta_pulses, **kw) -> None:
+        self.calls.append(("move_relative", int(delta_pulses)))
+        self._enc = 0                       # contactless return to centre
 
     def set_vibration(self, stroke_mm, rpm, accel_ms) -> None:
         self.calls.append(("set_vibration", round(stroke_mm, 3), round(rpm, 1), accel_ms))
 
     def start(self) -> None:
         self.calls.append(("start",))
+        self._enc = 7000                    # a running stage leaves the rod off-centre
 
     def stop(self) -> None:
         self.calls.append(("stop",))

@@ -72,8 +72,7 @@ def _has(module: str) -> bool:
 
 
 def _pick_ui_font(root: tk.Tk) -> str:
-    """选一个本机可用、覆盖中文的界面字体并设为 Tk 默认。
-
+    """
     Linux/WSL 下 Tk 默认字体常缺 CJK 字形(显示为 \\uXXXX 或方框);
     WSL 上可通过 fontconfig 引入 /mnt/c/Windows/Fonts(微软雅黑)。
     """
@@ -379,22 +378,28 @@ class HarvestConsole:
         ttk.Button(row, text="Browse…", command=self.on_browse_model).pack(side="left")
         ttk.Button(row, text="Load", command=self.on_load_model).pack(side="left", padx=6)
 
-        box = ttk.LabelFrame(tab, text="Model summary")
-        box.pack(fill="x", padx=6, pady=3)
-        self.model_info = tk.Text(box, state="disabled", height=9, font=(self.ui_font, 11),
+        main = ttk.Frame(tab)
+        main.pack(fill="both", expand=True, padx=6, pady=3)
+
+        box = ttk.LabelFrame(main, text="Model summary")
+        box.pack(side="left", fill="y", padx=(0, 6))
+        self.model_info = tk.Text(box, state="disabled", width=46, font=(self.ui_font, 11),
                                   bg=PALETTE["surface"], fg=PALETTE["text"],
                                   relief="flat", borderwidth=0, highlightthickness=1,
                                   highlightbackground=PALETTE["border"], padx=10, pady=8)
-        self.model_info.pack(fill="x", padx=4, pady=4)
+        self.model_info.pack(fill="both", expand=True, padx=4, pady=4)
 
-        figs = ttk.LabelFrame(tab, text="Topology (branch labels match ② clamp points)")
-        figs.pack(fill="both", expand=True, padx=6, pady=3)
+        # topology on the right; two figures side-by-side, each auto-fit to its half
+        figs = ttk.LabelFrame(main, text="Topology (branch labels match ② clamp points)")
+        figs.pack(side="left", fill="both", expand=True)
         self.fig2d = ttk.Label(figs, text="2D side view — load a model to render",
                                anchor="center", style="Muted.TLabel")
         self.fig2d.pack(side="left", fill="both", expand=True, padx=4, pady=4)
         self.fig3d = ttk.Label(figs, text="3D view — load a model to render",
                                anchor="center", style="Muted.TLabel")
         self.fig3d.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        self.fig2d.bind("<Configure>", lambda _e: self._fit_figure(self.fig2d))
+        self.fig3d.bind("<Configure>", lambda _e: self._fit_figure(self.fig3d))
 
     def on_browse_model(self) -> None:
         path = filedialog.askopenfilename(
@@ -466,8 +471,10 @@ class HarvestConsole:
             try:
                 from orchard_fem.visualization.rendering import plot_geometry
                 from orchard_fem.visualization.scene3d import plot_tree_3d
-                plot_geometry(raw, Path(p2d), show=False)
-                plot_tree_3d(raw, show=False, output_path=p3d)
+                # structure + branch labels only — no excitation/observation markers
+                # (those are FRF inputs, not a chosen clamp; would mislead pre-simulation)
+                plot_geometry(raw, Path(p2d), show=False, show_io_markers=False)
+                plot_tree_3d(raw, show=False, output_path=p3d, show_io_markers=False)
                 try:
                     import matplotlib.pyplot as plt
                     plt.close("all")
@@ -487,20 +494,39 @@ class HarvestConsole:
             return
         p2d, p3d = payload
         try:
-            from PIL import Image, ImageTk
+            from PIL import Image
         except Exception as e:  # noqa: BLE001
             self.fig2d.configure(text=f"Pillow unavailable: {e}", image="")
             return
         for label, path in ((self.fig2d, p2d), (self.fig3d, p3d)):
             try:
-                img = Image.open(path)
-                img.thumbnail((520, 520))
-                photo = ImageTk.PhotoImage(img)
-                self._fig_imgs[path] = photo       # keep a ref so Tk doesn't GC it
-                label.configure(image=photo, text="")
+                self._fig_src[label] = Image.open(path).convert("RGB")
+                self._fig_fitsize.pop(label, None)   # force a re-fit
+                self._fit_figure(label)
             except Exception as e:  # noqa: BLE001
                 label.configure(text=f"render failed: {e}", image="")
         self.log("Topology rendered (2D + 3D).")
+
+    def _fit_figure(self, label) -> None:
+        """Scale the stored source image to the label's current size (resize-aware)."""
+        src = self._fig_src.get(label)
+        if src is None:
+            return
+        w, h = label.winfo_width(), label.winfo_height()
+        if w < 40 or h < 40:
+            return
+        if self._fig_fitsize.get(label) == (w, h):   # avoid <Configure> feedback loop
+            return
+        self._fig_fitsize[label] = (w, h)
+        try:
+            from PIL import ImageTk
+            img = src.copy()
+            img.thumbnail((w - 10, h - 10))
+            photo = ImageTk.PhotoImage(img)
+            self._fig_imgs[label] = photo            # keep a ref so Tk doesn't GC it
+            label.configure(image=photo, text="")
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------ #
     # ② 仿真推荐
@@ -731,7 +757,7 @@ class HarvestConsole:
                         m, m.fruit_policy, opt.dense_fruit_spacing))
                 n_branches = len({f.branch_id for f in m.fruits})
                 grid = build_branch_outcome_grid(
-                    m, clamp, f_grid, a_grid,
+                    m, clamp, f_grid, a_grid, limits=LIMITS,
                     progress_cb=lambda msg, fr: (self._post("log", msg),
                                                  self._post("progress", fr)))
                 sched = compute_harvest_schedule(
@@ -802,16 +828,28 @@ class HarvestConsole:
             return
         path = filedialog.asksaveasfilename(
             defaultextension=".json", initialfile="recommendation.json")
-        if path:
-            self.result.save_json(path)
-            self.log(f"Result exported → {path}")
+        if not path:
+            return
+        # carry the executable schedule too, so an offline rig can run it without FE
+        payload = {
+            "recommendation": self.result.to_json_dict(),
+            "schedule": self.schedule.to_dict() if self.schedule is not None else None,
+        }
+        Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        n = len(self.schedule.stages) if self.schedule is not None else 0
+        self.log(f"Result exported → {path} ({n}-stage schedule included)")
 
     def on_import_result(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("Recommendation JSON", "*.json")])
         if not path:
             return
         try:
-            self.result = RecommendationResult.load_json(path)
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            # new format: {"recommendation": {...}, "schedule": {...}|null};
+            # legacy format: a bare recommendation dict.
+            rec_dict = data["recommendation"] if "recommendation" in data else data
+            sched_dict = data.get("schedule") if "recommendation" in data else None
+            self.result = RecommendationResult.from_json_dict(rec_dict)
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Load failed", str(e))
             return
@@ -819,6 +857,15 @@ class HarvestConsole:
         for step in self.result.steps:
             self.log(f"[imported] {step}")
         self.log(f"Result loaded ({self.result.model_name})")
+        if sched_dict:
+            from orchard_fem.actuator.harvest_bridge import HarvestSchedule
+            self._on_sched_done(HarvestSchedule.from_dict(sched_dict))
+            self.log("Harvest schedule restored from file — ready to run in ③.")
+        else:
+            self.schedule = None
+            self._set_panel(self.info_text,
+                            "Loaded a recommendation with no schedule.\n"
+                            "Re-run the simulation (needs dolfinx) to build the staged sequence.")
 
     # ------------------------------------------------------------------ #
     # ③ Execution (working point + plan + run)

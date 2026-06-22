@@ -197,6 +197,7 @@ class RecommendationOptions:
     stress_ceiling_pa: float = 100.0e6
     duration_s: float = 10.0
     limits: DS5L1Limits = field(default_factory=DS5L1Limits)
+    n_jobs: int = -1            # FE solves across processes; <=0 = all cores, 1 = serial
 
 
 @dataclass(frozen=True)
@@ -476,27 +477,21 @@ def _default_frf_sweep(model: Any, f_min: float, f_max: float, steps: int):
     return freqs, mags
 
 
-def _default_evaluator_factory(model: Any, options: RecommendationOptions):
-    """Displacement-excitation Pareto evaluator (e2e convention)."""
-    from orchard_fem.calibration.fenicsx_bridge import build_fenicsx_pareto_evaluator
+def _default_outcome_solver_factory(model: Any, options: RecommendationOptions):
+    """Displacement-excitation outcome solver (e2e convention).
+
+    Returns ``solve(params, f, A, clamp) -> HarvestOutcome`` — one FE solve per
+    work point yielding coverage + trunk stress + per-branch detachment.
+    """
+    from orchard_fem.calibration.fenicsx_bridge import build_outcome_solver
     from orchard_fem.domain import ExcitationKind
 
     disp_model = replace(model, excitation=replace(
         model.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT,
     ))
-    evaluator = build_fenicsx_pareto_evaluator(
+    return build_outcome_solver(
         disp_model, amplitude_unit="mm", coverage_mode=options.coverage_mode,
     )
-    theta = {
-        "E": float(model.materials[0].youngs_modulus),
-        "rho": float(model.materials[0].density),
-    }
-
-    def call(frequency_hz: float, amplitude_mm: float, clamp_label: str):
-        obj = evaluator(theta, frequency_hz, amplitude_mm, clamp_label)
-        return float(obj.detachment_coverage), float(obj.trunk_max_stress)
-
-    return call
 
 
 def recommend_harvest_parameters(
@@ -531,14 +526,18 @@ def recommend_harvest_parameters(
     """
     import numpy as np
 
+    from orchard_fem.calibration.fenicsx_bridge import HarvestOutcome
     from orchard_fem.recommendation.pareto import (
         find_knee_min_distance,
         non_dominated_mask,
     )
+    from orchard_fem.workflows._solve_pool import (
+        resolve_n_jobs,
+        solve_outcomes_parallel,
+    )
 
     opt = options or RecommendationOptions()
     sweep = frf_sweep or _default_frf_sweep
-    make_evaluator = evaluator_factory or _default_evaluator_factory
     steps: list[str] = []
     t_start = time.time()
 
@@ -597,42 +596,80 @@ def recommend_harvest_parameters(
     log(f"Working-point grid: |f|={len(f_grid)} × |A|={len(a_grid)}", 0.24)
 
     # -- 4. per-clamp Pareto sweep --------------------------------------------
+    # Only rig-feasible (f, A) cells are ever executable, so we solve those alone
+    # (unreachable frequencies/strokes are skipped, not solved-then-discarded).
     clamp_labels = candidate_clamp_labels(model, opt)
-    evaluate = make_evaluator(model, opt)
-    n_total = len(clamp_labels) * len(f_grid) * len(a_grid)
-    log(f"{len(clamp_labels)} candidate clamps, {n_total} single-point solves", 0.25)
+    work_points = [
+        (clamp_label, float(f), float(a))
+        for clamp_label in clamp_labels
+        for f in f_grid
+        for a in a_grid
+        if rig_feasible(float(f), float(a), opt.limits)
+    ]
+    if not work_points:
+        raise RuntimeError(
+            "No rig-feasible (f, A) work points: every grid cell is outside the "
+            "cylinder envelope. Relax the grids or re-clamp."
+        )
+    theta = {
+        "E": float(model.materials[0].youngs_modulus),
+        "rho": float(model.materials[0].density),
+    }
+    # Parallelise only the default FE backend (an injected evaluator may hold an
+    # unpicklable closure → run it serially in-process).
+    injected = evaluator_factory is not None
+    n_jobs = 1 if injected else resolve_n_jobs(opt.n_jobs, len(work_points))
+    n_total = len(work_points)
+    log(f"{len(clamp_labels)} candidate clamps, {n_total} rig-feasible solves"
+        f"{'' if n_jobs == 1 else f' across {n_jobs} processes'}", 0.25)
 
-    clamps: list[ClampRecommendation] = []
     n_done = 0
+
+    def _on_done(_clamp: str, _f: float, _a: float) -> None:
+        nonlocal n_done
+        n_done += 1
+        progress_cb(f"FE solves {n_done}/{n_total}", 0.25 + 0.70 * n_done / n_total)
+
+    if n_jobs > 1:
+        from orchard_fem.domain import ExcitationKind
+        disp_model = replace(model, excitation=replace(
+            model.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT))
+        solver_kw = dict(amplitude_unit="mm", coverage_mode=opt.coverage_mode)
+        outcomes = solve_outcomes_parallel(
+            disp_model, solver_kw, work_points, theta, n_jobs,
+            on_done=_on_done, cancel_cb=cancel_cb,
+        )
+    else:
+        if injected:
+            evaluate = evaluator_factory(model, opt)
+
+            def solve(_params, f, a, clamp):
+                cov, stress = evaluate(float(f), float(a), clamp)
+                return HarvestOutcome(coverage=float(cov), trunk_stress_pa=float(stress),
+                                      branch_governing_ratio={}, n_detached_fruits=0)
+        else:
+            solve = _default_outcome_solver_factory(model, opt)
+        outcomes = {}
+        for clamp_label, f, a in work_points:
+            check_cancel()
+            outcomes[(clamp_label, f, a)] = solve(theta, f, a, clamp_label)
+            _on_done(clamp_label, f, a)
+
+    # group the flat outcomes back into per-clamp working points
+    clamps: list[ClampRecommendation] = []
     for clamp_label in clamp_labels:
-        raw: list[WorkingPoint] = []
-        failed = False
-        for f in f_grid:
-            for a in a_grid:
-                check_cancel()
-                try:
-                    coverage, stress = evaluate(float(f), float(a), clamp_label)
-                except Exception as exc:  # noqa: BLE001 - skip pathological clamp
-                    log(f"Skipping clamp {clamp_label}: {exc}", 0.25 + 0.70 * n_done / n_total)
-                    failed = True
-                    break
-                n_done += 1
-                raw.append(WorkingPoint(
-                    clamp_label=clamp_label,
-                    frequency_hz=float(f),
-                    amplitude_mm=float(a),
-                    coverage=coverage,
-                    trunk_stress_pa=stress,
-                    rig_feasible=rig_feasible(float(f), float(a), opt.limits),
-                ))
-                progress_cb(
-                    f"{clamp_label}: f={f:g} Hz A={a:g} mm → "
-                    f"coverage {coverage:.2f}, σ {stress / 1e6:.2f} MPa",
-                    0.25 + 0.70 * n_done / n_total,
-                )
-            if failed:
-                break
-        if failed or not raw:
+        raw = [
+            WorkingPoint(
+                clamp_label=clamp_label, frequency_hz=float(f), amplitude_mm=float(a),
+                coverage=outcomes[(clamp_label, float(f), float(a))].coverage,
+                trunk_stress_pa=outcomes[(clamp_label, float(f), float(a))].trunk_stress_pa,
+                rig_feasible=True,   # work_points were filtered to rig-feasible cells
+            )
+            for f in f_grid
+            for a in a_grid
+            if (clamp_label, float(f), float(a)) in outcomes
+        ]
+        if not raw:
             continue
 
         # hard constraints: rig envelope + stress sanity ceiling

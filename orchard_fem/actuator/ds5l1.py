@@ -714,8 +714,9 @@ def run_harvest_schedule_on_rig(
 
     The staged-adjustment-sequence counterpart of :func:`run_harvest_plan_on_rig`:
     connect → pre-clear alarms → init → home once → run every stage in order via
-    :func:`~orchard_fem.actuator.harvest_bridge.execute_harvest_schedule`
-    (drive started once, segments rewritten live between stages).  Each stage is
+    :func:`~orchard_fem.actuator.harvest_bridge.execute_harvest_schedule`, with the
+    rod returned to mid-stroke (contactless :meth:`DS5L1.move_relative`) between
+    stages so a larger stroke always has full travel.  Each stage is
     seeded from its own ``(S, f)`` calibration-table entry when present, and its
     converged calibration point is saved back.
 
@@ -755,6 +756,11 @@ def run_harvest_schedule_on_rig(
             seeded.append(dataclasses.replace(stage, plan=plan))
         schedule = dataclasses.replace(schedule, stages=tuple(seeded))
 
+        # Mid-stroke reference (absolute encoder) captured at homing; used to
+        # return the rod to centre between stages so a larger stroke never starts
+        # from an off-centre rest position and overruns the cylinder end.
+        centre: dict = {"enc": None}
+
         home_cb: Callable[[], None] | None = None
         if home:
             if drv.setup_homing(home_offset_mm, home_reverse):
@@ -764,6 +770,17 @@ def run_harvest_schedule_on_rig(
 
             def home_cb() -> None:
                 drv.home_center(status_cb=status_cb)
+                centre["enc"] = drv.enc_pos()
+
+        def recenter_cb() -> None:
+            if centre["enc"] is None:
+                return                      # no centre reference (homing skipped)
+            drv.stop()
+            delta_pulses = round((centre["enc"] - drv.enc_pos()) / DS5L1.ENC_PER_PULSE)
+            if abs(delta_pulses) < 100:     # already within ~0.1 mm of centre
+                return
+            status(f"Returning rod to mid-stroke ({delta_pulses / PULSES_PER_MM:+.2f} mm)…")
+            drv.move_relative(delta_pulses)
 
         # Track the active stage so calibration is saved under the right (S, f).
         active: dict = {"key": None, "accel": 10}
@@ -789,6 +806,7 @@ def run_harvest_schedule_on_rig(
         return execute_harvest_schedule(
             schedule, drv,
             home=home_cb,
+            recenter=recenter_cb,
             calibrate=calibrate,
             limits=limits,
             on_status=status_cb,

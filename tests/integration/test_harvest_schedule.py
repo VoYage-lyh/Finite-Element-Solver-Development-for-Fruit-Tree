@@ -190,6 +190,25 @@ def test_execute_schedule_runs_stages_in_order_started_once():
     assert names.index("set_vibration") < names.index("start")
 
 
+def test_execute_schedule_recenters_between_stages():
+    # With a recenter callback, the rod is returned to mid-stroke between stages,
+    # so the drive is stopped+restarted each stage (not started once).
+    drv = FakeDriver()
+    recenters = {"n": 0}
+    clock = {"t": 0.0}
+    outcome = execute_harvest_schedule(
+        _two_stage_schedule(), drv, calibrate=False,
+        recenter=lambda: recenters.__setitem__("n", recenters["n"] + 1),
+        now=lambda: clock["t"],
+        sleep=lambda dt: clock.__setitem__("t", clock["t"] + max(dt, 0.5)),
+    )
+    assert outcome == "completed"
+    assert recenters["n"] == 1                         # once: between the 2 stages, not before stage 1
+    names = [c[0] for c in drv.calls]
+    assert names.count("start") == 2                   # restarted from centre each stage
+    assert names.count("set_vibration") == 2
+
+
 def test_execute_schedule_alarm_aborts_whole_sequence():
     drv = FakeDriver(alarm_at_stage=1)                # alarm during stage 1
     outcome = execute_harvest_schedule(

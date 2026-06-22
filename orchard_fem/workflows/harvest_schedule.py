@@ -220,108 +220,78 @@ def build_branch_outcome_grid(
     a_grid_mm: list[float],
     *,
     theta: dict[str, float] | None = None,
+    limits: DS5L1Limits | None = None,
+    n_jobs: int = -1,
     progress_cb: Callable[[str, float], None] | None = None,
 ) -> BranchOutcomeGrid:
-    """Solve the FE problem on each ``(f, A)`` cell and tabulate branch outcomes.
+    """Solve each *runnable* ``(f, A)`` cell and tabulate branch outcomes.
 
-    Ports ``verify_pareto_end_to_end.py``'s ``_compute_fruit_outcomes`` (per-fruit
-    inertia ``F = m·ω²·|u|`` vs. detachment ``F = k·d``) and aggregates to
-    per-branch detachment + governing load ratio, plus the trunk stress from the
-    Pareto evaluator.  Requires dolfinx; imported lazily here.
+    Per-fruit inertia ``F = m·ω²·|u|`` vs. detachment ``F = k·d`` aggregated to
+    per-branch detachment + governing load ratio, plus the trunk stress — all
+    from **one** solve per cell (the shared
+    :func:`~orchard_fem.calibration.fenicsx_bridge.build_outcome_solver`, which
+    replaces the old separate fruit and stress solves).  Cells the rig can't
+    execute are skipped, and the independent solves fan out across processes
+    (``n_jobs`` <=0 = all cores, 1 = serial).  Requires dolfinx; imported lazily.
     """
-    import numpy as np
+    from dataclasses import replace as _replace
 
-    from orchard_fem.calibration.fenicsx_bridge import (
-        _apply_theta_to_model,
-        _parse_clamp_label,
-        build_fenicsx_pareto_evaluator,
-    )
+    from orchard_fem.calibration.fenicsx_bridge import build_outcome_solver
     from orchard_fem.domain import ExcitationKind
-    from orchard_fem.fenicsx.frequency_response import (
-        solve_embedded_beam_frequency_response_experiment,
+    from orchard_fem.workflows._solve_pool import (
+        resolve_n_jobs,
+        solve_outcomes_parallel,
     )
-    from orchard_fem.topology import ObservationPoint
 
+    lim = limits or DS5L1Limits()
     theta = theta or {
         "E": float(model.materials[0].youngs_modulus),
         "rho": float(model.materials[0].density),
     }
-    # Trunk stress comes from the displacement-excitation Pareto evaluator.
-    from dataclasses import replace as _replace
+
+    def _runnable(f: float, a: float) -> bool:
+        stroke = 2.0 * a
+        return (stroke <= lim.max_stroke_mm and f <= lim.max_freq_hz
+                and lim.seed_rpm(stroke, f) is not None)
+
+    work_points = [
+        (clamp_label, float(f), float(a))
+        for f in f_grid for a in a_grid_mm
+        if _runnable(float(f), float(a))
+    ]
+    if not work_points:
+        return {}
 
     disp_model = _replace(model, excitation=_replace(
         model.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT))
-    stress_eval = build_fenicsx_pareto_evaluator(
-        disp_model, amplitude_unit="mm", coverage_mode="branch")
+    n = len(work_points)
+    n_jobs_r = resolve_n_jobs(n_jobs, n)
+    done = 0
 
-    branch_id, target_s = _parse_clamp_label(clamp_label)
-    d_detach_default = 0.010
+    def _on_done(_c: str, _f: float, _a: float) -> None:
+        nonlocal done
+        done += 1
+        if progress_cb is not None:
+            progress_cb(f"grid {clamp_label}: {done}/{n} solves", done / n)
+
+    if n_jobs_r > 1:
+        solver_kw = dict(amplitude_unit="mm", coverage_mode="branch")
+        outcomes = solve_outcomes_parallel(
+            disp_model, solver_kw, work_points, theta, n_jobs_r, on_done=_on_done)
+    else:
+        solve = build_outcome_solver(
+            disp_model, amplitude_unit="mm", coverage_mode="branch")
+        outcomes = {}
+        for clamp, f, a in work_points:
+            outcomes[(clamp, f, a)] = solve(theta, f, a, clamp)
+            _on_done(clamp, f, a)
 
     grid: BranchOutcomeGrid = {}
-    n_total = len(f_grid) * len(a_grid_mm)
-    done = 0
-    for f in f_grid:
-        for a in a_grid_mm:
-            cloned = _apply_theta_to_model(model, theta)
-            cloned = _replace(cloned, excitation=_replace(
-                cloned.excitation,
-                kind=ExcitationKind.HARMONIC_DISPLACEMENT,   # impose A mm at the clamp
-                target_branch_id=branch_id,
-                target_s=target_s if target_s is not None else cloned.excitation.target_s,
-                amplitude=float(a) * 1.0e-3,
-                driving_frequency_hz=float(f),
-            ), analysis=_replace(
-                cloned.analysis,
-                frequency_start_hz=float(f),
-                frequency_end_hz=float(f) + 1.0e-6,
-                frequency_steps=1,
-            ))
-            extras: list = []
-            fruit_keys: list = []
-            for fruit in cloned.fruits:
-                oid = f"__sched_fruit_{fruit.fruit_id}"
-                extras.append(ObservationPoint(
-                    observation_id=oid, target_type="fruit",
-                    target_id=fruit.fruit_id, target_node="tip",
-                    target_components=[fruit.target_component]))
-                fruit_keys.append((oid, fruit))
-            cloned = _replace(cloned, observations=list(cloned.observations) + extras)
-
-            exp = solve_embedded_beam_frequency_response_experiment(
-                cloned, polynomial_degree=1)
-            point = exp.result.points[0]
-            name_to_idx = {n: i for i, n in enumerate(exp.result.observation_names)}
-            d_detach = (float(cloned.fruit_policy.detachment_displacement_m)
-                        if cloned.fruit_policy is not None else d_detach_default)
-            omega = 2.0 * np.pi * float(f)
-
-            governing: dict[str, float] = {}
-            n_detached = 0
-            for oid, fruit in fruit_keys:
-                idx = name_to_idx.get(oid)
-                if idx is None or fruit.stiffness <= 0.0:
-                    continue
-                u_mag = float(point.observation_magnitudes[idx])
-                inertia = fruit.mass * omega * omega * u_mag
-                detach_force = fruit.stiffness * d_detach
-                if detach_force <= 0.0:
-                    continue
-                ratio = inertia / detach_force
-                if ratio >= 1.0:                # detached (binary inertia criterion)
-                    n_detached += 1
-                    prev = governing.get(fruit.branch_id)
-                    governing[fruit.branch_id] = ratio if prev is None else min(prev, ratio)
-
-            stress_pa = float(stress_eval(theta, float(f), float(a), clamp_label).trunk_max_stress)
-            grid[(float(f), float(a))] = BranchOutcome(
-                detached_branches=frozenset(governing.keys()),
-                branch_governing_ratio=governing,
-                trunk_stress_pa=stress_pa,
-                n_detached_fruits=n_detached,
-            )
-            done += 1
-            if progress_cb is not None:
-                progress_cb(f"grid {clamp_label}: f={f:g} A={a:g} → "
-                            f"{len(governing)} branches, σ {stress_pa / 1e6:.2f} MPa",
-                            done / n_total)
+    for (_clamp, f, a), o in outcomes.items():
+        grid[(f, a)] = BranchOutcome(
+            detached_branches=o.detached_branches,
+            branch_governing_ratio=dict(o.branch_governing_ratio),
+            trunk_stress_pa=o.trunk_stress_pa,
+            n_detached_fruits=o.n_detached_fruits,
+        )
     return grid

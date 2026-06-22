@@ -63,7 +63,8 @@ def _save_figure(fig, output_path: Path, show: bool) -> None:
     plt.close(fig)
 
 
-def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
+def plot_geometry(model: dict, output_path: Path, show: bool,
+                  show_io_markers: bool = True) -> None:
     plt, _ = require_plotting_dependencies(show)
     _apply_publication_style(plt)
     fig, ax = plt.subplots(figsize=(8.0, 8.0))
@@ -132,29 +133,30 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
         )
         fruit_count += 1
 
-    excitation_point, excitation_label = resolve_excitation_point(model)
-    excitation_x, excitation_z = project_xz(excitation_point)
-    ax.scatter(
-        [excitation_x],
-        [excitation_z],
-        s=160.0,
-        marker="*",
-        color="#d62728",
-        edgecolors="black",
-        linewidths=0.8,
-        zorder=5,
-        label="Excitation",
-    )
-    ax.annotate(
-        excitation_label.replace("excitation", "Excitation"),
-        xy=(excitation_x, excitation_z),
-        xytext=(6, 6),
-        textcoords="offset points",
-        fontsize=8,
-        ha="left",
-        va="bottom",
-        color="#d62728",
-    )
+    if show_io_markers:
+        excitation_point, excitation_label = resolve_excitation_point(model)
+        excitation_x, excitation_z = project_xz(excitation_point)
+        ax.scatter(
+            [excitation_x],
+            [excitation_z],
+            s=160.0,
+            marker="*",
+            color="#d62728",
+            edgecolors="black",
+            linewidths=0.8,
+            zorder=5,
+            label="Excitation",
+        )
+        ax.annotate(
+            excitation_label.replace("excitation", "Excitation"),
+            xy=(excitation_x, excitation_z),
+            xytext=(6, 6),
+            textcoords="offset points",
+            fontsize=8,
+            ha="left",
+            va="bottom",
+            color="#d62728",
+        )
 
     node_styles = {
         "root": {"marker": "s", "color": "#1f3a93", "label": "Obs (root)"},
@@ -163,7 +165,7 @@ def plot_geometry(model: dict, output_path: Path, show: bool) -> None:
     }
     legend_seen = set()
     observation_count = 0
-    for observation in model.get("observations", []):
+    for observation in (model.get("observations", []) if show_io_markers else []):
         point, _label = resolve_observation_point(model, observation)
         x, z = project_xz(point)
         node = observation.get("target_node", "tip")

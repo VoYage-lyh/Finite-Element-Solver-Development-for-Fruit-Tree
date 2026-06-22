@@ -132,6 +132,7 @@ def plot_tree_3d(
     *,
     show: bool = True,
     output_path: str | Path | None = None,
+    show_io_markers: bool = True,
 ) -> Any:
     """Render the fruit-tree structure as an interactive 3D figure.
 
@@ -254,6 +255,8 @@ def plot_tree_3d(
 
     # Excitation point — red star, offset radially so it isn't hidden inside the tube
     try:
+        if not show_io_markers:
+            raise RuntimeError("io markers suppressed")
         exc_pt, exc_label = resolve_excitation_point(model_data)
         exc_arr = np.asarray(exc_pt, dtype=float)
         radial = np.array([exc_arr[0] - mid_x, exc_arr[1] - mid_y, 0.0])
@@ -287,7 +290,7 @@ def plot_tree_3d(
         "tip":  {"marker": "o", "color": "#5eaeff", "label": "Obs (tip)"},
     }
     legend_seen = set()
-    for obs in model_data.get("observations", []):
+    for obs in (model_data.get("observations", []) if show_io_markers else []):
         try:
             obs_pt, _obs_label = resolve_observation_point(model_data, obs)
             node = obs.get("target_node", "tip")
