@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import queue
 import sys
 import threading
@@ -959,8 +960,18 @@ class HarvestConsole:
             self.btn_run.configure(state="disabled")
             self.log("Serial disconnected")
             return
+        port = self.var_port.get().strip()
+        # WSL: if the port is missing OR not openable (usbip nodes are root:root
+        # 0600), auto-attach + load driver + fix perms before opening it.
+        if port.startswith("/dev/tty") and not os.access(port, os.R_OK | os.W_OK):
+            from orchard_fem.actuator.wsl_usb import ensure_usb_serial
+            ok, msg = ensure_usb_serial(port, log=self.log)
+            self.log(msg)
+            if not ok:
+                messagebox.showerror("Serial port unavailable", msg)
+                return
         try:
-            self.drv.connect(self.var_port.get().strip(), int(self.var_baud.get()),
+            self.drv.connect(port, int(self.var_baud.get()),
                              self.var_parity.get(), int(self.var_stop.get()))
             alm = self.drv.alarm()
         except Exception as e:  # noqa: BLE001
