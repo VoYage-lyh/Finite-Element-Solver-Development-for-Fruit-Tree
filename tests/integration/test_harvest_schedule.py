@@ -16,6 +16,7 @@ from orchard_fem.workflows.harvest_schedule import (
     BranchOutcome,
     StageDurationModel,
     compute_harvest_schedule,
+    compute_multiclamp_harvest_schedule,
 )
 
 
@@ -88,6 +89,64 @@ def test_schedule_greedy_picks_best_then_covers_remaining():
     assert {"b1", "b2", "b3", "b4"} <= covered
     assert sched.final_coverage == pytest.approx(1.0)
     assert sched.feasible
+
+
+def _two_clamp_grids() -> dict:
+    # Energy reach is local: the left grip only sheds the left branches {b1,b2}
+    # (b3/b4 attenuate to nothing); the right grip only reaches {b3,b4}. One clamp
+    # can never exceed 2/4 coverage — the tree needs both grips.
+    left = {
+        (5.0, 5.0): BranchOutcome(frozenset({"b1", "b2"}), {"b1": 1.2, "b2": 1.1}, 2.0e6, 8),
+        (7.0, 5.0): BranchOutcome(frozenset({"b1"}), {"b1": 1.3}, 1.0e6, 4),
+    }
+    right = {
+        (6.0, 5.0): BranchOutcome(frozenset({"b3", "b4"}), {"b3": 1.1, "b4": 1.05}, 3.0e6, 6),
+    }
+    return {"left@0.00": left, "right@0.00": right}
+
+
+def test_multiclamp_covers_what_one_clamp_cannot():
+    grids = _two_clamp_grids()
+    # single clamp caps at 2/4 (energy can't reach the other half)
+    one = compute_harvest_schedule(grids["left@0.00"], n_fruit_branches=4)
+    assert one.final_coverage == pytest.approx(0.5)
+    # multi-clamp reaches full coverage by moving the grip once
+    multi = compute_multiclamp_harvest_schedule(grids, n_fruit_branches=4)
+    covered = set()
+    for s in multi.stages:
+        covered.update(s.new_branches)
+    assert {"b1", "b2", "b3", "b4"} <= covered
+    assert multi.final_coverage == pytest.approx(1.0)
+    assert multi.clamp_labels == ("left@0.00", "right@0.00")
+    assert multi.n_reclamps == 1                       # exactly one repositioning
+    # the per-stage clamp rides on the plan's excitation label
+    assert multi.stages[0].plan.excitation_label == "left@0.00"
+    assert multi.stages[-1].plan.excitation_label == "right@0.00"
+
+
+def test_multiclamp_exhausts_current_clamp_before_reclamping():
+    # left grip reaches {b1,b2} across two cells; the scheduler should use BOTH
+    # left cells (no re-clamp) before moving to the right grip.
+    grids = _two_clamp_grids()
+    multi = compute_multiclamp_harvest_schedule(grids, n_fruit_branches=4, max_stages=6)
+    labels = [s.plan.excitation_label for s in multi.stages]
+    # all 'left' stages precede the first 'right' stage (no ping-ponging)
+    first_right = labels.index("right@0.00")
+    assert all(label == "left@0.00" for label in labels[:first_right])
+
+
+def test_multiclamp_empty_grids():
+    sched = compute_multiclamp_harvest_schedule({}, n_fruit_branches=4)
+    assert sched.stages == ()
+    assert sched.feasible is False
+
+
+def test_schedule_summary_label_fn_and_reclamps():
+    grids = _two_clamp_grids()
+    multi = compute_multiclamp_harvest_schedule(grids, n_fruit_branches=4)
+    text = multi.summary(label_fn=lambda raw: raw.replace("left", "1").replace("right", "2"))
+    assert "1@0.00" in text and "2@0.00" in text          # labels translated
+    assert "re-clamp" in text                              # multi-clamp header
 
 
 def test_schedule_durations_are_fatigue_derived():

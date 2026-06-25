@@ -727,16 +727,27 @@ class HarvestConsole:
                                  "Building the schedule needs dolfinx "
                                  "(run in the orchard-fenicsx environment).")
             return
-        rec = self.result.recommended
         opt = self._sim_options()
         f_grid = list(self.result.frequency_grid_hz)
         a_grid = list(self.result.amplitude_grid_mm)
         ncyc = float(self.var_ncycles.get())
         model = self.model
-        clamp = rec.clamp_label
+        # Multi-clamp: one grip only sheds fruit on the branches its excitation
+        # energy reaches, so its coverage caps out. Cover the tree by also building
+        # grids on the next-best clamps and letting the scheduler move the grip
+        # between energy-reachable regions. Each clamp scans its OWN local-mode
+        # frequencies (the ones the recommendation evaluated for it).
+        max_clamps = 4
+        candidates = [c for c in self.result.clamps if c.knee is not None]
+        candidates.sort(key=lambda c: c.knee.coverage, reverse=True)
+        candidates = candidates[:max_clamps]
+        clamp_freqs = {
+            c.clamp_label: (sorted({p.frequency_hz for p in c.points}) or f_grid)
+            for c in candidates
+        }
         self.btn_sim.configure(state="disabled")    # keep the pipeline locked
-        self.log(f"Building schedule (best clamp {clamp}, "
-                 f"{len(f_grid)}×{len(a_grid)} grid)…")
+        self.log(f"Building multi-clamp schedule over {len(candidates)} clamp(s): "
+                 f"{', '.join(self._display_clamp(c.clamp_label) for c in candidates)}…")
 
         def worker() -> None:
             try:
@@ -745,7 +756,7 @@ class HarvestConsole:
                 from orchard_fem.workflows.harvest_schedule import (
                     StageDurationModel,
                     build_branch_outcome_grid,
-                    compute_harvest_schedule,
+                    compute_multiclamp_harvest_schedule,
                 )
                 # 复刻推荐时的布果,保证覆盖率分母一致
                 m = model
@@ -757,12 +768,17 @@ class HarvestConsole:
                     m = replace(m, fruits=generate_linear_fruits(
                         m, m.fruit_policy, opt.dense_fruit_spacing))
                 n_branches = len({f.branch_id for f in m.fruits})
-                grid = build_branch_outcome_grid(
-                    m, clamp, f_grid, a_grid, limits=LIMITS,
-                    progress_cb=lambda msg, fr: (self._post("log", msg),
-                                                 self._post("progress", fr)))
-                sched = compute_harvest_schedule(
-                    grid, n_fruit_branches=n_branches, clamp_label=clamp,
+                grids = {}
+                for idx, cand in enumerate(candidates, start=1):
+                    cl = cand.clamp_label
+                    self._post("log", f"Reach grid {idx}/{len(candidates)}: "
+                                      f"clamp {self._display_clamp(cl)}…")
+                    grids[cl] = build_branch_outcome_grid(
+                        m, cl, clamp_freqs[cl], a_grid, limits=LIMITS,
+                        progress_cb=lambda msg, fr: (self._post("log", msg),
+                                                     self._post("progress", fr)))
+                sched = compute_multiclamp_harvest_schedule(
+                    grids, n_fruit_branches=n_branches,
                     target_coverage=0.95, limits=LIMITS,
                     duration_model=StageDurationModel(reference_cycles=ncyc))
                 self._post("log", f"Stage durations from {ncyc:g} detach-cycles "
@@ -788,7 +804,7 @@ class HarvestConsole:
             messagebox.showerror("Failed", str(payload))
             return
         self.schedule = payload
-        self._set_panel(self.info_text, payload.summary())
+        self._set_panel(self.info_text, payload.summary(label_fn=self._display_clamp))
         if payload.feasible:
             self.btn_run.configure(
                 state="normal" if self.drv.connected else "disabled")
@@ -815,7 +831,7 @@ class HarvestConsole:
         if rec is not None:
             self._set_panel(self.info_text, (
                 "Recommended working point  (building schedule…)\n"
-                f"  Clamp       {rec.clamp_label}\n"
+                f"  Clamp       {self._display_clamp(rec.clamp_label)}\n"
                 f"  Frequency   {rec.frequency_hz:.2f} Hz\n"
                 f"  Amplitude   {rec.amplitude_mm:g} mm  (stroke {rec.stroke_mm:g} mm)\n"
                 f"  Coverage    {rec.coverage:.2f}\n"

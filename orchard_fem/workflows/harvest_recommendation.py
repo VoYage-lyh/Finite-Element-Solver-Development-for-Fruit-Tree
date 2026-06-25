@@ -2,9 +2,17 @@
 
 One call takes a tree model and returns rig-executable working parameters:
 
-    load model → (densify fruits) → coarse FRF sweep → resonance candidates
-    → (f, A) grid **clipped to the DS5L1 envelope** → per-clamp Pareto fronts
-    (coverage vs. trunk stress) → knee per clamp → best clamp → WorkingPoint
+    load model → (densify fruits) → modal analysis → per-branch local modes
+    → per-clamp frequency grid (each clamp excites ITS branch, so it is tuned
+    to that branch's local mode) **clipped to the DS5L1 envelope** → per-clamp
+    Pareto fronts (coverage vs. trunk stress) → knee per clamp → best clamp
+    → WorkingPoint
+
+Each candidate clamp grips one branch; the resonance that matters there is that
+branch's *local* mode, not a single global peak.  Earlier this stage averaged
+all branch tips into one FRF and reused its tallest peak for every clamp, which
+both hid branch-local modes and decoupled the frequency from the clamp — see
+``branch_local_frequencies`` / ``_default_modal_local_modes``.
 
 This ports the validated logic of ``scripts/verify_pareto_end_to_end.py`` into
 the package, with three changes for interactive/front-end use:
@@ -31,6 +39,7 @@ The chosen :class:`WorkingPoint` exports to the same params-JSON consumed by
 """
 from __future__ import annotations
 
+import functools
 import json
 import math
 import random
@@ -198,6 +207,16 @@ class RecommendationOptions:
     duration_s: float = 10.0
     limits: DS5L1Limits = field(default_factory=DS5L1Limits)
     n_jobs: int = -1            # FE solves across processes; <=0 = all cores, 1 = serial
+    # Per-branch local-mode frequency selection (replaces the old global
+    # mean-tip FRF peak pick). Each clamp excites its own branch, so its
+    # candidate frequencies come from that branch's local modes.
+    modal_num_modes: int = 30          # eigenpairs solved to cover branch-local modes in band
+    local_modes_per_clamp: int = 2     # how many of a branch's local modes seed its grid
+    local_mode_participation_min: float = 0.20  # min share of a mode's motion on a branch to count
+    # FE element order for the modal AND outcome solves. P1 (linear) Timoshenko
+    # beams shear-lock and over-predict frequencies ~20-40%; P2 is essentially
+    # order-converged (p=2 ≈ p=3) and far less mesh-sensitive, so default to 2.
+    polynomial_degree: int = 2
 
 
 @dataclass(frozen=True)
@@ -235,6 +254,10 @@ class ClampRecommendation:
     clamp_label: str
     points: tuple[WorkingPoint, ...]
     knee: WorkingPoint | None
+    # Dominant local-mode frequency of the branch this clamp grips, i.e. the
+    # resonance this clamp is tuned to. ``None`` when the branch owns no in-band
+    # local mode (then the grid falls back to the globally prominent modes).
+    local_mode_hz: float | None = None
 
 
 @dataclass(frozen=True)
@@ -280,6 +303,7 @@ class RecommendationResult:
                 clamp_label=c["clamp_label"],
                 points=tuple(WorkingPoint(**p) for p in c["points"]),
                 knee=WorkingPoint(**c["knee"]) if c.get("knee") else None,
+                local_mode_hz=c.get("local_mode_hz"),
             )
             for c in d["clamps"]
         )
@@ -442,6 +466,139 @@ def build_frequency_grid(
     return sorted(f for f in grid if band_hz[0] - 1.5 <= f <= band_hz[1] + 1.5)
 
 
+# --------------------------------------------------------------------------- #
+# Per-branch local modes (replaces the old global mean-tip FRF peak pick)
+# --------------------------------------------------------------------------- #
+#
+# A tree is a multi-DOF structure: each branch has its own local resonances
+# (the branch vibrating with its root ~fixed by the stiffer parent). A multi-
+# stage harvest sequence wants to drive each branch at ITS local mode. The old
+# logic collapsed the whole spectrum to the single tallest peak of the mean
+# tip response — which both hid local modes (spatial averaging) and reused one
+# global frequency for every clamp. Here we instead read the modes directly.
+
+
+ModeParticipation = tuple[float, dict[str, float]]  # (frequency_hz, {branch_id: motion share})
+
+
+def _default_modal_local_modes(
+    model: Any, band_hz: tuple[float, float], num_modes: int, *, polynomial_degree: int = 2,
+) -> list[ModeParticipation]:
+    """Per-branch modal participation via the FEniCSx eigen-solver.
+
+    Returns ``[(frequency_hz, {branch_id: share})]`` for each mode, where *share*
+    is the fraction of that mode's translational motion living on each branch
+    (so a branch-local mode has one branch near 1.0). Uses the same FEniCSx
+    backend and element order as the outcome solver, so the frequencies line up
+    with the coverage evaluation.
+    """
+    from orchard_fem.fenicsx.branch_dofs import resolve_branch_node_dofs
+    from orchard_fem.fenicsx.modal import solve_embedded_beam_modal_experiment
+
+    experiment = solve_embedded_beam_modal_experiment(
+        model, num_modes=int(num_modes), polynomial_degree=int(polynomial_degree),
+    )
+    node_dofs = resolve_branch_node_dofs(
+        model, experiment.experiment.space_bundle, experiment.experiment.mesh_spec,
+    )
+    modes: list[ModeParticipation] = []
+    for mode in experiment.modes:
+        shape = mode.mode_shape
+        per_branch: dict[str, float] = {}
+        total = 0.0
+        for branch_id, nodes in node_dofs.items():
+            energy = 0.0
+            for dofs in nodes:
+                for component in (0, 1, 2):          # translational ux, uy, uz
+                    dof = dofs[component]
+                    if 0 <= dof < len(shape):
+                        energy += shape[dof] * shape[dof]
+            per_branch[branch_id] = energy
+            total += energy
+        if total <= 0.0:
+            continue
+        modes.append((float(mode.frequency_hz), {b: e / total for b, e in per_branch.items()}))
+    return modes
+
+
+def _in_band(
+    modes: list[ModeParticipation], band: tuple[float, float],
+) -> list[ModeParticipation]:
+    return [(f, part) for f, part in modes if band[0] <= f <= band[1]]
+
+
+def _branch_subtrees(model: Any) -> dict[str, frozenset[str]]:
+    """branch_id → set of itself + all descendant branches (its subtree).
+
+    A clamp grips one branch but shakes its whole subtree, so the frequencies
+    worth driving there are that subtree's local modes — not just the clamped
+    branch's own (a thick scaffold barely resonates; the fruiting tips on it do).
+    """
+    children: dict[str, list[str]] = {}
+    for branch in model.branches:
+        if branch.parent_branch_id is not None:
+            children.setdefault(branch.parent_branch_id, []).append(branch.branch_id)
+    subtrees: dict[str, frozenset[str]] = {}
+    for branch in model.branches:
+        seen: set[str] = set()
+        stack = [branch.branch_id]
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(children.get(node, []))
+        subtrees[branch.branch_id] = frozenset(seen)
+    return subtrees
+
+
+def branch_local_frequencies(
+    modes: list[ModeParticipation],
+    branch_ids: set[str] | frozenset[str],
+    band: tuple[float, float],
+    *,
+    participation_min: float,
+    max_modes: int,
+) -> list[float]:
+    """In-band frequencies whose motion concentrates in *branch_ids* (a clamp's subtree).
+
+    Ranks modes by the share of motion living inside the subtree, then by how
+    branch-local the mode is (so the trunk, whose subtree is the whole tree and
+    thus carries every mode, falls back to the most prominent modes).
+    """
+    branch_ids = set(branch_ids)
+    scored: list[tuple[float, float, float]] = []
+    for f, part in _in_band(modes, band):
+        subtree_share = sum(share for b, share in part.items() if b in branch_ids)
+        if subtree_share >= participation_min:
+            prominence = max(part.values()) if part else 0.0
+            scored.append((f, subtree_share, prominence))
+    scored.sort(key=lambda fsp: (-fsp[1], -fsp[2]))
+    return [f for f, _, _ in scored[:max_modes]]
+
+
+def global_prominent_frequencies(
+    modes: list[ModeParticipation], band: tuple[float, float], max_modes: int,
+) -> list[float]:
+    """In-band frequencies of the most branch-localised modes (clamp fallback, e.g. trunk)."""
+    candidates = [(f, max(part.values()) if part else 0.0) for f, part in _in_band(modes, band)]
+    return [f for f, _ in sorted(candidates, key=lambda fp: -fp[1])[:max_modes]]
+
+
+def _aggregate_resonances(
+    modes: list[ModeParticipation], band: tuple[float, float],
+) -> tuple[float, list[float]]:
+    """Single (primary, [secondary...]) for the back-compat reporting fields.
+
+    Primary = lowest in-band mode (the fundamental); the recommendation itself is
+    now per-clamp, so these top-level fields are only a summary.
+    """
+    ordered = sorted(f for f, _ in _in_band(modes, band))
+    if not ordered:
+        return 0.0, []
+    return ordered[0], ordered[1:3]
+
+
 def rig_feasible(frequency_hz: float, amplitude_mm: float, limits: DS5L1Limits) -> bool:
     """Whether the rig can execute ``(f, A)``: stroke 2A within limits and f reachable."""
     stroke = 2.0 * amplitude_mm
@@ -453,28 +610,6 @@ def rig_feasible(frequency_hz: float, amplitude_mm: float, limits: DS5L1Limits) 
 # --------------------------------------------------------------------------- #
 # Pipeline
 # --------------------------------------------------------------------------- #
-
-
-def _default_frf_sweep(model: Any, f_min: float, f_max: float, steps: int):
-    """Mean tip-|H| spectrum via the FEniCSx solver (e2e ``_coarse_frf_sweep``)."""
-    import numpy as np
-
-    from orchard_fem.fenicsx.frequency_response import (
-        solve_embedded_beam_frequency_response_experiment,
-    )
-    swept = replace(model, analysis=replace(
-        model.analysis,
-        frequency_start_hz=float(f_min), frequency_end_hz=float(f_max),
-        frequency_steps=int(steps),
-    ))
-    res = solve_embedded_beam_frequency_response_experiment(swept, polynomial_degree=1).result
-    freqs = np.array([p.frequency_hz for p in res.points])
-    name_to_idx = {n: i for i, n in enumerate(res.observation_names)}
-    tip_obs = [n for n in res.observation_names if n.endswith("_tip_ux")]
-    mags = np.zeros_like(freqs)
-    for j, p in enumerate(res.points):
-        mags[j] = float(np.mean([p.observation_magnitudes[name_to_idx[n]] for n in tip_obs]))
-    return freqs, mags
 
 
 def _default_outcome_solver_factory(model: Any, options: RecommendationOptions):
@@ -491,6 +626,7 @@ def _default_outcome_solver_factory(model: Any, options: RecommendationOptions):
     ))
     return build_outcome_solver(
         disp_model, amplitude_unit="mm", coverage_mode=options.coverage_mode,
+        polynomial_degree=options.polynomial_degree,
     )
 
 
@@ -501,7 +637,7 @@ def recommend_harvest_parameters(
     options: RecommendationOptions | None = None,
     progress_cb: ProgressCb = _noop_progress,
     cancel_cb: CancelCb = _never_cancel,
-    frf_sweep: Callable | None = None,
+    local_modes: Callable | None = None,
     evaluator_factory: Callable | None = None,
 ) -> RecommendationResult:
     """Run the full recommendation pipeline on a loaded model.
@@ -516,8 +652,11 @@ def recommend_harvest_parameters(
         GUI hooks: progress messages with a 0–1 fraction; cooperative
         cancellation checked between FE solves (raises ``RuntimeError`` with
         message "cancelled" when triggered).
-    frf_sweep / evaluator_factory:
+    local_modes / evaluator_factory:
         FE-stage overrides for testing; defaults use the FEniCSx backend.
+        ``local_modes(model, band_hz, num_modes) -> [(freq_hz, {branch: share})]``
+        supplies the per-branch modal participation that drives frequency
+        selection (default :func:`_default_modal_local_modes`).
 
     Returns
     -------
@@ -537,7 +676,9 @@ def recommend_harvest_parameters(
     )
 
     opt = options or RecommendationOptions()
-    sweep = frf_sweep or _default_frf_sweep
+    local_modes_fn = local_modes or functools.partial(
+        _default_modal_local_modes, polynomial_degree=opt.polynomial_degree,
+    )
     steps: list[str] = []
     t_start = time.time()
 
@@ -564,22 +705,24 @@ def recommend_harvest_parameters(
         log(f"Dense fruit placement: 1 fruit per {opt.dense_fruit_spacing * 100:g}% arc "
             f"length, {len(fruits)} total", 0.04)
 
-    # -- 2. coarse FRF sweep → resonance candidates ---------------------------
+    # -- 2. modal analysis → per-branch local modes ---------------------------
     check_cancel()
-    log(f"FRF sweep {opt.sweep_range_hz[0]:g}–{opt.sweep_range_hz[1]:g} Hz "
-        f"({opt.sweep_steps} steps)…", 0.05)
-    freqs, mags = sweep(model, opt.sweep_range_hz[0], opt.sweep_range_hz[1], opt.sweep_steps)
-    peak_idx, genuine = find_in_band_resonance(freqs, mags, opt.band_hz)
-    f_res = float(freqs[peak_idx])
-    log(f"Primary resonance {f_res:.2f} Hz "
-        f"({'local maximum' if genuine else 'curvature inflection'})", 0.20)
-    sec_idx = find_in_band_peaks(freqs, mags, opt.band_hz)
-    secondary = [float(freqs[k]) for k in sec_idx if int(k) != peak_idx]
-    if secondary:
-        log(f"Secondary peak(s) {', '.join(f'{f:.2f}' for f in secondary)} Hz", 0.21)
+    log(f"Modal analysis ({opt.modal_num_modes} modes, P{opt.polynomial_degree} elements) "
+        f"for per-branch local resonances…", 0.05)
+    modes = local_modes_fn(model, opt.band_hz, opt.modal_num_modes)
+    if not modes:
+        raise RuntimeError(
+            f"Modal analysis returned no modes in {opt.band_hz[0]:g}–{opt.band_hz[1]:g} Hz; "
+            "widen options.band_hz or raise modal_num_modes."
+        )
+    f_res, secondary = _aggregate_resonances(modes, opt.band_hz)
+    n_local = sum(1 for _, part in _in_band(modes, opt.band_hz) if part and max(part.values()) > 0.5)
+    log(f"Fundamental {f_res:.2f} Hz; {n_local} of {len(_in_band(modes, opt.band_hz))} "
+        f"in-band modes are branch-local (>50% on one branch)", 0.18)
 
-    # -- 3. (f, A) grid with the rig envelope ---------------------------------
-    f_grid = build_frequency_grid(f_res, secondary, opt.band_hz)
+    # -- 3. amplitude grid + per-clamp frequency grids ------------------------
+    # Each clamp grips (and so excites) one branch, so its candidate frequencies
+    # are that branch's local modes — not one global peak reused for every clamp.
     a_all = sorted(opt.amplitude_grid_mm)
     a_grid = [a for a in a_all if 2.0 * a <= opt.limits.max_stroke_mm]
     dropped = [a for a in a_all if a not in a_grid]
@@ -588,21 +731,39 @@ def recommend_harvest_parameters(
             f"stroke 2A exceeds the {opt.limits.max_stroke_mm:g} mm cylinder limit", 0.22)
     if not a_grid:
         raise ValueError("All amplitude candidates exceed the rig stroke limit.")
-    n_unreach = sum(1 for f in f_grid for a in a_grid
-                    if not rig_feasible(f, a, opt.limits))
-    if n_unreach:
-        log(f"{n_unreach} (f,A) points outside the cylinder frequency envelope, "
-            f"marked non-executable", 0.23)
-    log(f"Working-point grid: |f|={len(f_grid)} × |A|={len(a_grid)}", 0.24)
+
+    clamp_labels = candidate_clamp_labels(model, opt)
+    subtrees = _branch_subtrees(model)
+    clamp_freq: dict[str, list[float]] = {}
+    clamp_local_mode: dict[str, float | None] = {}
+    for clamp_label in clamp_labels:
+        branch_id = clamp_label.split("@", 1)[0]
+        subtree = subtrees.get(branch_id, frozenset({branch_id}))
+        local_fs = branch_local_frequencies(
+            modes, subtree, opt.band_hz,
+            participation_min=opt.local_mode_participation_min,
+            max_modes=opt.local_modes_per_clamp,
+        )
+        if not local_fs:
+            # Subtree owns no in-band mode above the threshold: fall back to the
+            # globally most prominent modes so the clamp is still evaluated.
+            local_fs = global_prominent_frequencies(modes, opt.band_hz, opt.local_modes_per_clamp)
+        clamp_local_mode[clamp_label] = local_fs[0] if local_fs else None
+        clamp_freq[clamp_label] = build_frequency_grid(
+            local_fs[0], local_fs[1:], opt.band_hz,
+        ) if local_fs else []
+
+    f_union = sorted({f for grid in clamp_freq.values() for f in grid})
+    log(f"Per-clamp local-mode grids: {len(clamp_labels)} clamps, "
+        f"{len(f_union)} distinct frequencies", 0.24)
 
     # -- 4. per-clamp Pareto sweep --------------------------------------------
     # Only rig-feasible (f, A) cells are ever executable, so we solve those alone
     # (unreachable frequencies/strokes are skipped, not solved-then-discarded).
-    clamp_labels = candidate_clamp_labels(model, opt)
     work_points = [
         (clamp_label, float(f), float(a))
         for clamp_label in clamp_labels
-        for f in f_grid
+        for f in clamp_freq[clamp_label]
         for a in a_grid
         if rig_feasible(float(f), float(a), opt.limits)
     ]
@@ -634,7 +795,8 @@ def recommend_harvest_parameters(
         from orchard_fem.domain import ExcitationKind
         disp_model = replace(model, excitation=replace(
             model.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT))
-        solver_kw = dict(amplitude_unit="mm", coverage_mode=opt.coverage_mode)
+        solver_kw = dict(amplitude_unit="mm", coverage_mode=opt.coverage_mode,
+                         polynomial_degree=opt.polynomial_degree)
         outcomes = solve_outcomes_parallel(
             disp_model, solver_kw, work_points, theta, n_jobs,
             on_done=_on_done, cancel_cb=cancel_cb,
@@ -665,18 +827,29 @@ def recommend_harvest_parameters(
                 trunk_stress_pa=outcomes[(clamp_label, float(f), float(a))].trunk_stress_pa,
                 rig_feasible=True,   # work_points were filtered to rig-feasible cells
             )
-            for f in f_grid
+            for f in clamp_freq[clamp_label]
             for a in a_grid
             if (clamp_label, float(f), float(a)) in outcomes
         ]
         if not raw:
+            # Every candidate cell is rig-infeasible: this clamp's subtree only
+            # resonates outside the actuator envelope, so it cannot be harvested
+            # by shaking here. Keep it visible (knee=None) and record why, which
+            # matters for the multi-stage sequence (some branches are unreachable).
+            lm = clamp_local_mode.get(clamp_label)
+            lm_note = f" (local mode {lm:.2f} Hz outside rig envelope)" if lm is not None else ""
+            log(f"Clamp {clamp_label} has no rig-executable working point{lm_note}", 0.92)
+            clamps.append(ClampRecommendation(clamp_label, (), None, local_mode_hz=lm))
             continue
 
         # hard constraints: rig envelope + stress sanity ceiling
         feasible = [p for p in raw
                     if p.rig_feasible and p.trunk_stress_pa <= opt.stress_ceiling_pa]
         if not feasible:
-            clamps.append(ClampRecommendation(clamp_label, tuple(raw), None))
+            clamps.append(ClampRecommendation(
+                clamp_label, tuple(raw), None,
+                local_mode_hz=clamp_local_mode.get(clamp_label),
+            ))
             continue
         objs = np.array([[-p.coverage, p.trunk_stress_pa] for p in feasible])
         nd_mask = non_dominated_mask(objs)
@@ -692,7 +865,10 @@ def recommend_harvest_parameters(
                 p, on_front=on_front, is_knee=(i == knee_pos),
             ))
         knee = next(p for p in marked if p.is_knee)
-        clamps.append(ClampRecommendation(clamp_label, tuple(marked), knee))
+        clamps.append(ClampRecommendation(
+            clamp_label, tuple(marked), knee,
+            local_mode_hz=clamp_local_mode.get(clamp_label),
+        ))
 
     with_knee = [c for c in clamps if c.knee is not None]
     if not with_knee:
@@ -709,10 +885,13 @@ def recommend_harvest_parameters(
     best = min(with_knee, key=_distance)
     best_idx = clamps.index(best)
     k = best.knee
+    local_note = (
+        f" [{best.local_mode_hz:.2f} Hz local mode]" if best.local_mode_hz is not None else ""
+    )
     log(
         f"Recommended working point: clamp {best.clamp_label}, f={k.frequency_hz:.2f} Hz, "
         f"A={k.amplitude_mm:g} mm (stroke {k.stroke_mm:g} mm), "
-        f"coverage {k.coverage:.2f}, trunk stress {k.trunk_stress_pa / 1e6:.2f} MPa",
+        f"coverage {k.coverage:.2f}, trunk stress {k.trunk_stress_pa / 1e6:.2f} MPa{local_note}",
         0.99,
     )
 
@@ -721,7 +900,7 @@ def recommend_harvest_parameters(
         model_name=str(model.metadata.name),
         resonance_hz=f_res,
         secondary_hz=tuple(secondary),
-        frequency_grid_hz=tuple(f_grid),
+        frequency_grid_hz=tuple(f_union),
         amplitude_grid_mm=tuple(a_grid),
         clamps=tuple(clamps),
         best_clamp_index=best_idx,
@@ -748,6 +927,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
                         help="write the chosen working point as run_harvest_on_rig "
                              "params JSON")
     parser.add_argument("--duration", type=float, default=10.0)
+    parser.add_argument("--degree", type=int, default=RecommendationOptions.polynomial_degree,
+                        help="FE element order for the modal/outcome solves "
+                             "(2 = order-converged; 1 = fast but shear-locked).")
     args = parser.parse_args(argv)
 
     from orchard_fem.io.loaders import load_orchard_model
@@ -756,7 +938,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
 
     result = recommend_harvest_parameters(
         model, model_path=args.model_json,
-        options=RecommendationOptions(duration_s=args.duration),
+        options=RecommendationOptions(duration_s=args.duration, polynomial_degree=args.degree),
         progress_cb=lambda m, f: print(f"[{f * 100:3.0f}%] {m}"),
     )
     if args.out:

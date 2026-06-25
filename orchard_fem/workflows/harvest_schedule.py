@@ -208,6 +208,116 @@ def compute_harvest_schedule(
     )
 
 
+def compute_multiclamp_harvest_schedule(
+    grids: dict[str, BranchOutcomeGrid],
+    *,
+    n_fruit_branches: int,
+    target_coverage: float = 0.95,
+    max_stages: int = 6,
+    limits: DS5L1Limits | None = None,
+    accel_ms: int = 10,
+    duration_model: StageDurationModel | None = None,
+) -> HarvestSchedule:
+    """Greedy multi-**clamp** schedule: cover the tree by moving the grip between
+    energy-reachable regions, not by frequency-sweeping a single clamp.
+
+    A clamp's excitation energy attenuates with distance, so one grip can only
+    shed fruit on the branches it actually reaches — exciting the left of the tree
+    will not detach fruit at the far-right tips. Each clamp's ``(f, A)`` grid is
+    therefore its *reachable set*. The scheduler **exhausts the current clamp's
+    reachable-but-unharvested branches first** (cheap — no re-clamp), then moves
+    to the clamp that newly activates the most branches, minimising the physical
+    re-clamping a single-clamp frequency sweep can never avoid (it simply leaves
+    the unreachable branches uncovered).
+
+    *grids* maps each candidate ``branch_id@s`` clamp to its
+    :class:`BranchOutcomeGrid`. The chosen clamp of each stage is carried on
+    ``stage.plan.excitation_label``; :attr:`HarvestSchedule.n_reclamps` counts the
+    repositionings the operator/rig must perform.
+    """
+    dur = duration_model or StageDurationModel()
+    lim = limits or DS5L1Limits()
+    n_total = max(int(n_fruit_branches), 1)
+
+    def _runnable(f: float, a: float) -> bool:
+        stroke = 2.0 * a
+        return (stroke <= lim.max_stroke_mm and f <= lim.max_freq_hz
+                and lim.seed_rpm(stroke, f) is not None)
+
+    def _best_cell(clamp: str, done: set[str]):
+        """Best runnable (f, a, new, info) on *clamp* adding new branches, or None."""
+        best_score = 0.0
+        best = None
+        for (f, a), info in grids[clamp].items():
+            new = set(info.detached_branches) - done
+            sigma = info.trunk_stress_pa
+            if not new or sigma <= 0.0 or not _runnable(f, a):
+                continue
+            score = len(new) / sigma
+            if score > best_score:
+                best_score = score
+                best = (f, a, new, info)
+        return best
+
+    def _reach(clamp: str) -> set[str]:
+        out: set[str] = set()
+        for (f, a), info in grids[clamp].items():
+            if _runnable(f, a):
+                out |= set(info.detached_branches)
+        return out
+
+    if not grids:
+        return HarvestSchedule(stages=(), clamp_label="", target_coverage=target_coverage)
+
+    # Start on the clamp that can reach the most branches (fewest re-clamps later).
+    current = max(grids, key=lambda c: len(_reach(c)))
+
+    activated: set[str] = set()
+    stages: list[HarvestStage] = []
+    for stage_index in range(1, max_stages + 1):
+        best = _best_cell(current, activated)
+        if best is None:
+            # Current grip exhausted its reachable branches → re-clamp to the one
+            # that newly activates the most branches (tie-break: per-stress score).
+            options = [(c, _best_cell(c, activated)) for c in grids if c != current]
+            options = [(c, b) for c, b in options if b is not None]
+            if not options:
+                break
+            current, best = max(
+                options, key=lambda cb: (len(cb[1][2]), len(cb[1][2]) / cb[1][3].trunk_stress_pa),
+            )
+
+        f, a, new, info = best
+        governing_ratio = min(info.branch_governing_ratio[b] for b in new)
+        duration_s = dur.duration_s(f, governing_ratio)
+        plan = plan_harvest_execution(
+            frequency_hz=f,
+            clamp_peak_to_peak_mm=2.0 * a,
+            duration_s=duration_s,
+            limits=limits,
+            accel_ms=accel_ms,
+            excitation_label=current,
+        )
+        activated |= new
+        coverage = len(activated) / n_total
+        stages.append(HarvestStage(
+            index=stage_index,
+            plan=plan,
+            new_branches=tuple(sorted(new)),
+            cumulative_coverage=coverage,
+            trunk_stress_pa=info.trunk_stress_pa,
+            n_detached_fruits=info.n_detached_fruits,
+        ))
+        if coverage >= target_coverage:
+            break
+
+    return HarvestSchedule(
+        stages=tuple(stages),
+        clamp_label=(stages[0].plan.excitation_label if stages else ""),
+        target_coverage=target_coverage,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # FE backend: build the branch-outcome grid (dolfinx; injectable for tests)
 # --------------------------------------------------------------------------- #

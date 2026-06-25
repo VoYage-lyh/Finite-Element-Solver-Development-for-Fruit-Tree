@@ -591,15 +591,43 @@ class HarvestSchedule:
             stages=stages, clamp_label=d.get("clamp_label", ""),
             target_coverage=float(d.get("target_coverage", 0.95)))
 
-    def summary(self) -> str:
-        """Aligned monospace table (render with a fixed-width font)."""
-        head = (f"Harvest schedule @ {self.clamp_label}\n"
+    @property
+    def clamp_labels(self) -> tuple[str, ...]:
+        """Distinct clamp positions used across stages (>1 for a multi-clamp schedule)."""
+        seen: list[str] = []
+        for stage in self.stages:
+            label = stage.plan.excitation_label or self.clamp_label
+            if label not in seen:
+                seen.append(label)
+        return tuple(seen)
+
+    @property
+    def n_reclamps(self) -> int:
+        """Number of times the rig must be repositioned to a different branch."""
+        labels = [s.plan.excitation_label or self.clamp_label for s in self.stages]
+        return sum(1 for a, b in zip(labels, labels[1:]) if a != b)
+
+    def summary(self, label_fn: "Callable[[str], str] | None" = None) -> str:
+        """Aligned monospace table (render with a fixed-width font).
+
+        *label_fn* maps a raw ``branch_id@s`` clamp to a display label (e.g. the
+        hierarchical ``2@0.00`` shown in the topology figure); defaults to raw.
+        Per-stage clamp is shown so a multi-clamp schedule reads which branch to
+        grip at each stage.
+        """
+        lf = label_fn or (lambda raw: raw)
+        used = self.clamp_labels
+        clamp_line = (lf(used[0]) if len(used) <= 1
+                      else f"{len(used)} clamps ({self.n_reclamps} re-clamps): "
+                           + " → ".join(lf(c) for c in used))
+        head = (f"Harvest schedule @ {clamp_line}\n"
                 f"{len(self.stages)} stages, {self.total_duration_s:.1f} s total "
                 f"→ {self.final_coverage:.0%} branch coverage "
                 f"(target {self.target_coverage:.0%})")
-        hdr = "  #   f(Hz)  dur(s)  stroke   new   cum   σ(MPa)"
+        hdr = "  #   clamp       f(Hz)  dur(s)  stroke   new   cum   σ(MPa)"
         rows = [
-            f"  {s.index:<2} {s.plan.frequency_hz:6.2f} {s.plan.duration_s:6.1f}  "
+            f"  {s.index:<2} {lf(s.plan.excitation_label or self.clamp_label):<11} "
+            f"{s.plan.frequency_hz:6.2f} {s.plan.duration_s:6.1f}  "
             f"{s.plan.stroke_mm:5.1f}mm   +{len(s.new_branches):<2} "
             f"{s.cumulative_coverage:4.0%}  {s.trunk_stress_pa / 1e6:6.2f}"
             + ("" if s.plan.feasible else "  [INFEASIBLE]")
@@ -644,6 +672,7 @@ def execute_harvest_schedule(
     now: Callable[[], float] = time.monotonic,
     on_status: Callable[[str], None] | None = None,
     on_stage: Callable[[HarvestStage], None] | None = None,
+    on_reclamp: Callable[[str, str], None] | None = None,
     on_calibrated: Callable[[CalibrationOutcome], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     calibration_kwargs: dict | None = None,
@@ -690,9 +719,23 @@ def execute_harvest_schedule(
 
     outcome = "completed"
     started = False
+    prev_clamp = schedule.clamp_label
     try:
         for stage in schedule.stages:
             plan = stage.plan
+            stage_clamp = plan.excitation_label or schedule.clamp_label
+            # A multi-clamp schedule grips a different branch at some stages, which
+            # the rig cannot do on its own — stop and have the operator reposition
+            # the clamp (a blocking on_reclamp callback can pop a "move grip, OK"
+            # dialog); without it we at least announce it and never auto-run a
+            # stage on the wrong branch.
+            if started and stage_clamp != prev_clamp:
+                status(f"⚠ Re-clamp required: move the grip to {stage_clamp} "
+                       f"for stage {stage.index}.")
+                driver.stop()
+                started = False
+                if on_reclamp is not None:
+                    on_reclamp(prev_clamp, stage_clamp)
             # Between stages, stop and return the rod to mid-stroke so the next
             # (possibly larger) stroke has full symmetric travel — otherwise it
             # oscillates from wherever the previous stage stopped and a big stroke
@@ -702,6 +745,7 @@ def execute_harvest_schedule(
                 driver.stop()
                 started = False
                 recenter()
+            prev_clamp = stage_clamp
             status(f"Stage {stage.index}/{len(schedule.stages)}: "
                    f"{plan.frequency_hz:.2f} Hz, stroke {plan.stroke_mm:.1f} mm, "
                    f"{plan.duration_s:g} s (+{len(stage.new_branches)} branches).")

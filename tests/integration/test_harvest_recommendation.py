@@ -97,10 +97,15 @@ def test_rig_feasible_envelope():
 # Full pipeline with synthetic FE stages
 # ---------------------------------------------------------------------------
 
-def _fake_sweep(_model, f_min, f_max, steps):
-    freqs = np.linspace(f_min, f_max, steps)
-    mags = 1e-3 / (np.abs(freqs - 6.0) + 0.4)           # resonance at 6 Hz
-    return freqs, mags
+def _fake_local_modes(model, _band, _num_modes):
+    # Synthetic per-branch modal participation in place of a FEniCSx eigen-solve:
+    # a dominant mode at 6 Hz and a weaker one at 12 Hz, keyed to the real trunk
+    # branch so the trunk clamps' subtree (the whole tree) picks up the 6 Hz mode.
+    trunk = next(b.branch_id for b in model.branches if b.parent_branch_id is None)
+    return [
+        (6.0, {trunk: 0.7}),
+        (12.0, {trunk: 0.3}),
+    ]
 
 
 def _fake_evaluator_factory(_model, _options):
@@ -125,7 +130,7 @@ def _run(model, **opt_kwargs):
     )
     return recommend_harvest_parameters(
         model, model_path=MODEL_PATH, options=options,
-        frf_sweep=_fake_sweep, evaluator_factory=_fake_evaluator_factory,
+        local_modes=_fake_local_modes, evaluator_factory=_fake_evaluator_factory,
     )
 
 
@@ -152,7 +157,7 @@ def test_pipeline_knee_points_within_envelope(model):
 def test_pipeline_steps_trace(model):
     result = _run(model)
     text = "\n".join(result.steps)
-    assert "FRF sweep" in text and "Primary resonance" in text \
+    assert "Modal analysis" in text and "local-mode grids" in text \
         and "Recommended working point" in text
 
 
@@ -164,7 +169,7 @@ def test_pipeline_progress_and_cancel(model):
             options=RecommendationOptions(
                 clamp_labels=("trunk@0.40",), amplitude_grid_mm=(5.0,),
                 dense_fruit_spacing=None, detachment_displacement_m=None),
-            frf_sweep=_fake_sweep,
+            local_modes=_fake_local_modes,
             evaluator_factory=_fake_evaluator_factory,
             progress_cb=lambda _m, f: fractions.append(f),
             cancel_cb=lambda: len(fractions) > 3,       # cancel mid-run

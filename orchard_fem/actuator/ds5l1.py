@@ -169,6 +169,18 @@ class DS5L1:
     def connect(self, port: str, baud: int = 19200, parity: str = "E",
                 stopbits: int = 1) -> None:
         try:
+            self._open_and_verify(port, baud, parity, stopbits)
+        except ConnectionError:
+            # WSL2 usbip serial nodes go 'zombie' (open or the first read fails)
+            # after the host sleeps, the adapter is re-plugged, or servo EMI
+            # resets the chip — the node exists but every transfer times out.
+            # Refresh the usbip attachment once and retry before giving up.
+            if not self._refresh_wsl_usb(port):
+                raise
+            self._open_and_verify(port, baud, parity, stopbits)
+
+    def _open_and_verify(self, port: str, baud: int, parity: str, stopbits: int) -> None:
+        try:
             import serial
         except ImportError as exc:
             raise ImportError(
@@ -192,6 +204,23 @@ class DS5L1:
                 f"Port opened but communication check failed. Verify station ID, "
                 f"baud, parity, stop bits and wiring (drive RS232 factory default: "
                 f"19200-8-E-1). Detail: {e}") from e
+
+    @staticmethod
+    def _refresh_wsl_usb(port: str) -> bool:
+        """Best-effort: refresh a stale WSL2 usbip serial attachment before a retry.
+
+        Returns ``True`` if a detach+re-attach was performed (so retrying the open
+        is worthwhile). No-op (``False``) off WSL or if usbipd is unavailable.
+        """
+        try:
+            from orchard_fem.actuator.wsl_usb import is_wsl, refresh_usb_serial
+            if not is_wsl():
+                return False
+            node = port if port.startswith("/dev/") else None
+            ok, _msg = refresh_usb_serial(node)
+            return ok
+        except Exception:  # noqa: BLE001
+            return False
 
     def close(self):
         if self.ser:
