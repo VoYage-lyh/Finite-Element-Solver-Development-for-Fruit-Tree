@@ -20,7 +20,7 @@ schedule (``compute_multiclamp_harvest_schedule``).
 
 Example
 -------
-    python scripts/clamp_energy_reach.py trees/tree_3.json --out results/accuracy_study
+    python scripts/clamp_energy_reach.py trees/tree_3.json --out results_nonlinear/diagnostics/accuracy_study
 """
 
 from __future__ import annotations
@@ -56,10 +56,11 @@ def main() -> int:
     parser.add_argument("--degree", type=int, default=2, help="FE element order (2 = converged).")
     parser.add_argument("--max-clamps", type=int, default=16)
     parser.add_argument("--drive-mm", type=float, default=10.0, help="Clamp displacement amplitude [mm].")
-    parser.add_argument("--rayleigh-beta", type=float, default=None,
-                        help="Override stiffness-proportional damping β (model default ~1e-4 ≈ 0.25%% "
-                             "ζ — far below real green-wood 5–15%%; try 0.006 ≈ ~8%% ζ at 8 Hz).")
-    parser.add_argument("--out", type=Path, default=Path("results/accuracy_study"))
+    parser.add_argument("--zeta", type=float, default=0.06,
+                        help="Structural damping ratio as band-tuned Rayleigh over --band "
+                             "(model default ~0.25%% is far below real green-wood 5–15%%). "
+                             "Use a negative value to keep the model's own damping.")
+    parser.add_argument("--out", type=Path, default=Path("results_nonlinear/diagnostics/accuracy_study"))
     args = parser.parse_args()
 
     from orchard_fem.fenicsx.frequency_response import (
@@ -68,8 +69,10 @@ def main() -> int:
 
     fmin, fmax = (float(x) for x in args.band.split(","))
     model = load_orchard_model(str(args.model_json))
-    if args.rayleigh_beta is not None:
-        model = replace(model, analysis=replace(model.analysis, rayleigh_beta=args.rayleigh_beta))
+    if args.zeta >= 0.0:
+        from orchard_fem.discretization.damping import rayleigh_from_band_zeta
+        alpha, beta = rayleigh_from_band_zeta(args.zeta, fmin, fmax)
+        model = replace(model, analysis=replace(model.analysis, rayleigh_alpha=alpha, rayleigh_beta=beta))
     policy = replace(model.fruit_policy, detachment_displacement_m=0.002)
     model = replace(model, fruit_policy=policy, fruits=generate_linear_fruits(model, policy, 0.05))
     # Absolute detachment-reach uses the SAME physics as the schedule: a fruit
@@ -151,21 +154,23 @@ def main() -> int:
     axd.grid(True, which="both", alpha=0.3)
     axd.legend()
 
-    beta_tag = f"_beta{args.rayleigh_beta:g}" if args.rayleigh_beta is not None else "_betamodel"
-    fig.suptitle(f"clamp energy reach — {stem}, β={args.rayleigh_beta if args.rayleigh_beta is not None else 'model(~1e-4)'}",
-                 y=1.02, fontsize=9)
+    z_tag = f"_zeta{args.zeta:g}" if args.zeta >= 0.0 else "_zetamodel"
+    z_txt = f"ζ≈{args.zeta:.0%} (band-tuned Rayleigh)" if args.zeta >= 0.0 else "model damping (~0.25%)"
+    fig.suptitle(f"clamp energy reach — {stem}, {z_txt}", y=1.02, fontsize=9)
     fig.tight_layout()
-    out_png = args.out / f"clamp_energy_reach_{stem}{beta_tag}.png"
+    out_png = args.out / f"clamp_energy_reach_{stem}{z_tag}.png"
     fig.savefig(out_png, dpi=130, bbox_inches="tight")
     plt.close(fig)
 
-    per_clamp = (reach >= 1.0).sum(axis=1)
-    union = (reach >= 1.0).any(axis=0).sum()
-    print(f"\nFruit branches: {len(branches)}  (drive {args.drive_mm:g} mm; r≥1 ⇒ detaches)")
-    print(f"Best single clamp sheds: {per_clamp.max()}/{len(branches)} "
-          f"({per_clamp.max() / len(branches):.0%})")
-    print(f"Union over ALL clamps:   {union}/{len(branches)} ({union / len(branches):.0%})"
-          f"  ← multi-clamp ceiling")
+    detach = reach >= 1.0
+    per_clamp = detach.sum(axis=1)
+    print(f"\nFruit branches: {len(branches)}  (drive {args.drive_mm:g} mm; {z_txt}; r≥1 ⇒ detaches)")
+    print(f"Best single clamp sheds:  {per_clamp.max()}/{len(branches)} "
+          f"({per_clamp.max() / len(branches):.0%})  ← usually a central/trunk grip")
+    print(f"MEAN per-clamp reach:     {per_clamp.mean():.1f}/{len(branches)} "
+          f"({per_clamp.mean() / len(branches):.0%})  ← damping-sensitive (peripheral grips)")
+    print(f"Reachable (clamp,branch) pairs: {detach.mean():.0%}  "
+          f"(the rest are too far / too damped to shed)")
     print(f"Wrote {out_png}")
     return 0
 

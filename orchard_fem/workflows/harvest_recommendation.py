@@ -217,6 +217,12 @@ class RecommendationOptions:
     # beams shear-lock and over-predict frequencies ~20-40%; P2 is essentially
     # order-converged (p=2 ≈ p=3) and far less mesh-sensitive, so default to 2.
     polynomial_degree: int = 2
+    # Structural damping. None (default) = use the measured frequency-dependent law
+    # from Liu et al. 2026 (paper_zeta_of_frequency: ζ≈0.35 at the trunk/low freq →
+    # ≈0.09 at high-freq tips), applied as mass-proportional Rayleigh so ζ decreases
+    # with frequency as measured. A float overrides it with a flat band-tuned ζ
+    # (legacy). The model files carry β=1e-4 ≈ 0.25 % ζ — far below the measured 9–35 %.
+    damping_zeta: float | None = None
 
 
 @dataclass(frozen=True)
@@ -588,15 +594,25 @@ def global_prominent_frequencies(
 def _aggregate_resonances(
     modes: list[ModeParticipation], band: tuple[float, float],
 ) -> tuple[float, list[float]]:
-    """Single (primary, [secondary...]) for the back-compat reporting fields.
+    """Report the fundamental + the most prominent well-separated modes.
 
-    Primary = lowest in-band mode (the fundamental); the recommendation itself is
-    now per-clamp, so these top-level fields are only a summary.
+    Primary = the lowest in-band mode (the 1st natural frequency). Secondary =
+    the most PROMINENT modes (largest single-branch participation, i.e. the
+    sharpest FRF peaks) that are ≥1.5 Hz from the primary — so a bimodal tree
+    (e.g. tree_3 at ~3.4 Hz and a strong ~8 Hz mode) reports both, not just the
+    lowest weak mode.
     """
-    ordered = sorted(f for f, _ in _in_band(modes, band))
-    if not ordered:
+    in_band = _in_band(modes, band)
+    if not in_band:
         return 0.0, []
-    return ordered[0], ordered[1:3]
+    primary = min(f for f, _ in in_band)
+    by_prominence = sorted(
+        in_band, key=lambda fp: -(max(fp[1].values()) if fp[1] else 0.0),
+    )
+    secondary = [
+        f for f, _ in by_prominence if abs(f - primary) >= 1.5
+    ][:2]
+    return primary, secondary
 
 
 def rig_feasible(frequency_hz: float, amplitude_mm: float, limits: DS5L1Limits) -> bool:
@@ -705,6 +721,28 @@ def recommend_harvest_parameters(
         log(f"Dense fruit placement: 1 fruit per {opt.dense_fruit_spacing * 100:g}% arc "
             f"length, {len(fruits)} total", 0.04)
 
+    # Structural damping. The model files carry β≈1e-4 (~0.25 % ζ) — far below the
+    # measured Prunus cerasifera 9–35 % (Liu et al. 2026, Fig. 20). Default: the
+    # measured frequency-dependent law (mass-proportional Rayleigh, ζ decreasing
+    # from ~0.35 at the trunk to ~0.09 at the tips). A float = legacy flat ζ.
+    from orchard_fem.discretization.damping import (
+        paper_zeta_of_frequency, rayleigh_from_band_zeta, rayleigh_from_paper_zeta,
+    )
+    _dmp_hi = min(opt.band_hz[1], opt.limits.max_freq_hz)
+    if opt.damping_zeta is None:
+        alpha, beta = rayleigh_from_paper_zeta(opt.band_hz[0], _dmp_hi)
+        log(f"Damping: measured ζ(f) law (Liu et al. 2026), "
+            f"ζ≈{paper_zeta_of_frequency(opt.band_hz[0]):.0%}@{opt.band_hz[0]:g}Hz → "
+            f"{paper_zeta_of_frequency(_dmp_hi):.0%}@{_dmp_hi:g}Hz "
+            f"(mass-proportional Rayleigh α={alpha:.3g})", 0.045)
+    else:
+        alpha, beta = rayleigh_from_band_zeta(opt.damping_zeta, opt.band_hz[0], opt.band_hz[1])
+        log(f"Damping set to flat ζ≈{opt.damping_zeta:.0%} across "
+            f"{opt.band_hz[0]:g}–{opt.band_hz[1]:g} Hz (Rayleigh α={alpha:.3g}, β={beta:.3g})", 0.045)
+    model = replace(model, analysis=replace(
+        model.analysis, rayleigh_alpha=alpha, rayleigh_beta=beta,
+    ))
+
     # -- 2. modal analysis → per-branch local modes ---------------------------
     check_cancel()
     log(f"Modal analysis ({opt.modal_num_modes} modes, P{opt.polynomial_degree} elements) "
@@ -715,10 +753,15 @@ def recommend_harvest_parameters(
             f"Modal analysis returned no modes in {opt.band_hz[0]:g}–{opt.band_hz[1]:g} Hz; "
             "widen options.band_hz or raise modal_num_modes."
         )
-    f_res, secondary = _aggregate_resonances(modes, opt.band_hz)
-    n_local = sum(1 for _, part in _in_band(modes, opt.band_hz) if part and max(part.values()) > 0.5)
-    log(f"Fundamental {f_res:.2f} Hz; {n_local} of {len(_in_band(modes, opt.band_hz))} "
-        f"in-band modes are branch-local (>50% on one branch)", 0.18)
+    # Drive frequencies must be rig-REACHABLE: cap the selection band at the
+    # actuator's max frequency (modes above it, e.g. high tip modes near 19 Hz,
+    # are real but the rig cannot excite them — selecting them gives empty grids).
+    feasible_band = (opt.band_hz[0], min(opt.band_hz[1], opt.limits.max_freq_hz))
+    f_res, secondary = _aggregate_resonances(modes, feasible_band)
+    n_local = sum(1 for _, part in _in_band(modes, feasible_band) if part and max(part.values()) > 0.5)
+    log(f"Resonance {f_res:.2f} Hz; secondary {', '.join(f'{s:.1f}' for s in secondary) or '—'} Hz "
+        f"({len(_in_band(modes, feasible_band))} modes in {feasible_band[0]:g}–{feasible_band[1]:g} Hz, "
+        f"{n_local} branch-local)", 0.18)
 
     # -- 3. amplitude grid + per-clamp frequency grids ------------------------
     # Each clamp grips (and so excites) one branch, so its candidate frequencies
@@ -740,17 +783,18 @@ def recommend_harvest_parameters(
         branch_id = clamp_label.split("@", 1)[0]
         subtree = subtrees.get(branch_id, frozenset({branch_id}))
         local_fs = branch_local_frequencies(
-            modes, subtree, opt.band_hz,
+            modes, subtree, feasible_band,
             participation_min=opt.local_mode_participation_min,
             max_modes=opt.local_modes_per_clamp,
         )
         if not local_fs:
             # Subtree owns no in-band mode above the threshold: fall back to the
-            # globally most prominent modes so the clamp is still evaluated.
-            local_fs = global_prominent_frequencies(modes, opt.band_hz, opt.local_modes_per_clamp)
+            # globally most prominent (rig-reachable) modes so the clamp is still
+            # evaluated.
+            local_fs = global_prominent_frequencies(modes, feasible_band, opt.local_modes_per_clamp)
         clamp_local_mode[clamp_label] = local_fs[0] if local_fs else None
         clamp_freq[clamp_label] = build_frequency_grid(
-            local_fs[0], local_fs[1:], opt.band_hz,
+            local_fs[0], local_fs[1:], feasible_band,
         ) if local_fs else []
 
     f_union = sorted({f for grid in clamp_freq.values() for f in grid})

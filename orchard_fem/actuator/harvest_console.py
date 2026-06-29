@@ -752,13 +752,15 @@ class HarvestConsole:
         def worker() -> None:
             try:
                 from dataclasses import replace
+                from orchard_fem.discretization.damping import rayleigh_from_band_zeta
                 from orchard_fem.workflows.harvest_recommendation import generate_linear_fruits
                 from orchard_fem.workflows.harvest_schedule import (
                     StageDurationModel,
                     build_branch_outcome_grid,
                     compute_multiclamp_harvest_schedule,
                 )
-                # 复刻推荐时的布果,保证覆盖率分母一致
+                # 复刻推荐时的布果与阻尼/单元阶次,保证调度与推荐物理一致
+                # (否则调度用 P1+轻阻尼会高估脱落,覆盖率与推荐对不上)。
                 m = model
                 if opt.detachment_displacement_m is not None and m.fruit_policy is not None:
                     m = replace(m, fruit_policy=replace(
@@ -767,6 +769,9 @@ class HarvestConsole:
                 if opt.dense_fruit_spacing is not None and m.fruit_policy is not None:
                     m = replace(m, fruits=generate_linear_fruits(
                         m, m.fruit_policy, opt.dense_fruit_spacing))
+                if opt.damping_zeta is not None:
+                    a, b = rayleigh_from_band_zeta(opt.damping_zeta, opt.band_hz[0], opt.band_hz[1])
+                    m = replace(m, analysis=replace(m.analysis, rayleigh_alpha=a, rayleigh_beta=b))
                 n_branches = len({f.branch_id for f in m.fruits})
                 grids = {}
                 for idx, cand in enumerate(candidates, start=1):
@@ -775,6 +780,7 @@ class HarvestConsole:
                                       f"clamp {self._display_clamp(cl)}…")
                     grids[cl] = build_branch_outcome_grid(
                         m, cl, clamp_freqs[cl], a_grid, limits=LIMITS,
+                        polynomial_degree=opt.polynomial_degree,
                         progress_cb=lambda msg, fr: (self._post("log", msg),
                                                      self._post("progress", fr)))
                 sched = compute_multiclamp_harvest_schedule(

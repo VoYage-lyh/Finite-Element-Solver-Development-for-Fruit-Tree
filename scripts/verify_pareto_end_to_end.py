@@ -1,29 +1,25 @@
-"""End-to-end self-consistency check with **multi-clamp** Pareto search.
+"""End-to-end figures for the 5 sample trees, driven by the PACKAGE pipeline.
 
-For each tree we:
-    1. Run a wide FRF sweep to find the dominant in-band local-max resonance.
-    2. Tighten the detachment displacement to 2 mm.
-    3. Enumerate candidate clamps:
-           * Trunk heights at s = 0.25, 0.40, 0.55, 0.70, 0.85
-           * Root (s = 0) of every branch joined directly to the trunk
-       For each clamp, run a Pareto sweep over (f, A) around the resonance
-       and extract a knee.
-    4. Select the **best clamp** as the one whose knee is closest to the
-       ideal (coverage = 1, σ = 0) point in normalised objective space.
+This is now a thin figure front-end over the package's harvest pipeline — the
+single source of truth — NOT a second, divergent implementation. Per tree it
+runs :func:`orchard_fem.workflows.harvest_recommendation.recommend_harvest_parameters`
+(P2 elements, modal per-subtree local-mode frequency selection, multi-clamp
+Pareto, band-tuned ζ≈6 % damping) and
+:func:`~orchard_fem.workflows.harvest_schedule.compute_multiclamp_harvest_schedule`,
+then renders the figures from that output. The old standalone logic (mean-FRF
+single-peak resonance, single-clamp greedy, P1) was wrong and has been removed.
 
-Outputs (in ``results/``), organised by figure type:
+Outputs default to ``results_nonlinear/`` (``--output-dir`` to change; the old
+linear ``results/`` tree is deprecated), organised by figure type:
 
-* ``results/pareto/tree_<n>.{png,pdf}``    — multi-clamp Pareto + best knee
-* ``results/frf/tree_<n>.{png,pdf}``       — FRF sweep with resonance marker
-* ``results/response/tree_<n>.{png,pdf}``  — side-view detachment map
-* ``results/pareto/all_trees.{png,pdf}``   — best-knee Pareto per tree
-* ``results/frf/all_trees.{png,pdf}``      — all 5 FRFs stacked
-* ``results/response/all_trees.{png,pdf}`` — side-view, 5 panels
-* ``results/summary/knees.{png,pdf}``      — best (clamp, f, A, act, σ) per tree
+* ``<out>/pareto/pareto_tree_<n>.{png,pdf}``    — per-clamp Pareto + best knee
+* ``<out>/frf/frf_tree_<n>.{png,pdf}``          — FRF sweep, global f₁/f₂ peak markers
+* ``<out>/sequence/sequence_tree_<n>.{png,pdf}``— multi-clamp staged sequence
+  (per-stage side-view tree response — replaces the dropped standalone response/)
+* ``<out>/summary/knees.{png,pdf}`` + ``summary_sequence_coverage.{png,pdf}``
 """
 from __future__ import annotations
 
-import math
 import sys
 import time
 from dataclasses import dataclass, field, replace
@@ -111,47 +107,6 @@ def _save_both(fig, stem: Path) -> None:
 # ────────────────────────────────────────────────────────────────────────────
 #  Resonance detection
 # ────────────────────────────────────────────────────────────────────────────
-def _find_in_band_resonance(
-    freqs: np.ndarray,
-    mags: np.ndarray,
-    band: tuple[float, float],
-    *,
-    prominence_ratio: float = 0.10,
-) -> tuple[int, bool]:
-    """Return ``(peak_index, has_genuine_local_max)`` inside *band*."""
-    in_band = (freqs >= band[0]) & (freqs <= band[1])
-    if not in_band.any():
-        raise RuntimeError(
-            f"No FRF samples in {band[0]}–{band[1]} Hz; widen the sweep."
-        )
-
-    log_mags = np.log(np.maximum(mags, 1.0e-20))
-    is_local_max = np.zeros(mags.size, dtype=bool)
-    is_local_max[1:-1] = (
-        (log_mags[1:-1] > log_mags[:-2]) & (log_mags[1:-1] > log_mags[2:])
-    )
-    candidates = is_local_max & in_band
-    band_median = float(np.median(mags[in_band]))
-    if candidates.any():
-        cand_idx = np.flatnonzero(candidates)
-        prominent = mags[cand_idx] >= band_median * (1.0 + prominence_ratio)
-        if prominent.any():
-            cand_idx = cand_idx[prominent]
-        peak_idx = int(cand_idx[int(np.argmax(mags[cand_idx]))])
-        return peak_idx, True
-
-    # Fallback: curvature inflection.
-    curvature = np.zeros_like(mags)
-    curvature[1:-1] = log_mags[2:] - 2.0 * log_mags[1:-1] + log_mags[:-2]
-    band_idx = np.flatnonzero(in_band)
-    interior = band_idx[(band_idx > 0) & (band_idx < mags.size - 1)]
-    if interior.size == 0:
-        peak_idx = int(band_idx[int(np.argmax(mags[in_band]))])
-        return peak_idx, False
-    peak_idx = int(interior[int(np.argmin(curvature[interior]))])
-    return peak_idx, False
-
-
 def _find_in_band_peaks(
     freqs: np.ndarray,
     mags: np.ndarray,
@@ -168,9 +123,6 @@ def _find_in_band_peaks(
     Within ``min_separation_hz`` of an already-selected peak no further peak
     is added (otherwise neighbouring grid samples around one mode would
     inflate the count). At most ``max_peaks`` peaks are returned.
-
-    Differs from :func:`_find_in_band_resonance` which only returns the
-    single dominant peak.
     """
     in_band = (freqs >= band[0]) & (freqs <= band[1])
     if not in_band.any():
@@ -249,7 +201,7 @@ def _coarse_frf_sweep(model, f_min: float, f_max: float, steps: int):
             frequency_steps=int(steps),
         ),
     )
-    exp = solve_embedded_beam_frequency_response_experiment(swept, polynomial_degree=1)
+    exp = solve_embedded_beam_frequency_response_experiment(swept, polynomial_degree=2)
     res = exp.result
     freqs = np.array([p.frequency_hz for p in res.points])
     name_to_idx = {n: i for i, n in enumerate(res.observation_names)}
@@ -259,15 +211,6 @@ def _coarse_frf_sweep(model, f_min: float, f_max: float, steps: int):
         mags[j] = float(np.mean([p.observation_magnitudes[name_to_idx[n]]
                                   for n in tip_obs]))
     return freqs, mags
-
-
-def _candidate_clamps(model) -> list[str]:
-    """Return clamp labels for trunk heights + each trunk-child branch root."""
-    labels = [f"trunk@{s:.2f}" for s in _TRUNK_CLAMP_S]
-    trunk_node = model.topology.require_node("trunk")
-    for bid in trunk_node.child_branch_ids:
-        labels.append(f"{bid}@0.00")
-    return labels
 
 
 def _build_hierarchical_label_map(model) -> dict[str, str]:
@@ -336,185 +279,98 @@ def _pretty_clamp_label(raw: str, label_map: dict[str, str]) -> str:
     return f"{prefix} @ {suffix}"
 
 
-def _knee_distance_to_ideal(
-    knees: list, *, sigma_norm: float
-) -> np.ndarray:
-    """Normalised distance from each knee to the ideal (cov=1, σ=0) point.
+def _clamp_result_from_rec(cr, label_map: dict[str, str]) -> "ClampResult":
+    """Adapt a package ``ClampRecommendation`` into the figure-friendly
+    ``ClampResult`` / ``ParetoFront`` used by the savers (no recompute)."""
+    from orchard_fem.recommendation.pareto import ParetoFront
 
-    The coverage axis is already in [0, 1]. The stress axis is normalised by
-    ``sigma_norm`` — typically the max stress observed across all knees of
-    this tree — so the two axes carry comparable weight.
-    """
-    distances = np.zeros(len(knees))
-    for i, k in enumerate(knees):
-        cov = float(k.detachment_coverage)
-        sigma_n = float(k.trunk_max_stress) / max(sigma_norm, 1.0e-12)
-        distances[i] = float(np.sqrt((1.0 - cov) ** 2 + sigma_n ** 2))
-    return distances
+    pts = list(cr.points)
+    freqs = np.array([p.frequency_hz for p in pts], dtype=float)
+    amps = np.array([p.amplitude_mm for p in pts], dtype=float)
+    # objectives are the minimisation form the savers read: col0=-coverage, col1=σ[Pa].
+    objs = np.array([[-p.coverage, p.trunk_stress_pa, 0.0] for p in pts], dtype=float)
+    nd = np.array([i for i, p in enumerate(pts) if p.on_front], dtype=int)
+    if nd.size == 0:
+        nd = np.array([int(np.argmin(objs[:, 0]))], dtype=int)
+    knee_local = next((j for j, i in enumerate(nd) if pts[i].is_knee), 0)
+    front = ParetoFront(
+        clamp_node=cr.clamp_label, frequencies_hz=freqs, amplitudes=amps,
+        objectives=objs, non_dominated_index=nd, knee_index=knee_local,
+    )
+    return ClampResult(
+        clamp_label=cr.clamp_label,
+        display_label=_pretty_clamp_label(cr.clamp_label, label_map),
+        front=front, knee=front.knee,
+    )
 
 
 def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
-    from orchard_fem.calibration.fenicsx_bridge import (
-        build_fenicsx_pareto_evaluator,
+    """Run the PACKAGE pipeline (single source of truth) and adapt its output to
+    the figure data structures. Replaces the old standalone FRF-sweep + Pareto +
+    greedy logic — that pipeline was wrong (P1, mean-FRF single-peak, single
+    clamp); the package now does modal per-subtree local modes, P2, realistic
+    band-tuned damping, and a multi-clamp schedule.
+    """
+    from orchard_fem.discretization.damping import (
+        rayleigh_from_band_zeta, rayleigh_from_paper_zeta,
     )
+    from orchard_fem.domain import ExcitationKind
     from orchard_fem.io.loaders import load_orchard_model
-    from orchard_fem.recommendation.pareto import pareto_front_from_grid
+    from orchard_fem.workflows.harvest_recommendation import (
+        RecommendationOptions, generate_linear_fruits, recommend_harvest_parameters,
+    )
 
     print(f"\n[{label}] loading {model_path.name} …")
     model = load_orchard_model(str(model_path))
+    opt = RecommendationOptions(duration_s=10.0)   # P2 + modal multi-clamp + measured ζ(f) defaults
 
-    # Replace the policy-driven fruit list with a dense linear distribution:
-    # every non-trunk branch carries one fruit per 5 % of its arc length
-    # (20 fruits per branch). The attachment stiffness varies linearly along
-    # the branch — stiffer near the root (older, woodier stalks) and softer
-    # at the tip (young, easily-snapped peduncles).
-    new_policy = replace(
-        model.fruit_policy,
-        detachment_displacement_m=0.002,
-    )
-    dense_fruits = _generate_linear_fruits(model, new_policy, spacing=0.05)
-    model = replace(model, fruits=dense_fruits, fruit_policy=new_policy)
-
-    fruit_branches = {f.branch_id for f in model.fruits}
-    print(f"[{label}]   fruits={len(model.fruits)} on "
-          f"{len(fruit_branches)} branches "
-          f"(linear density: every 5% of arc length)")
-
-    print(f"[{label}] FRF sweep 0.5–30 Hz …")
+    _dmp = (f"flat ζ≈{opt.damping_zeta:.0%}" if opt.damping_zeta is not None
+            else "measured ζ(f) 0.35→0.09")
+    print(f"[{label}] pipeline (P{opt.polynomial_degree}, {_dmp}, modal "
+          f"per-subtree local modes, multi-clamp) …")
     t0 = time.time()
-    freqs, mags = _coarse_frf_sweep(model, 0.5, 30.0, 60)
-    peak_idx, has_local_max = _find_in_band_resonance(
-        freqs, mags, _FEASIBLE_BAND_HZ,
+    result = recommend_harvest_parameters(
+        model, model_path=str(model_path), options=opt, progress_cb=lambda *_: None,
     )
-    f_resonance = float(freqs[peak_idx])
-    detect_type = "local max" if has_local_max else "curvature inflection"
-    print(f"[{label}]   sweep {time.time() - t0:.1f} s   "
-          f"primary resonance ({detect_type}) @ {f_resonance:.2f} Hz "
-          f"({mags[peak_idx] / model.excitation.amplitude * 1e3:.3f} mm/N)")
+    print(f"[{label}]   {time.time() - t0:.1f}s  resonance {result.resonance_hz:.2f} Hz, "
+          f"{len(result.clamps)} clamps, best #{result.best_clamp_index}")
 
-    # Pick at most ONE well-separated secondary mode (≥ 5 Hz away from the
-    # primary) — typically the "other end" of the bimodal trees: e.g. the
-    # 12 Hz mode for tree_4 (primary 4.5 Hz) or the 5–6 Hz mode for the
-    # trees whose primary sits near 13 Hz. Anything closer than 5 Hz is
-    # treated as a sibling of the primary and ignored.
-    secondary_idxs = _find_in_band_peaks(
-        freqs, mags, _FEASIBLE_BAND_HZ,
-        prominence_ratio=0.10, min_separation_hz=5.0, max_peaks=2,
-    )
-    secondary_freqs = [float(freqs[k]) for k in secondary_idxs
-                       if int(k) != peak_idx]
-    if secondary_freqs:
-        print(f"[{label}]   secondary peak @ {secondary_freqs[0]:.2f} Hz")
+    # Rebuild the SAME fruited + damped model the pipeline used, for the FRF curve
+    # and the per-fruit response map the figures need.
+    fmodel = model
+    if opt.detachment_displacement_m is not None and fmodel.fruit_policy is not None:
+        fmodel = replace(fmodel, fruit_policy=replace(
+            fmodel.fruit_policy, detachment_displacement_m=float(opt.detachment_displacement_m)))
+    if opt.dense_fruit_spacing is not None:
+        fmodel = replace(fmodel, fruits=generate_linear_fruits(
+            fmodel, fmodel.fruit_policy, opt.dense_fruit_spacing))
+    _dmp_hi = min(opt.band_hz[1], opt.limits.max_freq_hz)
+    if opt.damping_zeta is None:
+        a, b = rayleigh_from_paper_zeta(opt.band_hz[0], _dmp_hi)
+    else:
+        a, b = rayleigh_from_band_zeta(opt.damping_zeta, opt.band_hz[0], opt.band_hz[1])
+    fmodel = replace(fmodel, analysis=replace(fmodel.analysis, rayleigh_alpha=a, rayleigh_beta=b))
 
-    theta = {
-        "E": float(model.materials[0].youngs_modulus),
-        "rho": float(model.materials[0].density),
-    }
-    # Switch the model to displacement excitation: the eccentric-cam shaker
-    # used in real harvesters imposes a strict displacement, not a force.
-    from orchard_fem.domain import ExcitationKind
-    model = replace(
-        model,
-        excitation=replace(model.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT),
-    )
-    # amplitude_unit="mm" → A_grid values are interpreted as millimetres of
-    # imposed displacement at the clamp.
-    evaluator = build_fenicsx_pareto_evaluator(
-        model, amplitude_unit="mm", coverage_mode="branch",
-    )
+    print(f"[{label}] FRF sweep (figure) …")
+    freqs, mags = _coarse_frf_sweep(fmodel, 0.5, 30.0, 60)
 
-    # f_grid = primary-mode neighbourhood ± 2 Hz, plus a tight ±1 Hz cluster
-    # around every secondary peak. This lets the Pareto front weigh "soft"
-    # multi-mode candidates (e.g. tree_4 with peaks at 4.5 Hz and 13 Hz)
-    # against the dominant mode; the stress + coverage criteria then keep
-    # only the operating points that actually clear the harvesting target,
-    # so unsuitable resonances drop out by themselves.
-    f_grid_set: set[float] = {
-        max(0.5, f_resonance - 2.0),
-        max(0.5, f_resonance - 1.0),
-        f_resonance,
-        f_resonance + 1.0,
-        f_resonance + 2.0,
-    }
-    for f_sec in secondary_freqs:
-        for df in (-1.0, 0.0, 1.0):
-            f_grid_set.add(max(0.5, f_sec + df))
-    # Hard band guard: stay inside the feasible mechanical band even if a
-    # secondary peak sits near its edge.
-    f_grid = sorted(
-        f for f in f_grid_set
-        if _FEASIBLE_BAND_HZ[0] - 1.5 <= f <= _FEASIBLE_BAND_HZ[1] + 1.5
-    )
-    A_grid = list(_AMPLITUDE_GRID_MM)
-
-    clamp_labels = _candidate_clamps(model)
     label_map = _build_hierarchical_label_map(model)
-    print(f"[{label}] {len(clamp_labels)} candidate clamps × |f|={len(f_grid)} × "
-          f"|A|={len(A_grid)} = {len(clamp_labels) * len(f_grid) * len(A_grid)} "
-          f"FE solves")
-
-    clamps: list[ClampResult] = []
-    t0 = time.time()
-    for clamp_label in clamp_labels:
-        try:
-            front = pareto_front_from_grid(
-                clamp_label, f_grid, A_grid, evaluator, theta,
-                stress_max=_STRESS_SANITY_CEILING_PA,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"[{label}]   skip {clamp_label}: {exc}")
-            continue
-        if front.non_dominated_index.size == 0:
-            continue
-        clamps.append(ClampResult(
-            clamp_label=clamp_label,
-            display_label=_pretty_clamp_label(clamp_label, label_map),
-            front=front,
-            knee=front.knee,
-        ))
-    print(f"[{label}]   {len(clamps)} clamps produced a knee "
-          f"({time.time() - t0:.1f} s)")
-
+    clamps = [_clamp_result_from_rec(cr, label_map)
+              for cr in result.clamps if cr.knee is not None]
     if not clamps:
         raise RuntimeError(f"No feasible clamp for {label}.")
+    best_label = result.best.clamp_label
+    best_idx = next((i for i, c in enumerate(clamps) if c.clamp_label == best_label), 0)
 
-    # Best-clamp selection: knee closest to the ideal (cov = 1, σ = 0) point
-    # after normalising σ by the max σ over knees of this tree.
-    knees = [c.knee for c in clamps]
-    sigma_norm = max(float(k.trunk_max_stress) for k in knees)
-    distances = _knee_distance_to_ideal(knees, sigma_norm=sigma_norm)
-    best_idx = int(np.argmin(distances))
-    best = clamps[best_idx]
-    print(f"[{label}] best clamp: {best.display_label} ({best.clamp_label})  "
-          f"f*={best.knee.frequency_hz:.2f} Hz, "
-          f"A*={best.knee.amplitude:.1f} mm, "
-          f"activation={best.knee.detachment_coverage:.2f}, "
-          f"σ={best.knee.trunk_max_stress / 1e6:.3f} MPa")
-
-    # Pre-compute fruit-level outcomes on the best clamp's (f, A) grid for the
-    # downstream greedy multi-stage sequence. Only the best clamp gets this
-    # treatment (saving 8× the cost of evaluating every candidate clamp).
-    print(f"[{label}] tabulating fruit outcomes on best-clamp (f, A) grid …")
-    t0 = time.time()
-    best.grid_outcomes = _build_best_clamp_grid(
-        model, theta, best, f_grid, A_grid,
-    )
-    print(f"[{label}]   grid outcomes built ({time.time() - t0:.1f} s, "
-          f"{len(best.grid_outcomes)} entries)")
-
+    theta = {"E": float(model.materials[0].youngs_modulus),
+             "rho": float(model.materials[0].density)}
+    disp_model = replace(fmodel, excitation=replace(
+        fmodel.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT))
     return TreeResult(
-        label=label,
-        n_fruits=len(model.fruits),
-        freqs=freqs,
-        mags=mags,
-        f_resonance=f_resonance,
-        clamps=clamps,
-        best_idx=best_idx,
-        model=model,
-        theta=theta,
-        label_map=label_map,
+        label=label, n_fruits=len(fmodel.fruits), freqs=freqs, mags=mags,
+        f_resonance=float(result.resonance_hz), clamps=clamps, best_idx=best_idx,
+        model=disp_model, theta=theta, label_map=label_map,
     )
-
 
 def _load_or_evaluate(model_path: Path, label: str, *,
                        cache_dir: Path, force_recompute: bool) -> "TreeResult":
@@ -532,22 +388,6 @@ def _load_or_evaluate(model_path: Path, label: str, *,
             result = pickle.load(fh)
         print(f"[{label}] loaded from cache: "
               f"{cache_file.relative_to(REPO)}")
-        # Cache-schema migration: older caches don't carry the best-clamp
-        # (f, A) outcomes needed by the greedy sequence. Patch in place.
-        if not getattr(result.best, "grid_outcomes", None):
-            print(f"[{label}]   migrating cache: adding best-clamp grid …")
-            f_res = result.f_resonance
-            f_grid = [max(0.5, f_res - 2.0),
-                      max(0.5, f_res - 1.0),
-                      f_res, f_res + 1.0, f_res + 2.0]
-            A_grid = list(_AMPLITUDE_GRID_MM)
-            t0 = time.time()
-            result.best.grid_outcomes = _build_best_clamp_grid(
-                result.model, result.theta, result.best, f_grid, A_grid,
-            )
-            print(f"[{label}]   migrated ({time.time() - t0:.1f} s)")
-            with open(cache_file, "wb") as fh:
-                pickle.dump(result, fh, protocol=pickle.HIGHEST_PROTOCOL)
         return result
     result = _evaluate_tree(model_path, label=label)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -574,7 +414,7 @@ def main() -> int:
              "Use this when only the figure styling has changed.",
     )
     parser.add_argument(
-        "--output-dir", default="results",
+        "--output-dir", default="results_nonlinear",
         help="Directory (relative to repo root, or absolute) where figures are "
              "written. Defaults to 'results'. Use 'results_nonlinear' to keep "
              "outputs from the randomized Duffing-link pipeline separate from "
@@ -587,10 +427,9 @@ def main() -> int:
     results_root = output_dir_arg if output_dir_arg.is_absolute() else REPO / output_dir_arg
     out_pareto = results_root / "pareto"
     out_frf = results_root / "frf"
-    out_response = results_root / "response"
     out_summary = results_root / "summary"
     cache_dir = REPO / "cache" / f"verify_pareto_{results_root.name}"
-    for d in (out_pareto, out_frf, out_response, out_summary):
+    for d in (out_pareto, out_frf, out_summary):
         d.mkdir(parents=True, exist_ok=True)
     results_label = results_root.name
 
@@ -614,16 +453,12 @@ def main() -> int:
 
         _save_pareto_multi_clamp(result, out_pareto / f"pareto_tree_{n}")
         _save_frf(result, out_frf / f"frf_tree_{n}")
-
-        outcomes = _compute_fruit_outcomes_at_best(result)
-        _save_tree_response_map(
-            result, outcomes,
-            out_response / f"response_tree_{n}",
-        )
+        # The standalone response/ map is dropped: the single-fixed-parameter
+        # harvest it depicted is abandoned. The per-stage tree response now lives
+        # only inside the multi-clamp sequence panels below.
         print(f"[tree_{n}] figures → "
               f"{results_label}/pareto/pareto_tree_{n}.{{png,pdf}} + "
-              f"{results_label}/frf/frf_tree_{n}.{{png,pdf}} + "
-              f"{results_label}/response/response_tree_{n}.{{png,pdf}}")
+              f"{results_label}/frf/frf_tree_{n}.{{png,pdf}}")
 
     # Strategy A: greedy multi-stage sequence on each tree's best clamp.
     out_sequence = results_root / "sequence"
@@ -661,72 +496,6 @@ def main() -> int:
 
 # ────────────────────────────────────────────────────────────────────────────
 #  Dense fruit distribution along every branch
-# ────────────────────────────────────────────────────────────────────────────
-def _generate_linear_fruits(model, policy, spacing: float = 0.05):
-    """Generate fruits at every ``spacing`` fraction of every non-trunk branch.
-
-    Mass per fruit is drawn from the policy mean ± Gaussian residual
-    (``mass_residual_cv``). The attachment stiffness varies **linearly along
-    each branch**: ``k(s) = k_mean × (1.5 − s)`` (1.5×k at the root, 0.5×k at
-    the tip), giving the physical "young tip wood snaps first" behaviour.
-
-    A trunk branch is excluded — fruit are borne on scaffolds and shoots,
-    not on the trunk itself.
-    """
-    import random
-    from orchard_fem.domain.entities import FruitAttachment
-
-    rng = random.Random(policy.seed)
-
-    # Derive per-fruit mean parameters from the policy aggregates.
-    # ``mean_detachment_force_N`` is a derived quantity exposed by the policy
-    # generator; if absent, fall back to a default fruit mass of 0.05 kg.
-    mean_mass = getattr(policy, "mean_fruit_mass_kg", None)
-    if mean_mass is None:
-        # Derive from total weight if explicit value missing.
-        mean_mass = 0.05
-    mean_detach_force = (
-        getattr(policy, "mean_detachment_force_N", None) or 5.0
-    )
-    d_detach = float(policy.detachment_displacement_m)
-    k_mean = mean_detach_force / d_detach
-    zeta = float(getattr(policy, "attachment_damping_ratio", 0.05))
-    target_component = str(
-        getattr(policy, "attachment_component", "uz")
-    )
-
-    fruits: list = []
-    fruit_idx = 0
-    n_per_branch = max(int(round(1.0 / spacing)), 1)
-
-    for branch in model.branches:
-        if branch.branch_id == "trunk":
-            continue
-        for i in range(n_per_branch):
-            s = (i + 1) * spacing                  # 0.05, 0.10, …, 1.00
-            if s > 1.0:
-                break
-            mass_jitter = rng.gauss(0.0, float(getattr(
-                policy, "mass_residual_cv", 0.10,
-            )))
-            mass = max(mean_mass * (1.0 + mass_jitter), 0.005)
-            k = max(k_mean * (1.5 - s), 0.10 * k_mean)
-            damping = 2.0 * zeta * math.sqrt(mass * k)
-            fruits.append(FruitAttachment(
-                fruit_id=f"fr_{branch.branch_id}_{int(s*100):03d}",
-                branch_id=branch.branch_id,
-                location_s=float(s),
-                mass=float(mass),
-                stiffness=float(k),
-                damping=float(damping),
-                target_component=target_component,
-            ))
-            fruit_idx += 1
-    return fruits
-
-
-# ────────────────────────────────────────────────────────────────────────────
-#  Tree response map — per-fruit detachment at the best (clamp, f, A)
 # ────────────────────────────────────────────────────────────────────────────
 def _compute_fruit_outcomes(
     model, theta: dict, clamp_label: str,
@@ -777,7 +546,7 @@ def _compute_fruit_outcomes(
     cloned = replace(cloned, observations=list(cloned.observations) + extras)
 
     exp = solve_embedded_beam_frequency_response_experiment(
-        cloned, polynomial_degree=1,
+        cloned, polynomial_degree=2,
     )
     point = exp.result.points[0]
     name_to_idx = {n: i for i, n in enumerate(exp.result.observation_names)}
@@ -819,97 +588,50 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
     )
 
 
-def _build_best_clamp_grid(
-    model, theta: dict, best: ClampResult,
-    f_grid: list[float], A_grid: list[float],
-) -> dict:
-    """Tabulate fruit-level outcomes on every (f, A) cell of the best clamp.
-
-    Returns ``{(f, A): {"detached_branches": set[str], "n_detached": int,
-    "sigma_mpa": float}}`` — compact enough to ship inside the cached
-    ``TreeResult`` (~6 KB total for 5 trees).
-    """
-    front = best.front
-    objectives = front.objectives
-    freqs_all = front.frequencies_hz
-    amps_all = front.amplitudes
-    # Build (f, A) → σ lookup from the Pareto candidate cloud.
-    sigma_at = {}
-    for i in range(objectives.shape[0]):
-        key = (float(freqs_all[i]), float(amps_all[i]))
-        sigma_at[key] = float(objectives[i, 1]) / 1.0e6  # to MPa
-
-    grid: dict = {}
-    for f in f_grid:
-        for A in A_grid:
-            outcomes_list = _compute_fruit_outcomes(
-                model, theta, best.clamp_label, f, A,
-            )
-            grid[(float(f), float(A))] = {
-                "detached_branches": {
-                    o["branch_id"] for o in outcomes_list if o["detached"]
-                },
-                "n_detached": sum(1 for o in outcomes_list if o["detached"]),
-                "n_total_fruits": len(outcomes_list),
-                "sigma_mpa": sigma_at.get((float(f), float(A)), float("nan")),
-            }
-    return grid
-
-
-# ────────────────────────────────────────────────────────────────────────────
-#  Strategy A — Greedy multi-stage sequence
-# ────────────────────────────────────────────────────────────────────────────
 def _greedy_sequence(
-    result: TreeResult, *, target: float = 0.95, max_stages: int = 5,
+    result: TreeResult, *, target: float = 0.95, max_stages: int = 6,
 ) -> list[dict]:
-    """Build a sequence of (f, A) work points on the *best* clamp.
-
-    At each stage we pick the (f, A) cell of the pre-tabulated grid that
-    maximises ``|new branches| / σ`` (new branches per unit of trunk stress
-    paid). Stop when the cumulative branch activation reaches ``target``,
-    when no further (f, A) introduces new branches, or after ``max_stages``.
+    """Multi-clamp staged sequence via the package scheduler (replaces the old
+    single-clamp greedy). Builds a branch-outcome grid on the top candidate
+    clamps (each on its own local-mode frequencies) and lets the scheduler move
+    the grip between energy-reachable regions; returns figure-friendly dicts.
     """
-    grid = result.best.grid_outcomes
-    if not grid:
-        return []
+    from orchard_fem.actuator.harvest_bridge import DS5L1Limits
+    from orchard_fem.workflows.harvest_schedule import (
+        build_branch_outcome_grid, compute_multiclamp_harvest_schedule,
+    )
 
-    fruit_branches = {f.branch_id for f in result.model.fruits}
-    n_total = max(len(fruit_branches), 1)
-
-    activated: set[str] = set()
-    stages: list[dict] = []
-    for stage in range(max_stages):
-        best_score = 0.0
-        best_choice = None
-        for (f, A), info in grid.items():
-            new = info["detached_branches"] - activated
-            sigma = info["sigma_mpa"]
-            if not new or not (sigma > 0):
-                continue
-            score = len(new) / sigma                # new branches per MPa
-            if score > best_score:
-                best_score = score
-                best_choice = (f, A, new, sigma, info)
-        if best_choice is None:
-            break
-        f, A, new, sigma, info = best_choice
-        activated |= new
-        coverage = len(activated) / n_total
-        stages.append({
-            "stage": stage + 1,
-            "f_hz": f,
-            "A_mm": A,
-            "new_branches": sorted(new),
-            "n_new_branches": len(new),
-            "cumulative_branches": sorted(activated),
-            "coverage": coverage,
-            "sigma_mpa": sigma,
-            "n_detached_fruits": info["n_detached"],
-        })
-        if coverage >= target:
-            break
-    return stages
-
+    n_total = max(len({f.branch_id for f in result.model.fruits}), 1)
+    a_grid = list(_AMPLITUDE_GRID_MM)
+    # Give the scheduler ample re-clamp options (the rig CAN change grip): take the
+    # best-covering clamps across distinct subtrees so later stages can reach
+    # branches the first grip could not excite.
+    cand = sorted(result.clamps, key=lambda c: c.knee.detachment_coverage, reverse=True)[:6]
+    grids = {}
+    for c in cand:
+        f_for = sorted({float(x) for x in c.front.frequencies_hz.tolist()})
+        grids[c.clamp_label] = build_branch_outcome_grid(
+            result.model, c.clamp_label, f_for, a_grid,
+            theta=result.theta, limits=DS5L1Limits(), polynomial_degree=2,
+        )
+    sched = compute_multiclamp_harvest_schedule(
+        grids, n_fruit_branches=n_total, target_coverage=target, max_stages=max_stages,
+    )
+    return [
+        {
+            "stage": st.index,
+            "f_hz": st.plan.frequency_hz,
+            "A_mm": st.plan.stroke_mm / 2.0,
+            "clamp": st.plan.excitation_label,
+            "new_branches": list(st.new_branches),
+            "n_new_branches": len(st.new_branches),
+            "cumulative_branches": [],
+            "coverage": st.cumulative_coverage,
+            "sigma_mpa": st.trunk_stress_pa / 1.0e6,
+            "n_detached_fruits": st.n_detached_fruits,
+        }
+        for st in sched.stages
+    ]
 
 def _branch_polyline_xz(branch, n: int = 30):
     """Return (xs, zs) polyline for *branch* — side view (x-z) projection."""
@@ -1049,8 +771,6 @@ def _save_pareto_multi_clamp(result: TreeResult, stem: Path) -> None:
     fig, ax = plt.subplots(figsize=(7.4, 5.4))
 
     best = result.best
-    best_sigma_max = max(c.knee.trunk_max_stress / 1e6 for c in result.clamps)
-    best_cov_max = max(c.knee.detachment_coverage for c in result.clamps)
 
     sigma_ceiling_mpa = _STRESS_SANITY_CEILING_PA / 1.0e6
 
@@ -1159,8 +879,28 @@ def _save_frf(result: TreeResult, stem: Path) -> None:
         zorder=2,
     )
 
-    ax.axvline(result.f_resonance, color="#B2182B",
-               linestyle="--", linewidth=1.0, alpha=0.85, zorder=3)
+    # Mark the prominent natural frequencies by GLOBAL peak search on the FRF
+    # curve across the whole feasible band (not just the lowest mode): a tree
+    # like tree_3 resonates at BOTH ~3.4 Hz (f₁) and a stronger ~8 Hz (f₂).
+    peak_idx = _find_in_band_peaks(freqs, mags, _FEASIBLE_BAND_HZ, max_peaks=3)
+    peak_idx = sorted(peak_idx, key=lambda i: float(freqs[i]))  # ascending → f₁, f₂, …
+    y_min, y_max = ax.get_ylim()
+    label_y = y_min * (y_max / y_min) ** 0.06
+    if not peak_idx:  # degenerate FRF: fall back to the reported resonance
+        ax.axvline(result.f_resonance, color="#B2182B", linestyle="--",
+                   linewidth=1.0, alpha=0.85, zorder=3)
+        ax.text(result.f_resonance + 0.4, label_y,
+                f"resonance ≈ {result.f_resonance:.1f} Hz",
+                color="#B2182B", fontsize=11, ha="left", va="bottom", zorder=5)
+    for rank, idx in enumerate(peak_idx, start=1):
+        f_pk = float(freqs[idx])
+        ax.axvline(f_pk, color="#B2182B", linestyle="--",
+                   linewidth=1.0, alpha=0.85, zorder=3)
+        ax.plot([f_pk], [mags[idx] * 1.0e3], marker="v", color="#B2182B",
+                markersize=7, markeredgecolor="white", markeredgewidth=0.6, zorder=4)
+        sub = "₁₂₃₄₅"[rank - 1] if rank <= 5 else str(rank)
+        ax.text(f_pk + 0.4, label_y, f"f{sub} ≈ {f_pk:.1f} Hz",
+                color="#B2182B", fontsize=10.5, ha="left", va="bottom", zorder=5)
 
     ax.set_xlabel("Frequency [Hz]")
     ax.set_ylabel("Mean canopy-tip displacement [mm]")
@@ -1169,15 +909,6 @@ def _save_frf(result: TreeResult, stem: Path) -> None:
     ax.grid(True, which="major", linewidth=0.6, color="#d0d0d0")
     ax.grid(True, which="minor", linewidth=0.4, color="#ececec")
     ax.legend(loc="upper right", fontsize=10)
-
-    y_min, y_max = ax.get_ylim()
-    label_y = y_min * (y_max / y_min) ** 0.06
-    ax.text(
-        result.f_resonance + 0.4, label_y,
-        f"resonance ≈ {result.f_resonance:.1f} Hz",
-        color="#B2182B", fontsize=11,
-        ha="left", va="bottom", zorder=5,
-    )
 
     fig.tight_layout(pad=0.4)
     _save_both(fig, stem)

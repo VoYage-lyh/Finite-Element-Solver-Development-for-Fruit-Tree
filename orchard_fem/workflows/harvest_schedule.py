@@ -331,6 +331,7 @@ def build_branch_outcome_grid(
     *,
     theta: dict[str, float] | None = None,
     limits: DS5L1Limits | None = None,
+    polynomial_degree: int = 1,
     n_jobs: int = -1,
     progress_cb: Callable[[str, float], None] | None = None,
 ) -> BranchOutcomeGrid:
@@ -385,12 +386,14 @@ def build_branch_outcome_grid(
             progress_cb(f"grid {clamp_label}: {done}/{n} solves", done / n)
 
     if n_jobs_r > 1:
-        solver_kw = dict(amplitude_unit="mm", coverage_mode="branch")
+        solver_kw = dict(amplitude_unit="mm", coverage_mode="branch",
+                         polynomial_degree=polynomial_degree)
         outcomes = solve_outcomes_parallel(
             disp_model, solver_kw, work_points, theta, n_jobs_r, on_done=_on_done)
     else:
         solve = build_outcome_solver(
-            disp_model, amplitude_unit="mm", coverage_mode="branch")
+            disp_model, amplitude_unit="mm", coverage_mode="branch",
+            polynomial_degree=polynomial_degree)
         outcomes = {}
         for clamp, f, a in work_points:
             outcomes[(clamp, f, a)] = solve(theta, f, a, clamp)
