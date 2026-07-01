@@ -1,2 +1,0 @@
-[console_scripts]
-orchard-fem = orchard_fem.cli:main
