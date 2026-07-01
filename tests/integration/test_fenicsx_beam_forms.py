@@ -20,7 +20,7 @@ from orchard_fem.io import load_orchard_model
 
 
 def test_embedded_beam_cell_data_matches_mesh_spec_and_stays_positive() -> None:
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     spec = build_embedded_line_mesh_spec(model)
     cell_data = build_embedded_beam_cell_data(model, spec=spec)
 
@@ -42,7 +42,7 @@ def test_fenicsx_system_assembly_reports_pipeline_stages() -> None:
     if not fenicsx_stack_available():
         pytest.skip("FEniCSx stack not available in this environment")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     assembly = assemble_fenicsx_system(model, polynomial_degree=1)
     stage_names = [stage.name for stage in assembly.stages]
 
@@ -66,7 +66,7 @@ def test_fenicsx_system_assembly_reports_pipeline_stages() -> None:
 
 
 def test_embedded_beam_cell_frames_are_unit_and_orthogonal() -> None:
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     cell_data = build_embedded_beam_cell_data(model)
 
     tangent = np.stack(
@@ -96,7 +96,7 @@ def test_embedded_beam_form_bundle_smoke() -> None:
     if not fenicsx_stack_available():
         pytest.skip("FEniCSx stack not available in this environment")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     space_bundle = create_embedded_beam_function_space(model, polynomial_degree=1)
     cell_data = build_embedded_beam_cell_data(model)
     coefficients = create_embedded_beam_coefficient_functions(space_bundle.mesh, cell_data)
@@ -121,7 +121,7 @@ def test_embedded_beam_operator_bundle_smoke() -> None:
     if not fenicsx_stack_available():
         pytest.skip("FEniCSx stack not available in this environment")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     experiment = build_embedded_timoshenko_experiment(model, polynomial_degree=1)
     operator_bundle = experiment.operator_bundle
 
@@ -139,7 +139,7 @@ def test_embedded_beam_operator_bundle_matches_manual_pipeline() -> None:
     if not fenicsx_stack_available():
         pytest.skip("FEniCSx stack not available in this environment")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     space_bundle = create_embedded_beam_function_space(model, polynomial_degree=1)
     cell_data = build_embedded_beam_cell_data(model)
     coefficients = create_embedded_beam_coefficient_functions(space_bundle.mesh, cell_data)
@@ -157,7 +157,7 @@ def test_embedded_beam_ufl_jacobian_matches_linear_stiffness_form() -> None:
     if not fenicsx_stack_available():
         pytest.skip("FEniCSx stack not available in this environment")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     space_bundle = create_embedded_beam_function_space(model, polynomial_degree=1)
     cell_data = build_embedded_beam_cell_data(model)
     coefficients = create_embedded_beam_coefficient_functions(space_bundle.mesh, cell_data)

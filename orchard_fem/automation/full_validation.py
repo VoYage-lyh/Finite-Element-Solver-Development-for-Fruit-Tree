@@ -23,7 +23,6 @@ class FullValidationConfig:
     orchard_fenicsx_env: str = "orchard-fenicsx"
     skip_integration_tests: bool = False
     skip_fenicsx_tests: bool = False
-    skip_python_demo_suite: bool = False
 
     @classmethod
     def from_environment(cls, repo_root: Path | None = None) -> "FullValidationConfig":
@@ -39,7 +38,6 @@ class FullValidationConfig:
             orchard_fenicsx_env=os.environ.get("ORCHARD_FENICSX_ENV", "orchard-fenicsx"),
             skip_integration_tests=os.environ.get("SKIP_INTEGRATION_TESTS", "0") == "1",
             skip_fenicsx_tests=os.environ.get("SKIP_FENICSX_TESTS", "0") == "1",
-            skip_python_demo_suite=os.environ.get("SKIP_PYTHON_DEMO_SUITE", "0") == "1",
         )
 
 
@@ -73,12 +71,11 @@ def build_full_validation_steps(config: FullValidationConfig) -> list[FullValida
                     "orchard_fem",
                     "verify",
                     "--skip-verification",
-                    "--skip-demo-suite",
                 ],
             )
         )
 
-    if not config.skip_fenicsx_tests or not config.skip_python_demo_suite:
+    if not config.skip_fenicsx_tests:
         command = [
             "conda",
             "run",
@@ -89,18 +86,13 @@ def build_full_validation_steps(config: FullValidationConfig) -> list[FullValida
             "orchard_fem",
             "verify",
             "--skip-integration",
+            "--enable-dolfinx-tests",
             "--output-dir",
             str(config.validation_dir / "python"),
         ]
-        if config.skip_fenicsx_tests:
-            command.append("--skip-verification")
-        else:
-            command.append("--enable-dolfinx-tests")
-        if config.skip_python_demo_suite:
-            command.append("--skip-demo-suite")
         steps.append(
             FullValidationStep(
-                label="Run orchard-fenicsx Orchard FEM verification and demo workflow",
+                label="Run orchard-fenicsx Orchard FEM verification workflow",
                 command=command,
             )
         )

@@ -15,7 +15,7 @@ from orchard_fem.io import load_orchard_model
 
 
 def test_embedded_line_mesh_spec_matches_branch_element_count() -> None:
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     spec = build_embedded_line_mesh_spec(model)
 
     expected_cells = sum(max(branch.discretization.num_elements, 1) for branch in model.branches)
@@ -26,7 +26,7 @@ def test_embedded_line_mesh_spec_matches_branch_element_count() -> None:
 
 
 def test_embedded_line_mesh_spec_tracks_branch_cell_ranges() -> None:
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     spec = build_embedded_line_mesh_spec(model)
 
     trunk = model.require_branch("trunk")
@@ -39,7 +39,7 @@ def test_embedded_line_mesh_spec_tracks_branch_cell_ranges() -> None:
 
 
 def test_embedded_line_mesh_arrays_have_expected_shapes_and_dtypes() -> None:
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     spec = build_embedded_line_mesh_spec(model)
     arrays = build_embedded_line_mesh_arrays(spec)
 
@@ -66,7 +66,7 @@ def test_create_dolfinx_embedded_line_mesh_smoke() -> None:
     if importlib.util.find_spec("dolfinx") is None:
         pytest.skip("DOLFINx backend not available")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     spec = build_embedded_line_mesh_spec(model)
     mesh = create_dolfinx_embedded_line_mesh(spec)
 

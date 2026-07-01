@@ -145,7 +145,6 @@ def test_cli_parser_registers_expected_subcommands() -> None:
     assert "visualize" in help_text
     assert "plot-frequency-response" in help_text
     assert "import-skeleton" in help_text
-    assert "demo-suite" in help_text
     assert "verify" in help_text
     assert "doctor" in help_text
     assert "full-validate" in help_text
@@ -214,7 +213,6 @@ def test_python_verify_subcommand_shows_help() -> None:
     assert result.returncode == 0
     assert "--skip-integration" in result.stdout
     assert "--skip-verification" in result.stdout
-    assert "--skip-demo-suite" in result.stdout
     assert "--enable-dolfinx-tests" in result.stdout
 
 
@@ -272,7 +270,7 @@ def test_cli_run_writes_frequency_response_csv(tmp_path) -> None:
     exit_code = cli_main(
         [
             "run",
-            "examples/demo_orchard.json",
+            "tests/fixtures/demo_orchard.json",
             "--output-csv",
             str(output_csv),
             "--solver-backend",
@@ -295,7 +293,7 @@ def test_cli_modal_writes_summary_csv(tmp_path) -> None:
     exit_code = cli_main(
         [
             "modal",
-            "examples/demo_orchard.json",
+            "tests/fixtures/demo_orchard.json",
             "--output-csv",
             str(output_csv),
             "--num-modes",

@@ -11,13 +11,11 @@ from orchard_fem.visualization.scene3d import plot_tree_3d
 from orchard_fem.visualization import VisualizationOutputs, visualize_analysis
 from orchard_fem.workflows import (
     AnalysisRunOutputs,
-    DemoSuiteOutputs,
     DEFAULT_VALIDATION_OUTPUT_DIR,
     ValidationOutputs,
     default_modal_output,
     resolve_output_path,
     run_configured_analysis,
-    run_standard_demo_suite,
     run_validation_suite,
     write_modal_summary,
 )
@@ -74,26 +72,11 @@ class OrchardApplication:
             show=show,
         )
 
-    def run_demo_suite(
-        self,
-        output_dir: Path,
-        frequency_model: Path = Path("examples/demo_orchard.json"),
-        time_model: Path = Path("examples/demo_orchard_time_history.json"),
-        num_modes: int = 6,
-    ) -> DemoSuiteOutputs:
-        return run_standard_demo_suite(
-            output_dir=output_dir,
-            frequency_model=frequency_model,
-            time_model=time_model,
-            num_modes=num_modes,
-        )
-
     def verify(
         self,
         include_integration: bool = True,
         include_verification: bool = True,
         include_dolfinx_tests: bool = False,
-        include_demo_suite: bool = True,
         output_dir: Path = DEFAULT_VALIDATION_OUTPUT_DIR,
         pytest_args: Sequence[str] | None = None,
     ) -> ValidationOutputs:
@@ -101,7 +84,6 @@ class OrchardApplication:
             include_integration=include_integration,
             include_verification=include_verification,
             include_dolfinx_tests=include_dolfinx_tests,
-            include_demo_suite=include_demo_suite,
             output_dir=output_dir,
             pytest_args=pytest_args,
         )

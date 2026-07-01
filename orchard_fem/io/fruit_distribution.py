@@ -358,14 +358,16 @@ def generate_fruit_attachments_for_model(
        is_terminal is inferred: a branch is terminal when no other branch
        lists it as its parent_branch_id.
     2. Run the regression-based generation to get FruitNodeSummary per node.
-    3. Convert each summary to one FruitAttachment:
-         location_s  = POSITION_XI[position]
-         mass        = total_fruit_mass_kg
-         stiffness   = fruit_count * mean_detachment_force_N
-                       / policy.detachment_displacement_m   (parallel springs)
-         damping     = 2 * zeta * sqrt(mass * stiffness)
+    3. Convert each summary to one FruitAttachment (a node lumps ``fruit_count``
+       fruits, so stiffness / breaking force are the parallel-spring sums):
+         location_s   = POSITION_XI[position]
+         mass         = total_fruit_mass_kg
+         stiffness    = fruit_count * pedicel_stiffness(mass_per_fruit, ...)
+         detach_force = fruit_count * mean_detachment_force_N
+         damping      = 2 * zeta * sqrt(mass * stiffness)
     """
     from orchard_fem.domain.entities import FruitAttachment
+    from orchard_fem.domain.pedicel import pedicel_stiffness_n_per_m
 
     parent_ids = {
         b.parent_branch_id
@@ -399,11 +401,15 @@ def generate_fruit_attachments_for_model(
     for summary in node_summaries:
         if summary.total_fruit_mass_kg <= 0.0:
             continue
-        total_stiffness = (
-            summary.fruit_count
-            * summary.mean_detachment_force_N
-            / max(policy.detachment_displacement_m, 1.0e-9)
+        n = max(summary.fruit_count, 1)
+        mass_per_fruit = summary.total_fruit_mass_kg / n
+        total_stiffness = n * pedicel_stiffness_n_per_m(
+            mass_per_fruit,
+            policy.pedicel_length_m,
+            policy.pedicel_diameter_m,
+            policy.pedicel_youngs_modulus_pa,
         )
+        total_detach_force = n * summary.mean_detachment_force_N
         total_damping = (
             2.0
             * policy.attachment_damping_ratio
@@ -418,6 +424,7 @@ def generate_fruit_attachments_for_model(
                 stiffness=total_stiffness,
                 damping=total_damping,
                 target_component=policy.attachment_component,
+                detach_force=total_detach_force,
             )
         )
     return attachments

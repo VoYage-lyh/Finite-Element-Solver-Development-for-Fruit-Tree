@@ -252,7 +252,7 @@ def plot_calibration_result(
     ax_h.grid(True, which="minor", linewidth=0.4, color=GRID_MINOR)
     ax_h.legend(loc="upper right", fontsize=8.5)
     ax_h.set_title(
-        rf"Inverse calibration of $(\beta, k_3, c_2)$ from measured FRF"
+        r"Inverse calibration of $(\beta, k_3, c_2)$ from measured FRF"
     )
 
     ax_c.plot(freqs_eval[mask], coh[mask], color=ACCENT, linewidth=1.0)

@@ -274,7 +274,7 @@ def test_embedded_beam_modal_experiment_smoke() -> None:
     if os.environ.get("ORCHARD_RUN_DOLFINX_TESTS") != "1":
         pytest.skip("Set ORCHARD_RUN_DOLFINX_TESTS=1 to run DOLFINx modal tests")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     result = solve_embedded_beam_modal_experiment(
         model,
         num_modes=1,

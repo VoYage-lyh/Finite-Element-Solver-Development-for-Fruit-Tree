@@ -59,17 +59,18 @@ def test_duration_model_reference_cycles_drives_duration():
 # --------------------------------------------------------------------------- #
 
 def _grid() -> dict:
-    # (f, A_mm) -> BranchOutcome, all cells within the rig envelope (stroke=2A):
-    #   5Hz/5mm (stroke10, max~7.7Hz ✓) hits {b1,b2};
+    # (f, A_mm) -> BranchOutcome, all cells within the MEASURED rig envelope
+    # (stroke=2A; bench max ≈7.5 Hz @stroke5, ≈7.8 Hz @stroke10):
+    #   5Hz/5mm (stroke10 ✓) hits {b1,b2};
     #   7Hz/5mm (✓) hits {b3};
-    #   10Hz/2.5mm (stroke5, max~11Hz ✓) hits {b2,b3,b4}.
+    #   7Hz/2.5mm (stroke5, max 7.5Hz ✓) hits {b2,b3,b4}.
     return {
         (5.0, 5.0): BranchOutcome(frozenset({"b1", "b2"}),
                                   {"b1": 1.2, "b2": 1.05}, 2.0e6, 8),
         (7.0, 5.0): BranchOutcome(frozenset({"b3"}),
                                   {"b3": 1.5}, 1.0e6, 3),
-        (10.0, 2.5): BranchOutcome(frozenset({"b2", "b3", "b4"}),
-                                   {"b2": 1.1, "b3": 1.1, "b4": 1.1}, 5.0e6, 6),
+        (7.0, 2.5): BranchOutcome(frozenset({"b2", "b3", "b4"}),
+                                  {"b2": 1.1, "b3": 1.1, "b4": 1.1}, 5.0e6, 6),
     }
 
 
@@ -219,7 +220,8 @@ class FakeDriver:
 
 def _two_stage_schedule() -> HarvestSchedule:
     p1 = plan_harvest_execution(frequency_hz=5.0, clamp_peak_to_peak_mm=8.0, duration_s=0.5)
-    p2 = plan_harvest_execution(frequency_hz=8.0, clamp_peak_to_peak_mm=6.0, duration_s=0.5)
+    # 7 Hz @stroke 10mm is within the measured envelope (max ≈7.8 Hz there).
+    p2 = plan_harvest_execution(frequency_hz=7.0, clamp_peak_to_peak_mm=10.0, duration_s=0.5)
     return HarvestSchedule(
         stages=(
             HarvestStage(1, p1, ("b1", "b2"), 0.5, 2.0e6, 8),

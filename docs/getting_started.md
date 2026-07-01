@@ -35,15 +35,15 @@ Use this before debugging runtime issues. It reports missing Python packages and
 ## 3. Run a First Frequency-Response Example
 
 ```bash
-python -m orchard_fem run examples/demo_orchard.json --output-csv build/demo_frequency_response.csv
-python -m orchard_fem visualize examples/demo_orchard.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
+python -m orchard_fem run examples/tree_3.json --output-csv build/demo_frequency_response.csv
+python -m orchard_fem visualize examples/tree_3.json build/demo_frequency_response.csv --output-prefix build/demo_frequency_response
 ```
 
 ## 4. Run a First Time-History Example
 
 ```bash
-python -m orchard_fem run examples/demo_orchard_time_history.json --output-csv build/demo_time_history.csv
-python -m orchard_fem visualize examples/demo_orchard_time_history.json build/demo_time_history.csv --output-prefix build/demo_time_history
+python -m orchard_fem run examples/tree_3.json --output-csv build/demo_time_history.csv
+python -m orchard_fem visualize examples/tree_3.json build/demo_time_history.csv --output-prefix build/demo_time_history
 ```
 
 ## 5. Run Validation

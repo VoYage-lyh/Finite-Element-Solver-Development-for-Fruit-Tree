@@ -543,7 +543,7 @@ class HarvestConsole:
         self.var_band_lo = tk.DoubleVar(value=3.0)
         self.var_band_hi = tk.DoubleVar(value=20.0)
         self.var_steps = tk.IntVar(value=60)
-        self.var_agrid = tk.StringVar(value="2.5, 5, 7.5, 10")
+        self.var_agrid = tk.StringVar(value="")   # blank = derive from actuator envelope
         self.var_dense = tk.BooleanVar(value=True)
         self.var_spacing = tk.DoubleVar(value=0.05)
         self.var_ddet = tk.DoubleVar(value=2.0)
@@ -558,7 +558,7 @@ class HarvestConsole:
         ttk.Entry(g, textvariable=self.var_band_hi, width=5).grid(row=0, column=3, **pad)
         ttk.Label(g, text="Sweep steps").grid(row=0, column=4, **pad)
         ttk.Entry(g, textvariable=self.var_steps, width=5).grid(row=0, column=5, **pad)
-        ttk.Label(g, text="Amplitude A (mm)").grid(row=0, column=6, **pad)
+        ttk.Label(g, text="Amplitude A (mm, blank=auto)").grid(row=0, column=6, **pad)
         ttk.Entry(g, textvariable=self.var_agrid, width=16).grid(row=0, column=7, **pad)
         ttk.Label(g, text="Coverage").grid(row=0, column=8, **pad)
         ttk.Combobox(g, textvariable=self.var_coverage, width=7, state="readonly",
@@ -634,8 +634,13 @@ class HarvestConsole:
         self.tree.tag_configure("infeasible", foreground="#9aa8a1")
 
     def _sim_options(self) -> RecommendationOptions:
+        # Amplitude grid is OPTIONAL: blank ⇒ derive from the actuator envelope
+        # (limits.amplitude_ladder_mm), so the range follows `limits` alone.
         a_grid = tuple(float(x) for x in
-                       self.var_agrid.get().replace("，", ",").split(",") if x.strip())
+                       self.var_agrid.get().replace("，", ",").split(",") if x.strip()) or None
+        # The working envelope: the realistic harvester (≤15 Hz / 20 mm). The lab
+        # rig DS5L1Limits() is only used for actual on-rig execution feasibility.
+        limits = DS5L1Limits.realistic_harvester()
         return RecommendationOptions(
             band_hz=(float(self.var_band_lo.get()), float(self.var_band_hi.get())),
             sweep_steps=int(self.var_steps.get()),
@@ -644,7 +649,7 @@ class HarvestConsole:
                                  if self.var_dense.get() else None),
             detachment_displacement_m=float(self.var_ddet.get()) / 1000.0,
             coverage_mode=self.var_coverage.get(),
-            limits=LIMITS,
+            limits=limits,
         )
 
     def on_run_sim(self) -> None:
@@ -737,7 +742,9 @@ class HarvestConsole:
         # grids on the next-best clamps and letting the scheduler move the grip
         # between energy-reachable regions. Each clamp scans its OWN local-mode
         # frequencies (the ones the recommendation evaluated for it).
-        max_clamps = 4
+        # Keep in sync with the e2e schedule (scripts/verify_pareto_end_to_end.py
+        # _greedy_sequence) so console and end-to-end give identical schedules.
+        max_clamps = 6
         candidates = [c for c in self.result.clamps if c.knee is not None]
         candidates.sort(key=lambda c: c.knee.coverage, reverse=True)
         candidates = candidates[:max_clamps]
@@ -752,7 +759,9 @@ class HarvestConsole:
         def worker() -> None:
             try:
                 from dataclasses import replace
-                from orchard_fem.discretization.damping import rayleigh_from_band_zeta
+                from orchard_fem.discretization.damping import (
+                    rayleigh_from_band_zeta, rayleigh_from_paper_zeta,
+                )
                 from orchard_fem.workflows.harvest_recommendation import generate_linear_fruits
                 from orchard_fem.workflows.harvest_schedule import (
                     StageDurationModel,
@@ -769,9 +778,15 @@ class HarvestConsole:
                 if opt.dense_fruit_spacing is not None and m.fruit_policy is not None:
                     m = replace(m, fruits=generate_linear_fruits(
                         m, m.fruit_policy, opt.dense_fruit_spacing))
-                if opt.damping_zeta is not None:
+                # Same damping the recommendation used: None ⇒ measured ζ(f) law
+                # (mass-proportional), a float ⇒ legacy flat band-tuned ζ. Must
+                # match recommend_harvest_parameters or the schedule under-damps.
+                _dmp_hi = min(opt.band_hz[1], opt.limits.max_freq_hz)
+                if opt.damping_zeta is None:
+                    a, b = rayleigh_from_paper_zeta(opt.band_hz[0], _dmp_hi)
+                else:
                     a, b = rayleigh_from_band_zeta(opt.damping_zeta, opt.band_hz[0], opt.band_hz[1])
-                    m = replace(m, analysis=replace(m.analysis, rayleigh_alpha=a, rayleigh_beta=b))
+                m = replace(m, analysis=replace(m.analysis, rayleigh_alpha=a, rayleigh_beta=b))
                 n_branches = len({f.branch_id for f in m.fruits})
                 grids = {}
                 for idx, cand in enumerate(candidates, start=1):
@@ -779,13 +794,13 @@ class HarvestConsole:
                     self._post("log", f"Reach grid {idx}/{len(candidates)}: "
                                       f"clamp {self._display_clamp(cl)}…")
                     grids[cl] = build_branch_outcome_grid(
-                        m, cl, clamp_freqs[cl], a_grid, limits=LIMITS,
+                        m, cl, clamp_freqs[cl], a_grid, limits=opt.limits,
                         polynomial_degree=opt.polynomial_degree,
                         progress_cb=lambda msg, fr: (self._post("log", msg),
                                                      self._post("progress", fr)))
                 sched = compute_multiclamp_harvest_schedule(
                     grids, n_fruit_branches=n_branches,
-                    target_coverage=0.95, limits=LIMITS,
+                    target_coverage=0.95, limits=opt.limits,
                     duration_model=StageDurationModel(reference_cycles=ncyc))
                 self._post("log", f"Stage durations from {ncyc:g} detach-cycles "
                                   f"(at threshold) ÷ frequency.")

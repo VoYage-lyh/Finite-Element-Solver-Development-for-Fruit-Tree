@@ -35,13 +35,13 @@ Active work should stay inside the shipped Orchard FEM project roots:
 Run a model:
 
 ```bash
-python -m orchard_fem run examples/demo_orchard.json
+python -m orchard_fem run examples/tree_3.json
 ```
 
 Generate plots:
 
 ```bash
-python -m orchard_fem visualize examples/demo_orchard.json build/demo_frequency_response.csv
+python -m orchard_fem visualize examples/tree_3.json build/demo_frequency_response.csv
 ```
 
 Run validation:

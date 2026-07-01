@@ -14,8 +14,9 @@ themselves:
   The new two-objective formulation evaluates:
 
     1. **detachment_coverage** = fraction of fruits whose dynamic inertia
-       force ``m·a`` exceeds the local attachment force ``k_attach·d_detach``,
-       with ``a = ω²·|u|`` at the fruit's attachment node.
+       force ``m·a`` exceeds the pedicel breaking force ``detach_force``
+       (legacy fallback ``k_attach·d_detach``), with ``a = ω²·|u|`` the fruit
+       swing acceleration at its attachment DOF.
     2. **trunk_max_stress** = ``E · r_outer · |κ|`` at the trunk root, with
        curvature ``|κ| = √(κ_y²+κ_z²)`` reconstructed from the FE complex
        rotations at two adjacent trunk nodes.
@@ -466,7 +467,11 @@ def build_fenicsx_pareto_evaluator(
             u_mag = float(abs(cplx[idx]))
             a_fruit = omega * omega * u_mag                  # m/s²
             inertia = fruit.mass * a_fruit                   # N
-            detach_force = fruit.stiffness * d_detach
+            detach_force = (
+                fruit.detach_force
+                if fruit.detach_force is not None
+                else fruit.stiffness * d_detach              # legacy fallback
+            )
             n_total += 1
             branches_with_fruit.add(fruit.branch_id)
             if inertia >= detach_force:
@@ -607,7 +612,11 @@ def build_outcome_solver(
             branches_with_fruit.add(fruit.branch_id)
             u_mag = float(abs(cplx[idx]))
             inertia = fruit.mass * omega * omega * u_mag
-            detach_force = fruit.stiffness * d_detach
+            detach_force = (
+                fruit.detach_force
+                if fruit.detach_force is not None
+                else fruit.stiffness * d_detach              # legacy fallback
+            )
             if detach_force <= 0.0:
                 continue
             ratio = inertia / detach_force

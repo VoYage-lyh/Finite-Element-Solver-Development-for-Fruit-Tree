@@ -82,9 +82,16 @@ class DS5L1Limits:
     pulses_per_mm: float = 1000.0
     screw_lead_mm: float = 10.0
     max_stroke_mm: float = 20.0          # effective stroke (cylinder is 51.67 mm, margin kept)
-    max_freq_hz: float = 15.0
+    max_freq_hz: float = 8.0             # bench ceiling: f peaks ~8 Hz then ROLLS OVER (see below)
     rpm_cap: float = 1500.0              # excitation rpm ceiling (safety margin under 3000 rated)
-    c_overhead_s: float = 0.025          # half-cycle positioning-settling overhead [s]
+    c_overhead_s: float = 0.018          # half-cycle overhead [s], fitted to the rising-rpm data
+    # Bench-measured highest STABLE reciprocation frequency per stroke
+    # (scripts/measure_actuator_envelope.py, 2026-06). The analytical rpm-cap
+    # model OVER-predicts: real f PEAKS then ROLLS OVER as rpm rises (short-stroke
+    # high-rpm reversals can't settle in the accel ramp) and 15 mm alarms at
+    # 1350 rpm. These (stroke_mm, f_max_hz) points override the formula for
+    # feasibility — raising rpm_cap does NOT help (f falls past the peak).
+    measured_envelope: tuple = ((5.0, 7.5), (10.0, 7.8), (15.0, 5.4), (20.0, 5.1))
 
     def __post_init__(self) -> None:
         for name in ("pulses_per_mm", "screw_lead_mm", "max_stroke_mm",
@@ -93,6 +100,47 @@ class DS5L1Limits:
                 raise ValueError(f"{name} must be positive.")
         if self.c_overhead_s < 0.0:
             raise ValueError("c_overhead_s must be non-negative.")
+
+    @classmethod
+    def unconstrained(cls, *, max_freq_hz: float = 25.0,
+                      max_stroke_mm: float = 200.0) -> "DS5L1Limits":
+        """An 'ideal actuator': generous envelope with NO bench-measured cap.
+
+        Use this to compute the physics-optimal harvest parameter flow (which
+        ``(clamp, f, A)`` stages WOULD shed the fruit) independent of the DS5L1's
+        narrow frequency/amplitude limits — i.e. to spec the actuator the job
+        needs, not to gate on the one in the lab.
+        """
+        return cls(max_freq_hz=max_freq_hz, max_stroke_mm=max_stroke_mm,
+                   rpm_cap=1.0e7, c_overhead_s=0.0, measured_envelope=())
+
+    @classmethod
+    def realistic_harvester(cls, *, max_freq_hz: float = 15.0,
+                            max_amplitude_mm: float = 20.0) -> "DS5L1Limits":
+        """A REALISTIC, achievable shaker envelope (e.g. an eccentric-mass
+        exciter) — the default analysis envelope.
+
+        THE single place to change the working frequency / amplitude range: edit
+        the two defaults here and the whole pipeline (recommendation, schedule,
+        verify figures, console) follows, because the candidate amplitude grid is
+        derived from ``max_stroke_mm`` (:meth:`amplitude_ladder_mm`) and the
+        drive band from ``max_freq_hz`` — nothing else hard-codes them. Amplitude
+        ``A`` is half the peak-to-peak stroke, so ``max_stroke_mm = 2·A_max``.
+        """
+        return cls(max_freq_hz=max_freq_hz, max_stroke_mm=2.0 * max_amplitude_mm,
+                   rpm_cap=1.0e7, c_overhead_s=0.0, measured_envelope=())
+
+    def amplitude_ladder_mm(self) -> tuple[float, ...]:
+        """Candidate drive amplitudes [mm] for this envelope.
+
+        A fixed 5 mm ladder clipped to ``max_stroke_mm / 2`` (= ``A_max``), so the
+        amplitude grid follows the envelope automatically — callers never
+        hard-code amplitudes.
+        """
+        a_max = self.max_stroke_mm / 2.0
+        ladder = tuple(a for a in (5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0)
+                       if a <= a_max + 1.0e-9)
+        return ladder or (round(a_max, 3),)
 
     @property
     def _mm_per_rpm_s(self) -> float:
@@ -103,13 +151,38 @@ class DS5L1Limits:
         """Modelled half-cycle time [s] at *stroke_mm* and *rpm*."""
         return stroke_mm / (rpm * self._mm_per_rpm_s) + self.c_overhead_s
 
+    def measured_max_frequency(self, stroke_mm: float) -> float:
+        """Bench-measured highest stable frequency [Hz] at *stroke_mm*.
+
+        Linear interpolation of :attr:`measured_envelope`, clamped to its
+        endpoints. This is the empirical ceiling that overrides the (optimistic,
+        monotone) analytical rpm-cap formula. Returns ``+inf`` when no envelope is
+        set (an :meth:`unconstrained` / ideal actuator).
+        """
+        if not self.measured_envelope:
+            return float("inf")
+        pts = sorted(self.measured_envelope)
+        if stroke_mm <= pts[0][0]:
+            return pts[0][1]
+        if stroke_mm >= pts[-1][0]:
+            return pts[-1][1]
+        for (s0, f0), (s1, f1) in zip(pts, pts[1:]):
+            if s0 <= stroke_mm <= s1:
+                t = (stroke_mm - s0) / (s1 - s0)
+                return f0 + t * (f1 - f0)
+        return pts[-1][1]
+
     def seed_rpm(self, stroke_mm: float, frequency_hz: float) -> float | None:
         """Initial segment rpm to seek *frequency_hz* at *stroke_mm*.
 
-        Returns ``None`` when even ``rpm_cap`` cannot reach the frequency at this
-        stroke (i.e. the request is outside the envelope).  This is only a seed;
-        the executor's online calibration locks the real frequency.
+        Returns ``None`` when the frequency is outside the envelope — gated by the
+        BENCH-MEASURED ceiling (:meth:`measured_max_frequency`), not just the
+        analytical rpm cap, because the rig's frequency rolls over past a
+        stroke-dependent peak. Otherwise returns the rising-region seed rpm; the
+        executor's online calibration then locks the real frequency.
         """
+        if frequency_hz > self.measured_max_frequency(stroke_mm) + 1e-9:
+            return None
         avail = 1.0 / (2.0 * frequency_hz) - self.c_overhead_s
         min_half = stroke_mm / (self.rpm_cap * self._mm_per_rpm_s)
         if avail <= min_half:
@@ -117,8 +190,13 @@ class DS5L1Limits:
         return min(self.rpm_cap, stroke_mm / (avail * self._mm_per_rpm_s))
 
     def max_frequency_at_stroke(self, stroke_mm: float) -> float:
-        """Highest reachable shake frequency [Hz] at *stroke_mm* (rpm-cap bound)."""
-        return 1.0 / (2.0 * self.half_period_s(stroke_mm, self.rpm_cap))
+        """Highest reachable shake frequency [Hz] at *stroke_mm*.
+
+        The smaller of the analytical rpm-cap bound and the bench-measured
+        ceiling — the measured value caps the formula's small-stroke optimism.
+        """
+        analytical = 1.0 / (2.0 * self.half_period_s(stroke_mm, self.rpm_cap))
+        return min(analytical, self.measured_max_frequency(stroke_mm))
 
     def rpm_for(self, stroke_mm: float, frequency_hz: float, c_overhead_s: float) -> float | None:
         """rpm to hit *frequency_hz* given a *measured* overhead ``C`` (calibration)."""
@@ -617,9 +695,13 @@ class HarvestSchedule:
         """
         lf = label_fn or (lambda raw: raw)
         used = self.clamp_labels
-        clamp_line = (lf(used[0]) if len(used) <= 1
-                      else f"{len(used)} clamps ({self.n_reclamps} re-clamps): "
-                           + " → ".join(lf(c) for c in used))
+        if not used:                       # 0 stages (e.g. coverage ≈ 0): no clamp used
+            clamp_line = "— (no feasible stage)"
+        elif len(used) == 1:
+            clamp_line = lf(used[0])
+        else:
+            clamp_line = (f"{len(used)} clamps ({self.n_reclamps} re-clamps): "
+                          + " → ".join(lf(c) for c in used))
         head = (f"Harvest schedule @ {clamp_line}\n"
                 f"{len(self.stages)} stages, {self.total_duration_s:.1f} s total "
                 f"→ {self.final_coverage:.0%} branch coverage "

@@ -20,7 +20,7 @@ schedule (``compute_multiclamp_harvest_schedule``).
 
 Example
 -------
-    python scripts/clamp_energy_reach.py trees/tree_3.json --out results_nonlinear/diagnostics/accuracy_study
+    python scripts/clamp_energy_reach.py trees/tree_3.json --out results/diagnostics/accuracy_study
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def main() -> int:
                         help="Structural damping ratio as band-tuned Rayleigh over --band "
                              "(model default ~0.25%% is far below real green-wood 5–15%%). "
                              "Use a negative value to keep the model's own damping.")
-    parser.add_argument("--out", type=Path, default=Path("results_nonlinear/diagnostics/accuracy_study"))
+    parser.add_argument("--out", type=Path, default=Path("results/diagnostics/accuracy_study"))
     args = parser.parse_args()
 
     from orchard_fem.fenicsx.frequency_response import (

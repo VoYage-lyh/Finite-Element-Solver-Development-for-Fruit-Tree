@@ -21,7 +21,7 @@ def test_build_point_clamp_boundary_conditions_smoke() -> None:
     if os.environ.get("ORCHARD_RUN_DOLFINX_TESTS") != "1":
         pytest.skip("Set ORCHARD_RUN_DOLFINX_TESTS=1 to run DOLFINx boundary-condition tests")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     space_bundle = create_embedded_beam_function_space(model, polynomial_degree=1)
     point = (
         model.require_branch("trunk").path.start.x,
@@ -36,7 +36,7 @@ def test_build_model_clamp_boundary_conditions_smoke() -> None:
     if os.environ.get("ORCHARD_RUN_DOLFINX_TESTS") != "1":
         pytest.skip("Set ORCHARD_RUN_DOLFINX_TESTS=1 to run DOLFINx boundary-condition tests")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     space_bundle = create_embedded_beam_function_space(model, polynomial_degree=1)
     bcs = build_model_clamp_boundary_conditions(model, space_bundle)
     assert len(bcs) >= 2

@@ -9,8 +9,8 @@ Pareto, band-tuned ζ≈6 % damping) and
 then renders the figures from that output. The old standalone logic (mean-FRF
 single-peak resonance, single-clamp greedy, P1) was wrong and has been removed.
 
-Outputs default to ``results_nonlinear/`` (``--output-dir`` to change; the old
-linear ``results/`` tree is deprecated), organised by figure type:
+Outputs default to ``results/`` (``--output-dir`` to change), organised by
+figure type:
 
 * ``<out>/pareto/pareto_tree_<n>.{png,pdf}``    — per-clamp Pareto + best knee
 * ``<out>/frf/frf_tree_<n>.{png,pdf}``          — FRF sweep, global f₁/f₂ peak markers
@@ -43,7 +43,7 @@ _PARETO_LEGEND_LOC = {
     "tree_1": "upper left",
 }
 _TRUNK_CLAMP_S = (0.25, 0.40, 0.55, 0.70, 0.85)
-_AMPLITUDE_GRID_MM = (5.0, 10.0, 15.0, 20.0, 30.0)
+_AMPLITUDE_GRID_MM = (5.0, 10.0, 15.0, 20.0)
 
 # Sanity ceiling on the trunk peak bending stress. Wood typically fails in
 # tension at 50–100 MPa; anything above ~100 MPa is well outside the linear
@@ -175,6 +175,10 @@ class TreeResult:
     f_resonance: float
     clamps: list[ClampResult] = field(default_factory=list)
     best_idx: int = 0
+    # The amplitude grid the recommendation actually evaluated (rig-feasible
+    # subset of options.amplitude_grid_mm). The multi-clamp schedule reuses it so
+    # the sequence scans the SAME (f, A) cells as the Pareto — matching the console.
+    amplitude_grid_mm: list = field(default_factory=list)
     # Kept for downstream visualisation (response map). Not used by Pareto.
     model: object = None
     theta: dict = field(default_factory=dict)
@@ -322,7 +326,9 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
 
     print(f"\n[{label}] loading {model_path.name} …")
     model = load_orchard_model(str(model_path))
-    opt = RecommendationOptions(duration_s=10.0)   # P2 + modal multi-clamp + measured ζ(f) defaults
+    # Working envelope = the realistic harvester (≤15 Hz, ≤20 mm); the amplitude
+    # grid derives from limits (RecommendationOptions defaults).
+    opt = RecommendationOptions(duration_s=10.0)
 
     _dmp = (f"flat ζ≈{opt.damping_zeta:.0%}" if opt.damping_zeta is not None
             else "measured ζ(f) 0.35→0.09")
@@ -369,6 +375,7 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     return TreeResult(
         label=label, n_fruits=len(fmodel.fruits), freqs=freqs, mags=mags,
         f_resonance=float(result.resonance_hz), clamps=clamps, best_idx=best_idx,
+        amplitude_grid_mm=list(result.amplitude_grid_mm),
         model=disp_model, theta=theta, label_map=label_map,
     )
 
@@ -414,11 +421,9 @@ def main() -> int:
              "Use this when only the figure styling has changed.",
     )
     parser.add_argument(
-        "--output-dir", default="results_nonlinear",
+        "--output-dir", default="results",
         help="Directory (relative to repo root, or absolute) where figures are "
-             "written. Defaults to 'results'. Use 'results_nonlinear' to keep "
-             "outputs from the randomized Duffing-link pipeline separate from "
-             "the linear-baseline figures.",
+             "written (default 'results').",
     )
     args = parser.parse_args()
 
@@ -601,8 +606,13 @@ def _greedy_sequence(
         build_branch_outcome_grid, compute_multiclamp_harvest_schedule,
     )
 
+    limits = DS5L1Limits.realistic_harvester()
+
     n_total = max(len({f.branch_id for f in result.model.fruits}), 1)
-    a_grid = list(_AMPLITUDE_GRID_MM)
+    # Reuse the SAME amplitude grid the recommendation evaluated (rig-feasible
+    # subset of options.amplitude_grid_mm), so the schedule scans identical (f, A)
+    # cells to the Pareto and matches the console. Fall back for pre-field caches.
+    a_grid = list(result.amplitude_grid_mm) or list(_AMPLITUDE_GRID_MM)
     # Give the scheduler ample re-clamp options (the rig CAN change grip): take the
     # best-covering clamps across distinct subtrees so later stages can reach
     # branches the first grip could not excite.
@@ -612,10 +622,11 @@ def _greedy_sequence(
         f_for = sorted({float(x) for x in c.front.frequencies_hz.tolist()})
         grids[c.clamp_label] = build_branch_outcome_grid(
             result.model, c.clamp_label, f_for, a_grid,
-            theta=result.theta, limits=DS5L1Limits(), polynomial_degree=2,
+            theta=result.theta, limits=limits, polynomial_degree=2,
         )
     sched = compute_multiclamp_harvest_schedule(
         grids, n_fruit_branches=n_total, target_coverage=target, max_stages=max_stages,
+        limits=limits,    # else it re-gates with rig limits → 0 stages in ideal mode
     )
     return [
         {

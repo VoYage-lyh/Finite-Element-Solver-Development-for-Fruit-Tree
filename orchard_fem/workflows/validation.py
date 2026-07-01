@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from orchard_fem.workflows.demo import DemoSuiteOutputs, run_standard_demo_suite
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VALIDATION_OUTPUT_DIR = Path("build/validation/python")
 
@@ -17,7 +15,6 @@ INTEGRATION_TEST_TARGETS = [
     "tests/integration/test_cross_section_defaults.py",
     "tests/integration/test_auto_nonlinear_injection.py",
     "tests/integration/test_gravity_prestress.py",
-    "tests/integration/test_demo_workflow.py",
     "tests/integration/test_frequency_continuation.py",
     "tests/integration/test_python_cli.py",
     "tests/integration/test_python_scaffold.py",
@@ -56,7 +53,6 @@ DOLFINX_TEST_TARGETS = [
 @dataclass(frozen=True)
 class ValidationOutputs:
     pytest_targets: list[str]
-    demo_suite_outputs: DemoSuiteOutputs | None
 
 
 def print_validation_step(message: str) -> None:
@@ -100,8 +96,7 @@ def run_validation_suite(
     include_integration: bool = True,
     include_verification: bool = True,
     include_dolfinx_tests: bool = False,
-    include_demo_suite: bool = True,
-    output_dir: Path = DEFAULT_VALIDATION_OUTPUT_DIR,
+    output_dir: Path = DEFAULT_VALIDATION_OUTPUT_DIR,  # noqa: ARG001 (kept for API compat)
     pytest_args: Sequence[str] | None = None,
 ) -> ValidationOutputs:
     pytest_targets: list[str] = []
@@ -124,12 +119,4 @@ def run_validation_suite(
             ),
         )
 
-    demo_suite_outputs = None
-    if include_demo_suite:
-        print_validation_step("Run Orchard FEM FEniCSx demo suite")
-        demo_suite_outputs = run_standard_demo_suite(output_dir=output_dir)
-
-    return ValidationOutputs(
-        pytest_targets=pytest_targets,
-        demo_suite_outputs=demo_suite_outputs,
-    )
+    return ValidationOutputs(pytest_targets=pytest_targets)

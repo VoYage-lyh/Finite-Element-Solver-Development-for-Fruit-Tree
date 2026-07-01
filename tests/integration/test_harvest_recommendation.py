@@ -26,7 +26,7 @@ from orchard_fem.workflows.harvest_recommendation import (
     summarize_orchard_model,
 )
 
-MODEL_PATH = "examples/demo_orchard.json"
+MODEL_PATH = "tests/fixtures/demo_orchard.json"
 
 
 @pytest.fixture(scope="module")
@@ -61,15 +61,25 @@ def test_generate_linear_fruits():
     fruits = generate_linear_fruits(tree, tree.fruit_policy, spacing=0.25)
     non_trunk = [b for b in tree.branches if b.branch_id != "trunk"]
     assert len(fruits) == 4 * len(non_trunk)
-    by_branch = {}
     for f in fruits:
         assert f.branch_id != "trunk"
-        by_branch.setdefault(f.branch_id, []).append(f)
-    # stiffness decreases from root to tip on every branch
-    for fl in by_branch.values():
-        fl.sort(key=lambda f: f.location_s)
-        ks = [f.stiffness for f in fl]
-        assert all(a > b for a, b in zip(ks, ks[1:]))
+    # Breaking force comes from the calibrated regression (root ≈34 N → tip
+    # ≈8.5 N, clamped [3, 70]) and is stored on detach_force, DECOUPLED from the
+    # elastic pedicel stiffness. Check the gradient in AGGREGATE — per-fruit
+    # crack/CV noise breaks strict per-branch monotonicity.
+    f_by_s: dict[float, list[float]] = {}
+    forces = []
+    for f in fruits:
+        f_by_s.setdefault(round(f.location_s, 2), []).append(f.detach_force)
+        forces.append(f.detach_force)
+    mean_root = sum(f_by_s[min(f_by_s)]) / len(f_by_s[min(f_by_s)])
+    mean_tip = sum(f_by_s[max(f_by_s)]) / len(f_by_s[max(f_by_s)])
+    assert mean_root > mean_tip                          # root detaches harder than tip
+    assert all(3.0 <= F <= 70.0 for F in forces)         # within the formula's clamp
+    assert max(forces) > 6.0                             # NOT the old flat-5 N fallback
+    # Elastic stiffness is now the soft PHYSICAL pedicel (≈60 N/m, fruit-swing
+    # resonance in-band), not the old F_detach/d_detach secant (thousands N/m).
+    assert all(0.0 < f.stiffness < 500.0 for f in fruits)
 
 
 def test_find_in_band_resonance_picks_peak():

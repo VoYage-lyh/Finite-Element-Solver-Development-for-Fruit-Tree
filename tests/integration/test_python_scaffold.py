@@ -21,7 +21,7 @@ from orchard_fem.solver_core import ModalAnalysisRequest, SLEPcModalSolver
 
 
 def test_python_topology_loader_can_read_demo_model() -> None:
-    payload = load_model_payload("examples/demo_orchard.json")
+    payload = load_model_payload("tests/fixtures/demo_orchard.json")
     topology = build_topology_from_model_payload(payload)
     valid, message = topology.validate()
     assert valid, message
@@ -29,7 +29,7 @@ def test_python_topology_loader_can_read_demo_model() -> None:
 
 
 def test_typed_model_loader_can_read_demo_model() -> None:
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     assert model.metadata.name == "three_level_demo_tree"
     assert len(model.branches) == 4
     assert model.require_branch("trunk").discretization.num_elements == 5
@@ -74,7 +74,7 @@ def test_slepc_modal_solver_solves_simple_generalized_eigenproblem() -> None:
 
 
 def test_python_modal_assembler_matches_demo_dof_count() -> None:
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     assembled = OrchardModalAssembler().assemble(model)
 
     expected_branch_dofs = sum(
@@ -89,7 +89,7 @@ def test_python_modal_assembler_matches_demo_dof_count() -> None:
 
 def test_python_demo_modal_chain_runs() -> None:
     pytest.importorskip("slepc4py")
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     assembled = OrchardModalAssembler().assemble(model)
     modes = SLEPcModalSolver().solve(
         ModalAnalysisRequest(
@@ -111,12 +111,12 @@ def test_petsc_frequency_response_solver_writes_demo_csv(tmp_path) -> None:
     output_path = tmp_path / "demo_frequency_response.csv"
     result = PETScFrequencyResponseSolver().solve(
         FrequencyResponseRequest(
-            model_path="examples/demo_orchard.json",
+            model_path="tests/fixtures/demo_orchard.json",
             output_csv=str(output_path),
         )
     )
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     assert output_path.exists()
     assert len(result.points) == model.analysis.frequency_steps
     assert result.points[0].excitation_response_magnitude >= 0.0
@@ -129,12 +129,12 @@ def test_petsc_time_history_solver_writes_demo_csv(tmp_path) -> None:
     output_path = tmp_path / "demo_time_history.csv"
     result = PETScTimeHistorySolver().solve(
         TimeHistoryRequest(
-            model_path="examples/demo_orchard_time_history.json",
+            model_path="tests/fixtures/demo_orchard_time_history.json",
             output_csv=str(output_path),
         )
     )
 
-    model = load_orchard_model("examples/demo_orchard_time_history.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard_time_history.json")
     total_steps = max(1, round(model.analysis.total_time_seconds / model.analysis.time_step_seconds))
     output_stride = max(model.analysis.output_stride, 1)
     expected_points = 1 + sum(

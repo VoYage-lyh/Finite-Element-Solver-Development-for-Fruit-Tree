@@ -46,7 +46,7 @@ def test_create_embedded_beam_function_space_smoke() -> None:
     if missing_fenicsx_modules():
         pytest.skip("FEniCSx stack not available in this environment")
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     bundle = create_embedded_beam_function_space(
         model,
         polynomial_degree=1,

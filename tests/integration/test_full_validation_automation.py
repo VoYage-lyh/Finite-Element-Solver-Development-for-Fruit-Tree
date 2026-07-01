@@ -17,7 +17,7 @@ def test_full_validation_plan_builds_both_environment_steps(tmp_path) -> None:
 
     assert [step.label for step in steps] == [
         "Run Orchard FEM integration tests (orchard-fenicsx)",
-        "Run orchard-fenicsx Orchard FEM verification and demo workflow",
+        "Run orchard-fenicsx Orchard FEM verification workflow",
     ]
     assert steps[0].command[:7] == [
         "conda",
@@ -29,7 +29,6 @@ def test_full_validation_plan_builds_both_environment_steps(tmp_path) -> None:
         "orchard_fem",
     ]
     assert "--skip-verification" in steps[0].command
-    assert "--skip-demo-suite" in steps[0].command
     assert steps[1].command[:7] == [
         "conda",
         "run",
@@ -51,7 +50,6 @@ def test_full_validation_plan_honors_skip_flags(tmp_path) -> None:
         validation_dir=tmp_path / "build" / "validation",
         skip_integration_tests=True,
         skip_fenicsx_tests=True,
-        skip_python_demo_suite=True,
     )
 
     steps = build_full_validation_steps(config)

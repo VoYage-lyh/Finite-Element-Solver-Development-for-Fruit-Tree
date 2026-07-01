@@ -19,7 +19,7 @@ This document summarizes the current JSON input format used by the orchard vibra
 Use the CLI converter when the upstream data is a 3D centerline skeleton:
 
 ```bash
-python -m orchard_fem import-skeleton examples/skeleton_orchard.json build/orchard_model.json
+python -m orchard_fem import-skeleton tests/fixtures/skeleton_orchard.json build/orchard_model.json
 ```
 
 The skeleton format accepts branch `points`, radius shorthand fields such as

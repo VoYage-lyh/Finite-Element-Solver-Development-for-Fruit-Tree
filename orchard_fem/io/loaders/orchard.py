@@ -22,6 +22,11 @@ from orchard_fem.domain import (
     parse_section_series,
     parse_vec3,
 )
+from orchard_fem.domain.pedicel import (
+    DEFAULT_PEDICEL_DIAMETER_M,
+    DEFAULT_PEDICEL_LENGTH_M,
+    DEFAULT_PEDICEL_YOUNGS_MODULUS_PA,
+)
 from orchard_fem.io.loaders.payload import load_model_payload
 from orchard_fem.io.loaders.topology import (
     build_topology_from_model_payload,
@@ -118,6 +123,9 @@ def load_orchard_model(file_path: str) -> OrchardModel:
             stiffness=float(fruit["stiffness"]),
             damping=float(fruit["damping"]),
             target_component=str(fruit.get("target_component", "ux")),
+            detach_force=(
+                float(fruit["detach_force"]) if "detach_force" in fruit else None
+            ),
         )
         for fruit in payload.get("fruits", [])
     ]
@@ -132,6 +140,15 @@ def load_orchard_model(file_path: str) -> OrchardModel:
             detachment_displacement_m=float(policy_payload.get("detachment_displacement_m", 0.010)),
             attachment_damping_ratio=float(policy_payload.get("attachment_damping_ratio", 0.05)),
             attachment_component=str(policy_payload.get("attachment_component", "ux")),
+            pedicel_length_m=float(
+                policy_payload.get("pedicel_length_m", DEFAULT_PEDICEL_LENGTH_M)
+            ),
+            pedicel_diameter_m=float(
+                policy_payload.get("pedicel_diameter_m", DEFAULT_PEDICEL_DIAMETER_M)
+            ),
+            pedicel_youngs_modulus_pa=float(
+                policy_payload.get("pedicel_youngs_modulus_pa", DEFAULT_PEDICEL_YOUNGS_MODULUS_PA)
+            ),
             count_weight_cv=float(policy_payload.get("count_weight_cv", 0.25)),
             long_axis_cv=float(policy_payload.get("long_axis_cv", 0.12)),
             short_axis_cv=float(policy_payload.get("short_axis_cv", 0.12)),

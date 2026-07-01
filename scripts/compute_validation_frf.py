@@ -148,7 +148,6 @@ def main() -> int:
     args = parser.parse_args()
 
     out_branch = args.output_branch or args.input_branch
-    input_obs = f"obs_{args.input_branch}_{args.input_node}_{args.input_comp}"
     output_obs = f"obs_{out_branch}_{args.output_station}_{args.output_comp}"
 
     # Resolve calibration overrides

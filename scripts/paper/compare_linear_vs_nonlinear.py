@@ -13,7 +13,7 @@ The resonance peaks in the harvesting band (3-20 Hz) are extracted via the
 same prominence-based detector that ``verify_pareto_end_to_end.py`` uses for
 its main pipeline, so the shift number is directly comparable.
 
-Outputs (under ``results_nonlinear/verification/``):
+Outputs (under ``results/verification/``):
 
 * ``frequency_shift_tree_<n>.{png,pdf}`` — overlay of linear vs nonlinear FRF
   with resonance markers and the shift annotation.
@@ -39,7 +39,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
@@ -240,7 +240,7 @@ def _plot_summary(out_stem: Path, rows: list[tuple]) -> None:
 
 def main() -> int:
     _apply_pub_style()
-    out_dir = REPO / "results_nonlinear" / "verification"
+    out_dir = REPO / "results" / "verification"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[tuple] = []
@@ -304,7 +304,7 @@ def main() -> int:
     print("=" * 64)
     print(f"Mean resonance shift : {float(np.mean(shifts)):+.2f} %")
     print(f"Std  resonance shift : {float(np.std(shifts)):.2f} %")
-    print(f"Manuscript reference : -11.0 ± 4.1 % (Liu et al., Table 4)")
+    print("Manuscript reference : -11.0 ± 4.1 % (Liu et al., Table 4)")
     print(f"Summary CSV          : {csv_path.relative_to(REPO)}")
     print(f"Per-tree overlays    : {out_dir.relative_to(REPO)}/frequency_shift_tree_<n>.{{png,pdf}}")
     print("=" * 64)

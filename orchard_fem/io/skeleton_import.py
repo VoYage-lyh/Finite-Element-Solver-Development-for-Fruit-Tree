@@ -5,6 +5,12 @@ from math import ceil, sqrt
 from pathlib import Path
 from typing import Any
 
+from orchard_fem.domain.pedicel import (
+    DEFAULT_PEDICEL_DIAMETER_M,
+    DEFAULT_PEDICEL_LENGTH_M,
+    DEFAULT_PEDICEL_YOUNGS_MODULUS_PA,
+)
+
 
 DEFAULT_ANALYSIS = {
     "mode": "frequency_response",
@@ -25,37 +31,25 @@ DEFAULT_FRUIT_POLICY = {
     "detachment_displacement_m": 0.010,
     "attachment_damping_ratio": 0.05,
     "attachment_component": "uz",
+    # Pedicel geometry → fruit-swing stiffness (see orchard_fem.domain.pedicel).
+    "pedicel_length_m": DEFAULT_PEDICEL_LENGTH_M,
+    "pedicel_diameter_m": DEFAULT_PEDICEL_DIAMETER_M,
+    "pedicel_youngs_modulus_pa": DEFAULT_PEDICEL_YOUNGS_MODULUS_PA,
 }
 
-DEFAULT_MATERIALS = [
-    {
-        "id": "pith_default",
-        "tissue": "pith",
-        "model": "linear",
-        "density": 550.0,
-        "youngs_modulus": 1.0e9,
-        "poisson_ratio": 0.35,
-        "damping_ratio": 0.02,
-    },
-    {
-        "id": "xylem_default",
-        "tissue": "xylem",
-        "model": "linear",
-        "density": 750.0,
-        "youngs_modulus": 1.0e10,
-        "poisson_ratio": 0.30,
-        "damping_ratio": 0.01,
-    },
-    {
-        "id": "phloem_default",
-        "tissue": "phloem",
-        "model": "linear",
-        "density": 620.0,
-        "youngs_modulus": 2.0e9,
-        "poisson_ratio": 0.35,
-        "damping_ratio": 0.02,
-    },
-]
+def _load_default_materials() -> list[dict[str, Any]]:
+    """Default tissue material library, loaded from the editable config file.
+
+    Materials are a first-class physical input, so they live in
+    ``config/default_materials.json`` (edit THERE to change Young's modulus /
+    density) rather than being hard-coded in this importer. Tuned to the
+    bench-calibrated green-wood properties for Prunus cerasifera; see that file.
+    """
+    config_path = Path(__file__).resolve().parents[2] / "config" / "default_materials.json"
+    return json.loads(config_path.read_text(encoding="utf-8"))["materials"]
+
+
+DEFAULT_MATERIALS = _load_default_materials()
 
 
 def _point(value: Any, *, field_name: str) -> list[float]:

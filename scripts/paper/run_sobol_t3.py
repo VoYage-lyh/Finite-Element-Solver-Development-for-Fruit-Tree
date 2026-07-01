@@ -49,7 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
@@ -365,7 +365,7 @@ def main() -> int:
         fh.write(f"N_base = {args.n_base}, D = {problem['num_vars']}, "
                  f"total evals = {X.shape[0]}\n")
         fh.write(f"Valid = {valid.sum()}/{Y.size}\n")
-        fh.write(f"Output: dominant in-band resonance frequency f_r ∈ [3, 20] Hz\n")
+        fh.write("Output: dominant in-band resonance frequency f_r ∈ [3, 20] Hz\n")
         fh.write(f"  Y stats: mean={np.nanmean(Y):.2f} Hz, "
                  f"std={np.nanstd(Y):.2f} Hz, "
                  f"range=[{np.nanmin(Y):.1f}, {np.nanmax(Y):.1f}]\n\n")

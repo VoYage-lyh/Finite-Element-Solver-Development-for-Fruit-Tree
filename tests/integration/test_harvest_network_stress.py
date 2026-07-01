@@ -152,7 +152,7 @@ def test_assembler_populates_stress_recovery_fields():
     from orchard_fem.discretization import OrchardModalAssembler
     from orchard_fem.io import load_orchard_model
 
-    model = load_orchard_model("examples/demo_orchard.json")
+    model = load_orchard_model("tests/fixtures/demo_orchard.json")
     assembled = OrchardModalAssembler().assemble(model)
 
     elements = assembled.branch_elements["trunk"]

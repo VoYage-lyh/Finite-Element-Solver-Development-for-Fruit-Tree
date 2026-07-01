@@ -17,7 +17,6 @@ def _handle_full_validate(args: argparse.Namespace, application: OrchardApplicat
         orchard_fenicsx_env=args.orchard_fenicsx_env,
         skip_integration_tests=args.skip_integration_tests,
         skip_fenicsx_tests=args.skip_fenicsx_tests,
-        skip_python_demo_suite=args.skip_python_demo_suite,
     )
     application.full_validate(config)
     return 0
@@ -66,11 +65,5 @@ def register_full_validate_command(
         action="store_true",
         default=defaults.skip_fenicsx_tests,
         help="Skip the orchard-fenicsx verification step.",
-    )
-    parser.add_argument(
-        "--skip-python-demo-suite",
-        action="store_true",
-        default=defaults.skip_python_demo_suite,
-        help="Skip demo CSV regeneration in the orchard-fenicsx step.",
     )
     parser.set_defaults(handler=partial(_handle_full_validate, application=application))

@@ -11,7 +11,6 @@ from orchard_fem.workflows.batch_excitation import (
     ExcitationSpec,
     run_batch_frequency_response,
 )
-from orchard_fem.workflows.demo import DemoSuiteOutputs, run_standard_demo_suite
 from orchard_fem.workflows.harvest_recommendation import (
     ModelSummary,
     RecommendationOptions,
@@ -37,7 +36,6 @@ __all__ = [
     "BatchExcitationResult",
     "DEFAULT_VALIDATION_OUTPUT_DIR",
     "BranchOutcome",
-    "DemoSuiteOutputs",
     "ExcitationSpec",
     "ModelSummary",
     "RecommendationOptions",
@@ -54,7 +52,6 @@ __all__ = [
     "run_batch_frequency_response",
     "summarize_orchard_model",
     "run_configured_analysis",
-    "run_standard_demo_suite",
     "run_validation_suite",
     "write_modal_summary",
 ]

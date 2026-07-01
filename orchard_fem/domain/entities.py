@@ -11,6 +11,11 @@ from orchard_fem.domain.enums import (
     MaterialModelKind,
     SolverBackendKind,
 )
+from orchard_fem.domain.pedicel import (
+    DEFAULT_PEDICEL_DIAMETER_M,
+    DEFAULT_PEDICEL_LENGTH_M,
+    DEFAULT_PEDICEL_YOUNGS_MODULUS_PA,
+)
 from orchard_fem.topology import BranchPath, ObservationPoint, TreeTopology
 
 
@@ -75,6 +80,10 @@ class FruitAttachment:
     stiffness: float
     damping: float
     target_component: str = "ux"
+    # Pedicel breaking force [N] — the detachment threshold, INDEPENDENT of the
+    # elastic ``stiffness`` above (which now governs only the fruit-swing
+    # dynamics).  ``None`` falls back to the legacy ``stiffness·d_detach``.
+    detach_force: float | None = None
 
 
 @dataclass(frozen=True)
@@ -131,9 +140,13 @@ class FruitDistributionPolicy:
     `fruits` list in the JSON takes precedence over this policy.
 
     Stiffness derivation:
-        k_total = fruit_count * mean_detachment_force_N / detachment_displacement_m
+        k = pedicel_stiffness_n_per_m(mass, pedicel_length_m,
+                                      pedicel_diameter_m, pedicel_youngs_modulus_pa)
+        (slender cantilever + gravitational pendulum; see ``domain.pedicel``)
+    Detachment threshold:
+        F_detach = mean_detachment_force_N  (independent of stiffness)
     Damping derivation:
-        c = 2 * attachment_damping_ratio * sqrt(mass * k_total)
+        c = 2 * attachment_damping_ratio * sqrt(mass * k)
     """
     total_fruit_count: int
     seed: int = 2026
@@ -141,6 +154,10 @@ class FruitDistributionPolicy:
     detachment_displacement_m: float = 0.010
     attachment_damping_ratio: float = 0.05
     attachment_component: str = "ux"
+    # Pedicel geometry — sets the fruit-swing stiffness (see ``domain.pedicel``).
+    pedicel_length_m: float = DEFAULT_PEDICEL_LENGTH_M
+    pedicel_diameter_m: float = DEFAULT_PEDICEL_DIAMETER_M
+    pedicel_youngs_modulus_pa: float = DEFAULT_PEDICEL_YOUNGS_MODULUS_PA
     count_weight_cv: float = 0.25
     long_axis_cv: float = 0.12
     short_axis_cv: float = 0.12

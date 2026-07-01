@@ -21,7 +21,7 @@ We sweep frequency near resonance for three parameter sets:
 * cubic only (k3 != 0, c2 = 0)
 * cubic + quadratic damping (k3 != 0, c2 != 0)
 
-Output (under ``results_nonlinear/verification/``):
+Output (under ``results/verification/``):
 
 * ``duffing_sdof_frf.{png,pdf}`` — three FRFs overlaid, with RK45 markers
   showing the HB prediction matches the time-history ground truth.
@@ -36,7 +36,6 @@ from __future__ import annotations
 import csv
 import math
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import matplotlib
@@ -45,7 +44,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import solve_ivp
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
@@ -179,7 +178,7 @@ def _apply_pub_style() -> None:
 
 def main() -> int:
     _apply_pub_style()
-    out_dir = REPO / "results_nonlinear" / "verification"
+    out_dir = REPO / "results" / "verification"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     freqs_hz = np.linspace(FREQ_MIN_HZ, FREQ_MAX_HZ, FREQ_STEPS)

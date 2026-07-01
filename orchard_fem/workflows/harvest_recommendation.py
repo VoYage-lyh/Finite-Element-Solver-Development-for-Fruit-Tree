@@ -49,6 +49,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from orchard_fem.actuator.harvest_bridge import DS5L1Limits
+from orchard_fem.domain.pedicel import (
+    DEFAULT_PEDICEL_DIAMETER_M,
+    DEFAULT_PEDICEL_LENGTH_M,
+    DEFAULT_PEDICEL_YOUNGS_MODULUS_PA,
+)
 
 if TYPE_CHECKING:  # annotations only — numpy/pareto stay lazy so the package
     import numpy as np  # (and the CLI) imports without numpy installed
@@ -199,13 +204,18 @@ class RecommendationOptions:
     include_child_clamps: bool = True
     primary_clamp_s: tuple[float, ...] = (0.0, 0.25, 0.5)   # root / quarter / mid of each primary branch
     clamp_labels: tuple[str, ...] | None = None
-    amplitude_grid_mm: tuple[float, ...] = (2.5, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0)
+    # None ⇒ derive from the actuator envelope (limits.amplitude_ladder_mm), so
+    # the amplitude range follows `limits` alone. Set a tuple only to override.
+    amplitude_grid_mm: tuple[float, ...] | None = None
     dense_fruit_spacing: float | None = 0.05
     detachment_displacement_m: float | None = 0.002
     coverage_mode: str = "branch"
     stress_ceiling_pa: float = 100.0e6
     duration_s: float = 10.0
-    limits: DS5L1Limits = field(default_factory=DS5L1Limits)
+    # The actuator envelope — THE single knob for the working frequency/amplitude
+    # range (defaults to the realistic harvester: ≤15 Hz, ≤20 mm). Use
+    # DS5L1Limits() for the actual lab rig, .unconstrained() for the ideal study.
+    limits: DS5L1Limits = field(default_factory=DS5L1Limits.realistic_harvester)
     n_jobs: int = -1            # FE solves across processes; <=0 = all cores, 1 = serial
     # Per-branch local-mode frequency selection (replaces the old global
     # mean-tip FRF peak pick). Each clamp excites its own branch, so its
@@ -342,19 +352,32 @@ class RecommendationResult:
 def generate_linear_fruits(model: Any, policy: Any, spacing: float = 0.05) -> list:
     """One fruit per *spacing* fraction of every non-trunk branch.
 
-    Stiffness varies linearly along each branch (1.5×k_mean at the root →
-    0.5×k_mean at the tip): young tip wood snaps first.  Port of the e2e
-    ``_generate_linear_fruits``.
+    Mass and detachment force come from the user's CALIBRATED regressions
+    (``orchard_fem.io.fruit_distribution``: ``_mean_fruit_mass_g`` and
+    ``_mean_detachment_force_N``), with the along-branch position ``s`` mapped to
+    the canopy index ``xi`` (root 0 → tip 1, matching ``POSITION_XI``). Tip fruit
+    are lighter and detach at lower force (≈8.5 N) than root fruit (≈34 N).
+
+    Attachment stiffness comes from the physical pedicel model (slender
+    cantilever + gravitational pendulum, ``domain.pedicel``), which places the
+    fruit-swing resonance in the harvest band; the breaking force ``F_detach`` is
+    stored separately on ``detach_force`` and is the detachment threshold.
     """
     from orchard_fem.domain.entities import FruitAttachment
+    from orchard_fem.domain.pedicel import pedicel_stiffness_n_per_m
+    from orchard_fem.io.fruit_distribution import (
+        _mean_detachment_force_N, _mean_fruit_mass_g,
+    )
 
     rng = random.Random(policy.seed)
-    mean_mass = getattr(policy, "mean_fruit_mass_kg", None) or 0.05
-    mean_detach_force = getattr(policy, "mean_detachment_force_N", None) or 5.0
-    d_detach = float(policy.detachment_displacement_m)
-    k_mean = mean_detach_force / d_detach
     zeta = float(getattr(policy, "attachment_damping_ratio", 0.05))
     component = str(getattr(policy, "attachment_component", "uz"))
+    crack_prob = float(getattr(policy, "crack_probability", 0.0))
+    mass_cv = float(getattr(policy, "mass_residual_cv", 0.10))
+    force_cv = float(getattr(policy, "detachment_force_cv", 0.0))
+    ped_len = float(getattr(policy, "pedicel_length_m", DEFAULT_PEDICEL_LENGTH_M))
+    ped_dia = float(getattr(policy, "pedicel_diameter_m", DEFAULT_PEDICEL_DIAMETER_M))
+    ped_e = float(getattr(policy, "pedicel_youngs_modulus_pa", DEFAULT_PEDICEL_YOUNGS_MODULUS_PA))
 
     fruits: list = []
     n_per_branch = max(int(round(1.0 / spacing)), 1)
@@ -365,11 +388,17 @@ def generate_linear_fruits(model: Any, policy: Any, spacing: float = 0.05) -> li
             s = (i + 1) * spacing
             if s > 1.0:
                 break
+            xi = min(max(s, 0.0), 1.0)                    # along-branch position → canopy xi
+            crack = 1 if rng.random() < crack_prob else 0
             mass = max(
-                mean_mass * (1.0 + rng.gauss(0.0, float(getattr(policy, "mass_residual_cv", 0.10)))),
+                _mean_fruit_mass_g(xi) / 1000.0 * (1.0 + rng.gauss(0.0, mass_cv)),
                 0.005,
             )
-            k = max(k_mean * (1.5 - s), 0.10 * k_mean)
+            force = min(max(
+                _mean_detachment_force_N(xi, crack) * (1.0 + rng.gauss(0.0, force_cv)),
+                3.0,                                      # formula clamp [3, 70] N
+            ), 70.0)
+            k = pedicel_stiffness_n_per_m(mass, ped_len, ped_dia, ped_e)
             fruits.append(FruitAttachment(
                 fruit_id=f"fr_{branch.branch_id}_{int(s * 100):03d}",
                 branch_id=branch.branch_id,
@@ -378,6 +407,7 @@ def generate_linear_fruits(model: Any, policy: Any, spacing: float = 0.05) -> li
                 stiffness=float(k),
                 damping=float(2.0 * zeta * math.sqrt(mass * k)),
                 target_component=component,
+                detach_force=float(force),
             ))
     return fruits
 
@@ -766,7 +796,8 @@ def recommend_harvest_parameters(
     # -- 3. amplitude grid + per-clamp frequency grids ------------------------
     # Each clamp grips (and so excites) one branch, so its candidate frequencies
     # are that branch's local modes — not one global peak reused for every clamp.
-    a_all = sorted(opt.amplitude_grid_mm)
+    a_all = sorted(opt.amplitude_grid_mm if opt.amplitude_grid_mm is not None
+                   else opt.limits.amplitude_ladder_mm())
     a_grid = [a for a in a_all if 2.0 * a <= opt.limits.max_stroke_mm]
     dropped = [a for a in a_all if a not in a_grid]
     if dropped:

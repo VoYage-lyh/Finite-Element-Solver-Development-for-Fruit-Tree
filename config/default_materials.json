@@ -1,0 +1,32 @@
+{
+  "_comment": "Default tissue material library for skeleton/topology import (orchard_fem.io.skeleton_import.DEFAULT_MATERIALS). Edit HERE to change material properties — no need to touch importer code. Moduli/densities are tuned so the composite cylindrical section (pith core 15% radius, phloem outer 8%, xylem ring between) yields the bench-calibrated GREEN-WOOD effective bending modulus E ~= 4.70 GPa and density rho ~= 650 kg/m3 for Prunus cerasifera (Liu et al., Biosystems Engineering 2026). Earlier dry-wood values (xylem 10 GPa, rho 750) made the composite ~1.6x too stiff.",
+  "materials": [
+    {
+      "id": "pith_default",
+      "tissue": "pith",
+      "model": "linear",
+      "density": 492.0,
+      "youngs_modulus": 608000000.0,
+      "poisson_ratio": 0.35,
+      "damping_ratio": 0.02
+    },
+    {
+      "id": "xylem_default",
+      "tissue": "xylem",
+      "model": "linear",
+      "density": 671.0,
+      "youngs_modulus": 6080000000.0,
+      "poisson_ratio": 0.30,
+      "damping_ratio": 0.01
+    },
+    {
+      "id": "phloem_default",
+      "tissue": "phloem",
+      "model": "linear",
+      "density": 555.0,
+      "youngs_modulus": 1216000000.0,
+      "poisson_ratio": 0.35,
+      "damping_ratio": 0.02
+    }
+  ]
+}

@@ -10,7 +10,7 @@ Three curves on a common axis:
      Magnitudes are displacement amplitudes at the model's excitation amplitude
      F (10 N for the supplied tree JSONs), so |H_x|_sim = |U_tip| / F.
   3. **Nonlinear sim (k_3 ≠ 0, c_2 ≠ 0)** — same conversion, cached at
-     ``cache/verify_pareto_results_nonlinear/tree_<n>.pkl``.
+     ``cache/verify_pareto_results/tree_<n>.pkl``.
 
 The script ALSO back-estimates physical (k_3, c_2) ranges from the
 simulation's observed cubic-only frequency shift and c_2 peak suppression
@@ -19,7 +19,7 @@ using the standard Duffing describing function — see ``estimate_k3_c2``.
 Output (default): a two-panel figure (|H_x| overlay above, measured
 coherence γ² below) written to BOTH
   - ``<measured-dir>/compare_vs_sim_tree_<n>.{png,pdf}`` (per-test record),
-  - ``results_nonlinear/verification/measured_vs_simulation_tree_<n>.{png,pdf}``
+  - ``results/verification/measured_vs_simulation_tree_<n>.{png,pdf}``
     (paper validation figure).
 """
 
@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 # Cache locations populated by verify_pareto_end_to_end.py (whole-tree-mean FRF).
 PARETO_CACHE_LIN = REPO / "cache" / "verify_pareto_results"
-PARETO_CACHE_NL = REPO / "cache" / "verify_pareto_results_nonlinear"
+PARETO_CACHE_NL = REPO / "cache" / "verify_pareto_results"
 # Cache populated by compute_validation_frf.py (single-branch single-point FRF).
 VALIDATION_CACHE = REPO / "cache" / "validation_frf"
 
@@ -229,7 +229,7 @@ def main() -> int:
     parser.add_argument("--fmax", type=float, default=30.0)
     parser.add_argument(
         "--no-verification-copy", action="store_true",
-        help="Skip writing the same figure to results_nonlinear/verification/.",
+        help="Skip writing the same figure to results/verification/.",
     )
     parser.add_argument("--k1", type=float, default=40000.0,
                         help="Linear support stiffness k_1 [N·m⁻¹] for the back-estimate.")
@@ -279,7 +279,6 @@ def main() -> int:
         _register_pareto_pickle_classes()
         f_sim_lin, Hx_sim_lin = load_sim_displacement_frf(PARETO_CACHE_LIN, args.tree)
         f_sim_nl, Hx_sim_nl = load_sim_displacement_frf(PARETO_CACHE_NL, args.tree)
-        sim_label_suffix = "whole-tree mean"
     else:
         out_branch = args.output_branch or args.input_branch
         f_sim_lin, Hx_sim_lin, Hx_sim_nl, is_calibrated = load_validation_frf(
@@ -290,16 +289,13 @@ def main() -> int:
             output_comp=args.output_comp,
         )
         f_sim_nl = f_sim_lin
-        sim_label_suffix = (f"{args.input_branch}@{args.input_node} "
-                            f"{args.input_comp} → "
-                            f"{out_branch}@{args.output_station} {args.output_comp}")
         if is_calibrated:
             print("[validation] using calibrated nonlinear curve "
                   "(_calibrated.npz)")
 
     # Summary tables for the k3/c2 back-estimate (still useful for the printout).
-    shift_rows = load_summary_rows(REPO / "results_nonlinear/verification/summary_frequency_shift.csv")
-    c2_rows = load_summary_rows(REPO / "results_nonlinear/verification/summary_c2_suppression.csv")
+    shift_rows = load_summary_rows(REPO / "results/verification/summary_frequency_shift.csv")
+    c2_rows = load_summary_rows(REPO / "results/verification/summary_c2_suppression.csv")
     # Peak frequencies are taken from the loaded curves directly so they match
     # whatever FRF source (pareto whole-tree mean vs single-branch validation)
     # the user picked. The k3/c2 back-estimate optionally pulls cubic-only
@@ -371,7 +367,7 @@ def main() -> int:
     ax_h.semilogy(
         f_sim_lin[mask_sim_lin], Hx_sim_lin[mask_sim_lin],
         color=PRIMARY, linewidth=1.6, linestyle="-",
-        label=rf"Linear sim  ($k_3 = 0,\ c_2 = 0$)",
+        label=r"Linear sim  ($k_3 = 0,\ c_2 = 0$)",
     )
     nl_label = (r"Nonlinear sim (calibrated $\beta, k_3, c_2$)"
                 if not args.use_pareto_cache and is_calibrated
@@ -414,7 +410,7 @@ def main() -> int:
 
     stems = [measured_dir / f"compare_vs_sim_tree_{args.tree}"]
     if not args.no_verification_copy:
-        verif_dir = REPO / "results_nonlinear" / "verification"
+        verif_dir = REPO / "results" / "verification"
         verif_dir.mkdir(parents=True, exist_ok=True)
         stems.append(verif_dir / f"measured_vs_simulation_{measured_dir.name}")
 

@@ -13,7 +13,7 @@ velocity is large.  To isolate it we run three FRF sweeps per tree:
 The cubic_only -> full delta is the quadratic damping contribution.  We
 expect the response peak to drop and the peak to widen (added dissipation).
 
-Outputs (under ``results_nonlinear/verification/``):
+Outputs (under ``results/verification/``):
 
 * ``c2_effect_tree_<n>.{png,pdf}`` — three-curve overlay per tree.
 * ``summary_c2_suppression.{png,pdf}`` — peak amplitude reduction across trees.
@@ -32,7 +32,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
@@ -245,7 +245,7 @@ def _plot_summary(out_stem: Path, rows: list[tuple]) -> None:
 # ---------------------------------------------------------------------------
 def main() -> int:
     _apply_pub_style()
-    out_dir = REPO / "results_nonlinear" / "verification"
+    out_dir = REPO / "results" / "verification"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[tuple] = []

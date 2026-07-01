@@ -1,5 +1,7 @@
 build/
+*.egg-info/
 .codex
+.claude/
 *.exe
 *.obj
 *.dll
@@ -18,8 +20,7 @@ cache/
 
 # Local data and generated outputs (not hosted)
 trees/
-results/
-results_nonlinear/
+results*/
 
 # Image files
 *.png

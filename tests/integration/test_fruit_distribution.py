@@ -208,15 +208,23 @@ def test_generate_fruit_attachments_stiffness_matches_formula(tmp_path) -> None:
     )
     summary_by_node = {s.node_id: s for s in summaries}
 
+    from orchard_fem.domain.pedicel import pedicel_stiffness_n_per_m
+
     attachments = generate_fruit_attachments_for_model(model, policy)
     for att in attachments:
         summary = summary_by_node[att.fruit_id]
-        expected_stiffness = (
-            summary.fruit_count
-            * summary.mean_detachment_force_N
-            / policy.detachment_displacement_m
+        n = max(summary.fruit_count, 1)
+        # Stiffness = n parallel pedicels (physical cantilever+pendulum model);
+        # the breaking force is stored separately on detach_force = n·mean force.
+        expected_stiffness = n * pedicel_stiffness_n_per_m(
+            summary.total_fruit_mass_kg / n,
+            policy.pedicel_length_m,
+            policy.pedicel_diameter_m,
+            policy.pedicel_youngs_modulus_pa,
         )
         assert att.stiffness == pytest.approx(expected_stiffness, rel=1.0e-9)
+        expected_force = n * summary.mean_detachment_force_N
+        assert att.detach_force == pytest.approx(expected_force, rel=1.0e-9)
 
 
 # ── Tests for FruitDistributionPolicy round-trip ─────────────────────────────
