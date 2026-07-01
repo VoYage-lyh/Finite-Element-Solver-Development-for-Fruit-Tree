@@ -26,5 +26,5 @@ orchard-fem harvest examples/tree_3.json
 For the full multi-clamp harvest **working-parameter recommendation** (the
 project's headline capability — modal per-subtree frequency selection, per-clamp
 Pareto of coverage vs trunk stress, multi-stage schedule at the ≤15 Hz / 20 mm
-actuator envelope), see `scripts/verify_pareto_end_to_end.py` and
+actuator envelope), see `scripts/generate_all_figures.py` and
 `orchard_fem.workflows.harvest_recommendation.recommend_harvest_parameters`.

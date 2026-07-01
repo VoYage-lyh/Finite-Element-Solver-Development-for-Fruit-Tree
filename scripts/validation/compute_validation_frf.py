@@ -1,6 +1,6 @@
 """Compute a single-branch, single-point FRF for hammer-test validation.
 
-Unlike ``verify_pareto_end_to_end.py``'s ``_frf_tip_mean`` — which averages the
+Unlike ``generate_all_figures.py``'s ``_frf_tip_mean`` — which averages the
 displacement amplitudes of **all** branch tips in the **ux** direction (a
 "whole-tree" averaged FRF that pareto sweep needs) — this script:
 
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 

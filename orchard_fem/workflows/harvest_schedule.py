@@ -2,7 +2,7 @@
 
 A single ``(f, A)`` work point only resonates the subset of branches whose
 modes it hits; one frequency cannot shake a whole tree clean.  The packaged
-port of ``verify_pareto_end_to_end.py``'s ``_greedy_sequence`` builds a
+port of ``generate_all_figures.py``'s ``_greedy_sequence`` builds a
 **sequence** of work points: at each stage it picks the ``(f, A)`` cell that
 activates the most *new* branches per unit of trunk stress, accumulates the
 covered branches, and stops at a coverage target (or no-new-branches, or a
@@ -408,3 +408,40 @@ def build_branch_outcome_grid(
             n_detached_fruits=o.n_detached_fruits,
         )
     return grid
+
+
+def build_multiclamp_schedule(
+    scheduling_model: Any,
+    clamp_frequencies_hz: dict[str, list[float]],
+    amplitude_grid_mm: list[float],
+    *,
+    limits: DS5L1Limits | None = None,
+    polynomial_degree: int = 2,
+    target_coverage: float = 0.95,
+    max_stages: int = 10,
+    duration_model: StageDurationModel | None = None,
+    progress_cb: Callable[[str, float], None] | None = None,
+):
+    """Build the multi-clamp staged schedule shared by the console and
+    ``generate_all_figures``, so the figure schedule == the rig-executed schedule.
+
+    ``clamp_frequencies_hz`` maps each candidate clamp label to the drive
+    frequencies to scan for it (each clamp on its own local-mode frequencies);
+    the scheduler then moves the grip between energy-reachable regions. The
+    caller extracts these because the two front-ends carry different clamp types.
+    ``scheduling_model`` MUST be the prepared (fruited + damped) model from
+    :func:`~orchard_fem.workflows.harvest_recommendation.build_scheduling_model`,
+    or coverage drifts from the recommendation.
+    """
+    n_branches = max(len({f.branch_id for f in scheduling_model.fruits}), 1)
+    grids: dict[str, BranchOutcomeGrid] = {}
+    for clamp_label, freqs in clamp_frequencies_hz.items():
+        grids[clamp_label] = build_branch_outcome_grid(
+            scheduling_model, clamp_label, sorted(freqs), amplitude_grid_mm,
+            limits=limits, polynomial_degree=polynomial_degree,
+            progress_cb=progress_cb,
+        )
+    return compute_multiclamp_harvest_schedule(
+        grids, n_fruit_branches=n_branches, target_coverage=target_coverage,
+        max_stages=max_stages, limits=limits, duration_model=duration_model,
+    )

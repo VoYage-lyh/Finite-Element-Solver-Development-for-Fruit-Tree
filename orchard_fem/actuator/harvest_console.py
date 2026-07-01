@@ -733,7 +733,6 @@ class HarvestConsole:
                                  "(run in the orchard-fenicsx environment).")
             return
         opt = self._sim_options()
-        f_grid = list(self.result.frequency_grid_hz)
         a_grid = list(self.result.amplitude_grid_mm)
         ncyc = float(self.var_ncycles.get())
         model = self.model
@@ -742,66 +741,39 @@ class HarvestConsole:
         # grids on the next-best clamps and letting the scheduler move the grip
         # between energy-reachable regions. Each clamp scans its OWN local-mode
         # frequencies (the ones the recommendation evaluated for it).
-        # Keep in sync with the e2e schedule (scripts/verify_pareto_end_to_end.py
-        # _greedy_sequence) so console and end-to-end give identical schedules.
+        # The multi-clamp schedule is built by the SHARED workflow builder, so it
+        # is identical to scripts/generate_all_figures.py and the rig-executed run.
         max_clamps = 6
         candidates = [c for c in self.result.clamps if c.knee is not None]
         candidates.sort(key=lambda c: c.knee.coverage, reverse=True)
         candidates = candidates[:max_clamps]
-        clamp_freqs = {
-            c.clamp_label: (sorted({p.frequency_hz for p in c.points}) or f_grid)
-            for c in candidates
-        }
         self.btn_sim.configure(state="disabled")    # keep the pipeline locked
         self.log(f"Building multi-clamp schedule over {len(candidates)} clamp(s): "
                  f"{', '.join(self._display_clamp(c.clamp_label) for c in candidates)}…")
 
         def worker() -> None:
             try:
-                from dataclasses import replace
-                from orchard_fem.discretization.damping import (
-                    rayleigh_from_band_zeta, rayleigh_from_paper_zeta,
+                from orchard_fem.workflows.harvest_recommendation import (
+                    build_scheduling_model,
                 )
-                from orchard_fem.workflows.harvest_recommendation import generate_linear_fruits
                 from orchard_fem.workflows.harvest_schedule import (
                     StageDurationModel,
-                    build_branch_outcome_grid,
-                    compute_multiclamp_harvest_schedule,
+                    build_multiclamp_schedule,
                 )
-                # 复刻推荐时的布果与阻尼/单元阶次,保证调度与推荐物理一致
-                # (否则调度用 P1+轻阻尼会高估脱落,覆盖率与推荐对不上)。
-                m = model
-                if opt.detachment_displacement_m is not None and m.fruit_policy is not None:
-                    m = replace(m, fruit_policy=replace(
-                        m.fruit_policy,
-                        detachment_displacement_m=float(opt.detachment_displacement_m)))
-                if opt.dense_fruit_spacing is not None and m.fruit_policy is not None:
-                    m = replace(m, fruits=generate_linear_fruits(
-                        m, m.fruit_policy, opt.dense_fruit_spacing))
-                # Same damping the recommendation used: None ⇒ measured ζ(f) law
-                # (mass-proportional), a float ⇒ legacy flat band-tuned ζ. Must
-                # match recommend_harvest_parameters or the schedule under-damps.
-                _dmp_hi = min(opt.band_hz[1], opt.limits.max_freq_hz)
-                if opt.damping_zeta is None:
-                    a, b = rayleigh_from_paper_zeta(opt.band_hz[0], _dmp_hi)
-                else:
-                    a, b = rayleigh_from_band_zeta(opt.damping_zeta, opt.band_hz[0], opt.band_hz[1])
-                m = replace(m, analysis=replace(m.analysis, rayleigh_alpha=a, rayleigh_beta=b))
-                n_branches = len({f.branch_id for f in m.fruits})
-                grids = {}
-                for idx, cand in enumerate(candidates, start=1):
-                    cl = cand.clamp_label
-                    self._post("log", f"Reach grid {idx}/{len(candidates)}: "
-                                      f"clamp {self._display_clamp(cl)}…")
-                    grids[cl] = build_branch_outcome_grid(
-                        m, cl, clamp_freqs[cl], a_grid, limits=opt.limits,
-                        polynomial_degree=opt.polynomial_degree,
-                        progress_cb=lambda msg, fr: (self._post("log", msg),
-                                                     self._post("progress", fr)))
-                sched = compute_multiclamp_harvest_schedule(
-                    grids, n_fruit_branches=n_branches,
-                    target_coverage=0.95, limits=opt.limits,
-                    duration_model=StageDurationModel(reference_cycles=ncyc))
+                # The SAME fruited + damped model the recommendation ran on
+                # (shared builder), so the schedule coverage matches the Pareto.
+                m = build_scheduling_model(model, opt)
+                clamp_freqs = {
+                    c.clamp_label: (sorted({p.frequency_hz for p in c.points})
+                                    or list(self.result.frequency_grid_hz))
+                    for c in candidates
+                }
+                sched = build_multiclamp_schedule(
+                    m, clamp_freqs, a_grid, limits=opt.limits,
+                    polynomial_degree=opt.polynomial_degree, max_stages=10,
+                    duration_model=StageDurationModel(reference_cycles=ncyc),
+                    progress_cb=lambda msg, fr: (self._post("log", msg),
+                                                 self._post("progress", fr)))
                 self._post("log", f"Stage durations from {ncyc:g} detach-cycles "
                                   f"(at threshold) ÷ frequency.")
                 self._post("sched_done", sched)

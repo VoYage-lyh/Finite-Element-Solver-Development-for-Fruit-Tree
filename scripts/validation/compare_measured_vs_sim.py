@@ -6,11 +6,11 @@ Three curves on a common axis:
      ``results/hammer_test/<test>/frf_tip.csv``; converted to displacement
      compliance |H_x| = |H_a| / (2π f)² so the unit lines up with the sim.
   2. **Linear sim (k_3 = 0, c_2 = 0)** — pareto-pipeline FRF curve cached at
-     ``cache/verify_pareto_results/tree_<n>.pkl``.
+     ``cache/figures_results/tree_<n>.pkl``.
      Magnitudes are displacement amplitudes at the model's excitation amplitude
      F (10 N for the supplied tree JSONs), so |H_x|_sim = |U_tip| / F.
   3. **Nonlinear sim (k_3 ≠ 0, c_2 ≠ 0)** — same conversion, cached at
-     ``cache/verify_pareto_results/tree_<n>.pkl``.
+     ``cache/figures_results/tree_<n>.pkl``.
 
 The script ALSO back-estimates physical (k_3, c_2) ranges from the
 simulation's observed cubic-only frequency shift and c_2 peak suppression
@@ -34,11 +34,11 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
-# Cache locations populated by verify_pareto_end_to_end.py (whole-tree-mean FRF).
-PARETO_CACHE_LIN = REPO / "cache" / "verify_pareto_results"
-PARETO_CACHE_NL = REPO / "cache" / "verify_pareto_results"
+# Cache locations populated by generate_all_figures.py (whole-tree-mean FRF).
+PARETO_CACHE_LIN = REPO / "cache" / "figures_results"
+PARETO_CACHE_NL = REPO / "cache" / "figures_results"
 # Cache populated by compute_validation_frf.py (single-branch single-point FRF).
 VALIDATION_CACHE = REPO / "cache" / "validation_frf"
 
@@ -79,7 +79,7 @@ def load_summary_rows(path: Path) -> dict[int, dict[str, float]]:
 
 
 def _register_pareto_pickle_classes() -> None:
-    """Make ``pickle.load`` find verify_pareto_end_to_end's classes.
+    """Make ``pickle.load`` find generate_all_figures's classes.
 
     The pareto cache pickles were written from inside that script, so unpickle
     needs the same class objects available in ``__main__``.
@@ -87,7 +87,7 @@ def _register_pareto_pickle_classes() -> None:
     scripts_dir = REPO / "scripts"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
-    import verify_pareto_end_to_end as vp
+    import generate_all_figures as vp
     main = sys.modules["__main__"]
     for name in dir(vp):
         obj = getattr(vp, name)
@@ -107,7 +107,7 @@ def load_sim_displacement_frf(cache_dir: Path, tree_n: int) -> tuple[np.ndarray,
     if not path.exists():
         raise FileNotFoundError(
             f"Pareto cache missing: {path}. "
-            "Run scripts/verify_pareto_end_to_end.py first."
+            "Run scripts/generate_all_figures.py first."
         )
     with path.open("rb") as fh:
         record = pickle.load(fh)

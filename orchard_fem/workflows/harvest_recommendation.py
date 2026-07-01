@@ -14,7 +14,7 @@ all branch tips into one FRF and reused its tallest peak for every clamp, which
 both hid branch-local modes and decoupled the frequency from the clamp — see
 ``branch_local_frequencies`` / ``_default_modal_local_modes``.
 
-This ports the validated logic of ``scripts/verify_pareto_end_to_end.py`` into
+This ports the validated logic of ``scripts/generate_all_figures.py`` into
 the package, with three changes for interactive/front-end use:
 
 1. **Rig-envelope hard constraint.**  The e2e study scans displacement
@@ -412,6 +412,56 @@ def generate_linear_fruits(model: Any, policy: Any, spacing: float = 0.05) -> li
     return fruits
 
 
+def build_scheduling_model(model: Any, options: Any, *, log: ProgressCb = _noop_progress) -> Any:
+    """Apply the recommendation's physics prep to *model* and return the result.
+
+    Three transforms, in order:
+
+    1. Override the fruit-policy detachment displacement (``detachment_displacement_m``).
+    2. Densify fruit placement (``dense_fruit_spacing`` → :func:`generate_linear_fruits`).
+    3. Set Rayleigh damping from the ζ law (measured ζ(f) by default, else flat
+       ``damping_zeta``).
+
+    This is the SINGLE SOURCE of the fruited + damped model.  The Pareto
+    recommendation, the multi-clamp schedule (console *and* generate_all_figures),
+    and the e2e FRF figures must all run on the *same* prepared model, or their
+    coverage numbers silently drift — so they all call this one function.
+    """
+    from orchard_fem.discretization.damping import (
+        paper_zeta_of_frequency, rayleigh_from_band_zeta, rayleigh_from_paper_zeta,
+    )
+
+    if options.detachment_displacement_m is not None and model.fruit_policy is not None:
+        model = replace(model, fruit_policy=replace(
+            model.fruit_policy,
+            detachment_displacement_m=float(options.detachment_displacement_m),
+        ))
+        log(f"Detachment displacement set to {options.detachment_displacement_m * 1000:g} mm", 0.02)
+    if options.dense_fruit_spacing is not None:
+        if model.fruit_policy is None:
+            raise ValueError("dense_fruit_spacing requires a fruit policy on the model.")
+        fruits = generate_linear_fruits(model, model.fruit_policy, options.dense_fruit_spacing)
+        model = replace(model, fruits=fruits)
+        log(f"Dense fruit placement: 1 fruit per {options.dense_fruit_spacing * 100:g}% arc "
+            f"length, {len(fruits)} total", 0.04)
+
+    _dmp_hi = min(options.band_hz[1], options.limits.max_freq_hz)
+    if options.damping_zeta is None:
+        alpha, beta = rayleigh_from_paper_zeta(options.band_hz[0], _dmp_hi)
+        log(f"Damping: measured ζ(f) law (Liu et al. 2026), "
+            f"ζ≈{paper_zeta_of_frequency(options.band_hz[0]):.0%}@{options.band_hz[0]:g}Hz → "
+            f"{paper_zeta_of_frequency(_dmp_hi):.0%}@{_dmp_hi:g}Hz "
+            f"(mass-proportional Rayleigh α={alpha:.3g})", 0.045)
+    else:
+        alpha, beta = rayleigh_from_band_zeta(options.damping_zeta, options.band_hz[0], options.band_hz[1])
+        log(f"Damping set to flat ζ≈{options.damping_zeta:.0%} across "
+            f"{options.band_hz[0]:g}–{options.band_hz[1]:g} Hz (Rayleigh α={alpha:.3g}, β={beta:.3g})", 0.045)
+    model = replace(model, analysis=replace(
+        model.analysis, rayleigh_alpha=alpha, rayleigh_beta=beta,
+    ))
+    return model
+
+
 def find_in_band_resonance(
     freqs: np.ndarray, mags: np.ndarray, band: tuple[float, float],
     *, prominence_ratio: float = 0.10,
@@ -736,42 +786,10 @@ def recommend_harvest_parameters(
         if cancel_cb():
             raise RuntimeError("cancelled")
 
-    # -- 1. fruit setup ------------------------------------------------------
-    if opt.detachment_displacement_m is not None and model.fruit_policy is not None:
-        model = replace(model, fruit_policy=replace(
-            model.fruit_policy,
-            detachment_displacement_m=float(opt.detachment_displacement_m),
-        ))
-        log(f"Detachment displacement set to {opt.detachment_displacement_m * 1000:g} mm", 0.02)
-    if opt.dense_fruit_spacing is not None:
-        if model.fruit_policy is None:
-            raise ValueError("dense_fruit_spacing requires a fruit policy on the model.")
-        fruits = generate_linear_fruits(model, model.fruit_policy, opt.dense_fruit_spacing)
-        model = replace(model, fruits=fruits)
-        log(f"Dense fruit placement: 1 fruit per {opt.dense_fruit_spacing * 100:g}% arc "
-            f"length, {len(fruits)} total", 0.04)
-
-    # Structural damping. The model files carry β≈1e-4 (~0.25 % ζ) — far below the
-    # measured Prunus cerasifera 9–35 % (Liu et al. 2026, Fig. 20). Default: the
-    # measured frequency-dependent law (mass-proportional Rayleigh, ζ decreasing
-    # from ~0.35 at the trunk to ~0.09 at the tips). A float = legacy flat ζ.
-    from orchard_fem.discretization.damping import (
-        paper_zeta_of_frequency, rayleigh_from_band_zeta, rayleigh_from_paper_zeta,
-    )
-    _dmp_hi = min(opt.band_hz[1], opt.limits.max_freq_hz)
-    if opt.damping_zeta is None:
-        alpha, beta = rayleigh_from_paper_zeta(opt.band_hz[0], _dmp_hi)
-        log(f"Damping: measured ζ(f) law (Liu et al. 2026), "
-            f"ζ≈{paper_zeta_of_frequency(opt.band_hz[0]):.0%}@{opt.band_hz[0]:g}Hz → "
-            f"{paper_zeta_of_frequency(_dmp_hi):.0%}@{_dmp_hi:g}Hz "
-            f"(mass-proportional Rayleigh α={alpha:.3g})", 0.045)
-    else:
-        alpha, beta = rayleigh_from_band_zeta(opt.damping_zeta, opt.band_hz[0], opt.band_hz[1])
-        log(f"Damping set to flat ζ≈{opt.damping_zeta:.0%} across "
-            f"{opt.band_hz[0]:g}–{opt.band_hz[1]:g} Hz (Rayleigh α={alpha:.3g}, β={beta:.3g})", 0.045)
-    model = replace(model, analysis=replace(
-        model.analysis, rayleigh_alpha=alpha, rayleigh_beta=beta,
-    ))
+    # -- 1. fruit + damping setup --------------------------------------------
+    # Shared with the multi-clamp schedule (console + generate_all_figures) and
+    # the e2e FRF figures, so every stage runs on the SAME prepared model.
+    model = build_scheduling_model(model, opt, log=log)
 
     # -- 2. modal analysis → per-branch local modes ---------------------------
     check_cancel()

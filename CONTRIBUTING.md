@@ -36,7 +36,7 @@ python -m orchard_fem doctor
 Run a model:
 
 ```bash
-python -m orchard_fem run examples/demo_orchard.json
+python -m orchard_fem run examples/tree_3.json
 ```
 
 Run package validation:

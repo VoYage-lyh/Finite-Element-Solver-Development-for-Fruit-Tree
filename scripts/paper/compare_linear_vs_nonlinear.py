@@ -10,7 +10,7 @@ For each tree we run two FRF sweeps over the same band:
    Duffing-type link sampler.
 
 The resonance peaks in the harvesting band (3-20 Hz) are extracted via the
-same prominence-based detector that ``verify_pareto_end_to_end.py`` uses for
+same prominence-based detector that ``generate_all_figures.py`` uses for
 its main pipeline, so the shift number is directly comparable.
 
 Outputs (under ``results/verification/``):
@@ -134,7 +134,7 @@ def _find_in_band_resonance(
     *,
     prominence_ratio: float = 0.10,
 ) -> tuple[int, bool]:
-    """Same algorithm as verify_pareto_end_to_end._find_in_band_resonance."""
+    """Same algorithm as generate_all_figures._find_in_band_resonance."""
     in_band = (freqs >= band[0]) & (freqs <= band[1])
     if not in_band.any():
         raise RuntimeError(f"No FRF samples in {band[0]}-{band[1]} Hz.")

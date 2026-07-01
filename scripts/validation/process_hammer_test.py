@@ -47,7 +47,7 @@ import numpy as np
 STATIONS = ("root", "mid", "tip")
 COMPONENTS = ("X", "Y", "Z")
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 CACHE_ROOT = REPO_ROOT / "cache" / "hammer_test"
 
 

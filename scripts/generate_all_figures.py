@@ -315,13 +315,10 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     clamp); the package now does modal per-subtree local modes, P2, realistic
     band-tuned damping, and a multi-clamp schedule.
     """
-    from orchard_fem.discretization.damping import (
-        rayleigh_from_band_zeta, rayleigh_from_paper_zeta,
-    )
     from orchard_fem.domain import ExcitationKind
     from orchard_fem.io.loaders import load_orchard_model
     from orchard_fem.workflows.harvest_recommendation import (
-        RecommendationOptions, generate_linear_fruits, recommend_harvest_parameters,
+        RecommendationOptions, build_scheduling_model, recommend_harvest_parameters,
     )
 
     print(f"\n[{label}] loading {model_path.name} …")
@@ -341,21 +338,9 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     print(f"[{label}]   {time.time() - t0:.1f}s  resonance {result.resonance_hz:.2f} Hz, "
           f"{len(result.clamps)} clamps, best #{result.best_clamp_index}")
 
-    # Rebuild the SAME fruited + damped model the pipeline used, for the FRF curve
-    # and the per-fruit response map the figures need.
-    fmodel = model
-    if opt.detachment_displacement_m is not None and fmodel.fruit_policy is not None:
-        fmodel = replace(fmodel, fruit_policy=replace(
-            fmodel.fruit_policy, detachment_displacement_m=float(opt.detachment_displacement_m)))
-    if opt.dense_fruit_spacing is not None:
-        fmodel = replace(fmodel, fruits=generate_linear_fruits(
-            fmodel, fmodel.fruit_policy, opt.dense_fruit_spacing))
-    _dmp_hi = min(opt.band_hz[1], opt.limits.max_freq_hz)
-    if opt.damping_zeta is None:
-        a, b = rayleigh_from_paper_zeta(opt.band_hz[0], _dmp_hi)
-    else:
-        a, b = rayleigh_from_band_zeta(opt.damping_zeta, opt.band_hz[0], opt.band_hz[1])
-    fmodel = replace(fmodel, analysis=replace(fmodel.analysis, rayleigh_alpha=a, rayleigh_beta=b))
+    # The SAME fruited + damped model the recommendation used (shared builder),
+    # for the FRF curve and the per-fruit response map the figures need.
+    fmodel = build_scheduling_model(model, opt)
 
     print(f"[{label}] FRF sweep (figure) …")
     freqs, mags = _coarse_frf_sweep(fmodel, 0.5, 30.0, 60)
@@ -433,7 +418,7 @@ def main() -> int:
     out_pareto = results_root / "pareto"
     out_frf = results_root / "frf"
     out_summary = results_root / "summary"
-    cache_dir = REPO / "cache" / f"verify_pareto_{results_root.name}"
+    cache_dir = REPO / "cache" / f"figures_{results_root.name}"
     for d in (out_pareto, out_frf, out_summary):
         d.mkdir(parents=True, exist_ok=True)
     results_label = results_root.name
@@ -470,7 +455,7 @@ def main() -> int:
     out_sequence.mkdir(parents=True, exist_ok=True)
     results_with_stages: list[tuple[TreeResult, list[dict]]] = []
     for n, result in zip((1, 2, 3, 4, 5), results):
-        stages = _greedy_sequence(result, target=0.95, max_stages=5)
+        stages = _greedy_sequence(result, target=0.95, max_stages=10)
         results_with_stages.append((result, stages))
         _save_sequence_panel(
             result, stages,
@@ -594,7 +579,7 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
 
 
 def _greedy_sequence(
-    result: TreeResult, *, target: float = 0.95, max_stages: int = 6,
+    result: TreeResult, *, target: float = 0.95, max_stages: int = 10,
 ) -> list[dict]:
     """Multi-clamp staged sequence via the package scheduler (replaces the old
     single-clamp greedy). Builds a branch-outcome grid on the top candidate
@@ -602,31 +587,25 @@ def _greedy_sequence(
     the grip between energy-reachable regions; returns figure-friendly dicts.
     """
     from orchard_fem.actuator.harvest_bridge import DS5L1Limits
-    from orchard_fem.workflows.harvest_schedule import (
-        build_branch_outcome_grid, compute_multiclamp_harvest_schedule,
-    )
+    from orchard_fem.workflows.harvest_schedule import build_multiclamp_schedule
 
     limits = DS5L1Limits.realistic_harvester()
 
-    n_total = max(len({f.branch_id for f in result.model.fruits}), 1)
     # Reuse the SAME amplitude grid the recommendation evaluated (rig-feasible
     # subset of options.amplitude_grid_mm), so the schedule scans identical (f, A)
-    # cells to the Pareto and matches the console. Fall back for pre-field caches.
+    # cells to the Pareto. Fall back for pre-field caches.
     a_grid = list(result.amplitude_grid_mm) or list(_AMPLITUDE_GRID_MM)
-    # Give the scheduler ample re-clamp options (the rig CAN change grip): take the
-    # best-covering clamps across distinct subtrees so later stages can reach
-    # branches the first grip could not excite.
+    # Best-covering clamps across subtrees so later stages can reach branches the
+    # first grip could not excite. The shared builder (used by the console too)
+    # runs each clamp on its own Pareto-front frequencies → identical schedules.
     cand = sorted(result.clamps, key=lambda c: c.knee.detachment_coverage, reverse=True)[:6]
-    grids = {}
-    for c in cand:
-        f_for = sorted({float(x) for x in c.front.frequencies_hz.tolist()})
-        grids[c.clamp_label] = build_branch_outcome_grid(
-            result.model, c.clamp_label, f_for, a_grid,
-            theta=result.theta, limits=limits, polynomial_degree=2,
-        )
-    sched = compute_multiclamp_harvest_schedule(
-        grids, n_fruit_branches=n_total, target_coverage=target, max_stages=max_stages,
-        limits=limits,    # else it re-gates with rig limits → 0 stages in ideal mode
+    clamp_freqs = {
+        c.clamp_label: sorted(float(x) for x in c.front.frequencies_hz.tolist())
+        for c in cand
+    }
+    sched = build_multiclamp_schedule(
+        result.model, clamp_freqs, a_grid, limits=limits, polynomial_degree=2,
+        target_coverage=target, max_stages=max_stages,
     )
     return [
         {

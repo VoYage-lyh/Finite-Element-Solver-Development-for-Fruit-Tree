@@ -192,17 +192,6 @@ def test_python_doctor_subcommand_runs_environment_audit() -> None:
     assert "Missing summary" in result.stdout
 
 
-def test_check_python_env_wrapper_runs_environment_audit() -> None:
-    result = subprocess.run(
-        [sys.executable, "scripts/check_python_env.py"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert "Missing summary" in result.stdout
-
-
 def test_python_verify_subcommand_shows_help() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "orchard_fem", "verify", "--help"],
@@ -239,28 +228,6 @@ def test_python_plot_frequency_response_subcommand_shows_help() -> None:
     assert result.returncode == 0
     assert "frequency-response CSV" in result.stdout
     assert "--no-show" in result.stdout
-
-
-def test_run_full_validation_wrapper_forwards_help() -> None:
-    result = subprocess.run(
-        ["bash", "scripts/run_full_validation.sh", "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert "full-validate" in result.stdout
-
-
-def test_plot_frequency_response_wrapper_forwards_help() -> None:
-    result = subprocess.run(
-        [sys.executable, "scripts/plot_frequency_response.py", "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert "frequency-response CSV" in result.stdout
 
 
 def test_cli_run_writes_frequency_response_csv(tmp_path) -> None:

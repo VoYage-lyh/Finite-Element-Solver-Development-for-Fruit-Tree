@@ -70,17 +70,17 @@ conda run -n orchard-fenicsx python -m orchard_fem --help
 Run the frequency-response demo:
 
 ```bash
-python -m orchard_fem run examples/demo_orchard.json \
-  --output-csv build/demo_frequency_response.csv
+python -m orchard_fem run examples/tree_3.json \
+  --output-csv build/tree_3_frequency_response.csv
 
-python -m orchard_fem plot-frequency-response build/demo_frequency_response.csv \
-  --no-show --output build/demo_frequency_response.png
+python -m orchard_fem plot-frequency-response build/tree_3_frequency_response.csv \
+  --no-show --output build/tree_3_frequency_response.png
 ```
 
 Run the time-history demo:
 
 ```bash
-python -m orchard_fem run examples/demo_orchard_time_history.json \
+python -m orchard_fem run tests/fixtures/demo_orchard_time_history.json \
   --output-csv build/demo_time_history.csv
 
 python -m orchard_fem plot-time-history build/demo_time_history.csv \
@@ -90,22 +90,22 @@ python -m orchard_fem plot-time-history build/demo_time_history.csv \
 Run the open-vase tree model:
 
 ```bash
-python -m orchard_fem run trees/tree_1_multi_stem_open_crown.json \
-  --output-csv build/results/tree_1_multi_stem_open_crown/frf.csv
+python -m orchard_fem run trees/tree_1.json \
+  --output-csv build/results/tree_1/frf.csv
 
 python -m orchard_fem plot-frequency-response \
-  build/results/tree_1_multi_stem_open_crown/frf.csv \
+  build/results/tree_1/frf.csv \
   --no-show
 
 python -m orchard_fem visualize \
-  trees/tree_1_multi_stem_open_crown.json \
-  build/results/tree_1_multi_stem_open_crown/frf.csv \
-  --output-prefix build/results/tree_1_multi_stem_open_crown/visual
+  trees/tree_1.json \
+  build/results/tree_1/frf.csv \
+  --output-prefix build/results/tree_1/visual
 
 python -m orchard_fem view-tree \
-  trees/tree_1_multi_stem_open_crown.json \
+  trees/tree_1.json \
   --no-show \
-  --output build/results/tree_1_multi_stem_open_crown/tree_3d.png
+  --output build/results/tree_1/tree_3d.png
 ```
 
 The time-history plotter writes one excitation figure plus one figure per branch when an output path
@@ -150,19 +150,19 @@ Backend selection can be set in the model JSON through `analysis.solver_backend`
 the CLI where supported:
 
 ```bash
-python -m orchard_fem run examples/demo_orchard.json --solver-backend native
-python -m orchard_fem modal trees/tree_1_multi_stem_open_crown.json --solver-backend fenicsx
+python -m orchard_fem run examples/tree_3.json --solver-backend native
+python -m orchard_fem modal trees/tree_1.json --solver-backend fenicsx
 ```
 
 ## Inputs And Outputs
 
 Model input is JSON. The most useful starting points are:
 
-- `examples/demo_orchard.json`: compact frequency-response model.
-- `examples/demo_orchard_time_history.json`: compact time-history model.
-- `trees/tree_1_multi_stem_open_crown.json`: image-derived multi-stem open-crown model.
-- `trees/tree_2_asymmetric_multi_leader.json`, `trees/tree_3_broad_vase_multi_leader.json`,
-  `trees/tree_4_y_fan_canopy.json`, `trees/tree_5_rounded_two_leader.json`: additional architecture
+- `examples/tree_3.json`: the canonical example tree (frequency-response) — best first run.
+- `tests/fixtures/demo_orchard_time_history.json`: compact time-history model.
+- `trees/tree_1.json`: image-derived multi-stem open-crown model.
+- `trees/tree_2.json`, `trees/tree_3.json`,
+  `trees/tree_4.json`, `trees/tree_5.json`: additional architecture
   examples.
 
 Solver outputs are CSV files. Plot commands write PNG figures when `--output` is provided. Generated

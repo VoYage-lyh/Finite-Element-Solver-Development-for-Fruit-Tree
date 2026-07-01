@@ -207,12 +207,12 @@ Each observation entry supports:
 - `target_node`: `root`, `tip`, or an integer node index for branch observations
 - `target_component`: `ux`, `uy`, or `uz` for branch observations
 
-## Visualization Scripts
+## Visualization Commands
 
-- `scripts/plot_frequency_response.py`: `matplotlib`-based frequency-response plotting helper.
-- `scripts/visualize_analysis.py`: `numpy`/`matplotlib` orchard geometry plus excitation/measurement visualization helper.
+- `python -m orchard_fem plot-frequency-response <csv>`: `matplotlib`-based frequency-response plotting.
+- `python -m orchard_fem visualize <model.json> <response.csv>`: `numpy`/`matplotlib` orchard geometry plus excitation/measurement visualization.
 
-`visualize_analysis.py` reads the model JSON together with the response CSV and highlights:
+The `visualize` command reads the model JSON together with the response CSV and highlights:
 
 - branch geometry,
 - fruit locations,

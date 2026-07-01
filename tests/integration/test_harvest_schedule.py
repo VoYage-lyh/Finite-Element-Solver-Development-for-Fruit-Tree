@@ -15,6 +15,7 @@ from orchard_fem.actuator.harvest_bridge import (
 from orchard_fem.workflows.harvest_schedule import (
     BranchOutcome,
     StageDurationModel,
+    build_multiclamp_schedule,
     compute_harvest_schedule,
     compute_multiclamp_harvest_schedule,
 )
@@ -290,3 +291,51 @@ def test_execute_schedule_refuses_infeasible():
     )
     with pytest.raises(ValueError, match="infeasible"):
         execute_harvest_schedule(sched, FakeDriver(), calibrate=False)
+
+
+# --------------------------------------------------------------------------- #
+# Shared multi-clamp builder (console + generate_all_figures)
+# --------------------------------------------------------------------------- #
+
+def test_build_multiclamp_schedule_takes_frequency_dict(monkeypatch):
+    """Regression: the shared builder consumes a ``{clamp_label: freqs}`` dict and
+    builds one grid per clamp. The console passes ClampRecommendation-derived
+    frequencies (those objects have ``.points`` but no ``.front``), so the builder
+    must key off the dict and never touch clamp-object attributes."""
+    import orchard_fem.workflows.harvest_schedule as hs
+
+    seen_grids: dict[str, list[float]] = {}
+
+    def fake_grid(model, clamp_label, freqs, amps, **kw):
+        seen_grids[clamp_label] = list(freqs)
+        return {"clamp": clamp_label}
+
+    captured: dict = {}
+
+    def fake_schedule(grids, **kw):
+        captured["clamps"] = list(grids.keys())
+        captured["max_stages"] = kw.get("max_stages")
+        captured["target"] = kw.get("target_coverage")
+        return "SCHED"
+
+    monkeypatch.setattr(hs, "build_branch_outcome_grid", fake_grid)
+    monkeypatch.setattr(hs, "compute_multiclamp_harvest_schedule", fake_schedule)
+
+    class _Fruit:
+        def __init__(self, b):
+            self.branch_id = b
+
+    class _Model:
+        fruits = [_Fruit("b1"), _Fruit("b2")]
+
+    clamp_freqs = {"trunk@0.25": [8.0, 5.0], "b1@0.5": [7.0]}
+    out = build_multiclamp_schedule(
+        _Model(), clamp_freqs, [5.0, 10.0], max_stages=10, target_coverage=0.9,
+    )
+
+    assert out == "SCHED"
+    assert set(seen_grids) == {"trunk@0.25", "b1@0.5"}
+    assert seen_grids["trunk@0.25"] == [5.0, 8.0]        # sorted per clamp
+    assert captured["clamps"] == ["trunk@0.25", "b1@0.5"]
+    assert captured["max_stages"] == 10                  # our new default is 10
+    assert captured["target"] == pytest.approx(0.9)

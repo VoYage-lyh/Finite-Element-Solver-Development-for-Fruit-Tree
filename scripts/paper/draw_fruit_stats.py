@@ -1,4 +1,4 @@
-"""Render four independent figures summarising 20-fruit *Camellia oleifera*
+"""Render four independent figures summarising 20-fruit *Prunus cerasifera*
 field measurements so each can be placed individually in LaTeX.
 
 Outputs (under ``results/summary/``):

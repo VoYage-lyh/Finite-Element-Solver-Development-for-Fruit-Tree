@@ -1,8 +1,6 @@
 import csv
-import importlib.util
 import json
 import math
-from pathlib import Path
 
 import pytest
 
@@ -151,11 +149,10 @@ def test_petsc_time_history_solver_writes_demo_csv(tmp_path) -> None:
 
 
 def _load_visualize_analysis_module():
-    module_path = Path(__file__).resolve().parents[2] / "scripts" / "visualize_analysis.py"
-    spec = importlib.util.spec_from_file_location("visualize_analysis", module_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # plot_trajectory lives in the package; the old scripts/visualize_analysis.py
+    # shim was just ``from orchard_fem.visualization import *``.
+    import orchard_fem.visualization as module
+
     return module
 
 
