@@ -743,10 +743,9 @@ class HarvestConsole:
         # frequencies (the ones the recommendation evaluated for it).
         # The multi-clamp schedule is built by the SHARED workflow builder, so it
         # is identical to scripts/generate_all_figures.py and the rig-executed run.
-        max_clamps = 6
+        # Use ALL feasible clamps (no top-N cut): more grips reach more branches.
         candidates = [c for c in self.result.clamps if c.knee is not None]
         candidates.sort(key=lambda c: c.knee.coverage, reverse=True)
-        candidates = candidates[:max_clamps]
         self.btn_sim.configure(state="disabled")    # keep the pipeline locked
         self.log(f"Building multi-clamp schedule over {len(candidates)} clamp(s): "
                  f"{', '.join(self._display_clamp(c.clamp_label) for c in candidates)}…")
@@ -770,7 +769,7 @@ class HarvestConsole:
                 }
                 sched = build_multiclamp_schedule(
                     m, clamp_freqs, a_grid, limits=opt.limits,
-                    polynomial_degree=opt.polynomial_degree, max_stages=10,
+                    polynomial_degree=opt.polynomial_degree, max_stages=None,
                     duration_model=StageDurationModel(reference_cycles=ncyc),
                     progress_cb=lambda msg, fr: (self._post("log", msg),
                                                  self._post("progress", fr)))

@@ -38,19 +38,36 @@ from orchard_fem.calibration.bayesian_calibration import ForwardResult
 # ────────────────────────────────────────────────────────────────────────────
 #  Parameter → model mapping
 # ────────────────────────────────────────────────────────────────────────────
-def _apply_theta_to_model(model, params: dict[str, float]):
+def _apply_theta_to_model(
+    model, params: dict[str, float], *, calibrated_materials=None,
+):
     """Return a clone of *model* with θ applied to materials / clamps / fruits.
 
     Supported keys (any subset):
-      E, rho            — applied to all materials matching ``calibrated_materials``
+      E, rho            — applied to the CALIBRATED materials only (see below)
       zeta1, zeta2      — used by :func:`rayleigh_from_modal_damping_hz` later
       k_c, c_c          — applied to every ``ClampBoundaryCondition``
       k_f, c_f          — applied to every ``FruitAttachment``
+
+    ``calibrated_materials`` is a set of ``material_id``s that θ's E/ρ perturb.
+    When ``None`` (default) only the STIFFEST material is perturbed — the
+    load-bearing xylem a modal/FRF fit actually identifies. It must NOT touch
+    every tissue: overwriting pith + xylem + phloem with one E homogenises the
+    composite section (θ=materials[0]=pith once made harvest trees ~8× too soft
+    and crushed detachment). Pass an explicit set for multi-material fits.
     """
-    # 1. Materials (E, ρ)
+    # 1. Materials (E, ρ) — calibrated materials only, never the whole composite.
     if "E" in params or "rho" in params:
+        targets = calibrated_materials
+        if targets is None:
+            targets = {
+                max(model.materials, key=lambda m: m.youngs_modulus).material_id
+            }
         new_materials = []
         for mat in model.materials:
+            if mat.material_id not in targets:
+                new_materials.append(mat)
+                continue
             kwargs = {}
             if "E" in params:
                 kwargs["youngs_modulus"] = float(params["E"])
@@ -255,6 +272,35 @@ def _trunk_outer_radius(model, branch_id: str) -> float:
     return max_r if max_r > 0.0 else 0.05
 
 
+def _trunk_effective_youngs_modulus(model, branch_id: str) -> float:
+    """Area-weighted Young's modulus of the trunk root section (composite:
+    pith / xylem / phloem), for the bending-stress recovery ``σ = E·r·κ``.
+
+    The FE bends the real composite section, so the stress must use the composite
+    modulus — NOT θ (a calibration override that homogenises every material) nor a
+    hardcoded fallback. θ=materials[0]=pith gave 0.6 GPa; the old 1e10 fallback
+    gave 10 GPa; the true composite is ~4.7 GPa (xylem-dominated).
+    """
+    import math
+
+    branch = next(b for b in model.branches if b.branch_id == branch_id)
+    profiles = branch.section_series.profiles
+    if not profiles:
+        return 4.7e9
+    modulus_by_id = {m.material_id: float(m.youngs_modulus) for m in model.materials}
+    first = profiles[0]
+    numerator = denominator = 0.0
+    for region in getattr(first, "_regions", getattr(first, "regions", [])):
+        geometry = region.geometry
+        outer = max(geometry.outer_radii) if geometry.outer_radii else 0.0
+        inner_radii = getattr(geometry, "inner_radii", None) or [0.0]
+        inner = max(inner_radii) if inner_radii else 0.0
+        area = math.pi * max(outer * outer - inner * inner, 0.0)
+        numerator += modulus_by_id.get(region.material_id, 0.0) * area
+        denominator += area
+    return numerator / denominator if denominator > 0.0 else 4.7e9
+
+
 def _trunk_first_segment_length(model, branch_id: str) -> float:
     """Return Δs between trunk root (s=0) and trunk mid (s=0.5) in metres.
 
@@ -398,6 +444,7 @@ def build_fenicsx_pareto_evaluator(
     A_scale = 1.0e-3 if amplitude_unit == "mm" else 1.0
 
     r_outer = _trunk_outer_radius(model, trunk_branch_id)
+    E_trunk = _trunk_effective_youngs_modulus(model, trunk_branch_id)
     delta_s = _trunk_first_segment_length(model, trunk_branch_id)
 
     def evaluator(params, frequency_hz, amplitude, clamp_label):
@@ -496,7 +543,9 @@ def build_fenicsx_pareto_evaluator(
             kappa_mag = (abs(d_ry) ** 2 + abs(d_rz) ** 2) ** 0.5 / max(delta_s, 1.0e-9)
         else:
             kappa_mag = 0.0
-        E = float(params.get("E", 1.0e10))
+        # θ["E"] when calibrating (θ homogenises the tree, so σ must match); the
+        # composite trunk modulus otherwise (harvest passes θ={}). Never 1e10.
+        E = float(params.get("E", E_trunk))
         stress = E * r_outer * kappa_mag
 
         return HarvestObjective(
@@ -557,6 +606,7 @@ def build_outcome_solver(
     A_scale = 1.0e-3 if amplitude_unit == "mm" else 1.0
 
     r_outer = _trunk_outer_radius(model, trunk_branch_id)
+    E_trunk = _trunk_effective_youngs_modulus(model, trunk_branch_id)
     delta_s = _trunk_first_segment_length(model, trunk_branch_id)
 
     def solve(params, frequency_hz, amplitude, clamp_label) -> HarvestOutcome:
@@ -639,7 +689,9 @@ def build_outcome_solver(
             kappa_mag = (abs(d_ry) ** 2 + abs(d_rz) ** 2) ** 0.5 / max(delta_s, 1.0e-9)
         else:
             kappa_mag = 0.0
-        E = float(params.get("E", 1.0e10))
+        # θ["E"] when calibrating (θ homogenises the tree, so σ must match); the
+        # composite trunk modulus otherwise (harvest passes θ={}). Never 1e10.
+        E = float(params.get("E", E_trunk))
         stress = E * r_outer * kappa_mag
 
         return HarvestOutcome(

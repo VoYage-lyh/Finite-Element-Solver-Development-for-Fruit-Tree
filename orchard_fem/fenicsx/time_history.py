@@ -26,6 +26,7 @@ from orchard_fem.fenicsx.dofs import (
 )
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
 from orchard_fem.fenicsx.frequency_response import (
+    _remove_fruit_mass_proportional_damping,
     build_embedded_rayleigh_damping_matrix,
 )
 from orchard_fem.fenicsx.mpc import (
@@ -847,6 +848,9 @@ def solve_corotational_time_history_experiment(
         alpha=alpha,
         beta=beta_damping,
     )
+    _remove_fruit_mass_proportional_damping(
+        damping_matrix, experiment.fruit_dofs, model.fruits, alpha=alpha,
+    )
     if experiment.operator_bundle.attachment_damping_matrix is not None:
         damping_matrix = _add_matrix_in_place(
             damping_matrix,
@@ -1064,6 +1068,9 @@ def solve_embedded_beam_time_history_experiment(
         experiment.operator_bundle.mass_matrix,
         alpha=alpha,
         beta=beta_damping,
+    )
+    _remove_fruit_mass_proportional_damping(
+        damping_matrix, experiment.fruit_dofs, model.fruits, alpha=alpha,
     )
     if experiment.operator_bundle.attachment_damping_matrix is not None:
         damping_matrix = _add_matrix_in_place(

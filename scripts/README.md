@@ -15,7 +15,7 @@ the package CLI instead — `python -m orchard_fem --help`.
 
 | Script | Purpose |
 |---|---|
-| `generate_all_figures.py` | **Main driver.** Runs the full harvest recommendation + multi-clamp schedule pipeline for the five sample trees and writes every figure into `results/` (`frf/ pareto/ sequence/ summary/ verification/ diagnostics/`). `--force` recomputes, `--only-figures` re-renders from cache. |
+| `generate_all_figures.py` | **Main driver.** Runs the harvest recommendation + multi-clamp schedule pipeline for the five sample trees (writes `pareto/ frf/ sequence/ summary/`) and, in the same run, orchestrates the standalone verification scripts to refresh `verification/` — so one call regenerates every figure in `results/`. No flag = render from cache (fast); `--force` = recompute the FE and clear caches; `--only-figures` = strict cache render, skips the verification scripts. (`diagnostics/` stays with the `studies/` scripts.) |
 
 ## `rig/` — physical DS5L1 electric cylinder
 

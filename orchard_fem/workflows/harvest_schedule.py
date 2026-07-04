@@ -213,7 +213,7 @@ def compute_multiclamp_harvest_schedule(
     *,
     n_fruit_branches: int,
     target_coverage: float = 0.95,
-    max_stages: int = 6,
+    max_stages: int | None = None,
     limits: DS5L1Limits | None = None,
     accel_ms: int = 10,
     duration_model: StageDurationModel | None = None,
@@ -238,6 +238,11 @@ def compute_multiclamp_harvest_schedule(
     dur = duration_model or StageDurationModel()
     lim = limits or DS5L1Limits()
     n_total = max(int(n_fruit_branches), 1)
+    # max_stages=None → no cap: each stage activates ≥1 NEW branch, so the greedy
+    # loop terminates naturally at ≤ n_total stages (or earlier when no clamp can
+    # add a branch / target coverage is met). Cover as many branches as possible.
+    if max_stages is None:
+        max_stages = n_total
 
     def _runnable(f: float, a: float) -> bool:
         stroke = 2.0 * a
@@ -355,10 +360,10 @@ def build_branch_outcome_grid(
     )
 
     lim = limits or DS5L1Limits()
-    theta = theta or {
-        "E": float(model.materials[0].youngs_modulus),
-        "rho": float(model.materials[0].density),
-    }
+    # Empty θ preserves the real composite section; never default to materials[0]
+    # (pith) — _apply_theta_to_model would homogenise the tree ~8× too soft and
+    # crush coverage. θ is a calibration override, not a material pass-through.
+    theta = theta or {}
 
     def _runnable(f: float, a: float) -> bool:
         stroke = 2.0 * a
@@ -418,7 +423,7 @@ def build_multiclamp_schedule(
     limits: DS5L1Limits | None = None,
     polynomial_degree: int = 2,
     target_coverage: float = 0.95,
-    max_stages: int = 10,
+    max_stages: int | None = None,
     duration_model: StageDurationModel | None = None,
     progress_cb: Callable[[str, float], None] | None = None,
 ):

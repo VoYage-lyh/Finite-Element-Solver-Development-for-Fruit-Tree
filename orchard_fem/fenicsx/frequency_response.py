@@ -9,7 +9,6 @@ from orchard_fem.discretization.types import NonlinearLinkDefinition
 from orchard_fem.dynamics.continuation import solve_frequency_continuation
 from orchard_fem.domain import OrchardModel
 from orchard_fem.domain.enums import ExcitationKind
-from orchard_fem.dynamics.excitation import build_frequency_excitation_load
 from orchard_fem.dynamics.frequency_response import (
     FrequencyResponsePoint,
     FrequencyResponseResult,
@@ -112,6 +111,39 @@ def build_embedded_rayleigh_damping_matrix(
     )
     damping_matrix.assemble()
     return damping_matrix
+
+
+def _remove_fruit_mass_proportional_damping(
+    damping_matrix: Any,
+    fruit_dofs: dict[str, int] | None,
+    fruits: Any,
+    *,
+    alpha: float,
+) -> None:
+    """Undo the structural mass-proportional Rayleigh damping (``α·m``) on each
+    fruit point mass, in place.
+
+    The paper ζ(f) law is calibrated to the **woody structure**, and it enters as
+    ``C = α·M``. But ``M`` also carries the lumped fruit masses, so ``α·M`` damps
+    the fruit-pedicel swing with a spurious ζ = α/(2ω) (~14 % at 8 Hz) on top of
+    the fruit's own attachment damping. The fruit is not woody structure — its
+    swing must be damped ONLY by its pedicel/attachment term — so we subtract the
+    ``α·m`` the Rayleigh build put on each fruit DOF diagonal.
+    """
+    if not alpha or not fruit_dofs:
+        return
+    require_petsc()
+    from petsc4py import PETSc
+
+    mass_by_id = {f.fruit_id: float(f.mass) for f in fruits}
+    lo, hi = damping_matrix.getOwnershipRange()
+    for fruit_id, dof in fruit_dofs.items():
+        if lo <= dof < hi:
+            damping_matrix.setValue(
+                dof, dof, -float(alpha) * mass_by_id.get(fruit_id, 0.0),
+                addv=PETSc.InsertMode.ADD_VALUES,
+            )
+    damping_matrix.assemble()
 
 
 def _build_real_block_dynamic_matrix(
@@ -667,6 +699,9 @@ def solve_embedded_beam_frequency_response_experiment(
         experiment.operator_bundle.mass_matrix,
         alpha=alpha,
         beta=beta,
+    )
+    _remove_fruit_mass_proportional_damping(
+        damping_matrix, experiment.fruit_dofs, model.fruits, alpha=alpha,
     )
     if experiment.operator_bundle.attachment_damping_matrix is not None:
         _add_matrix_in_place(

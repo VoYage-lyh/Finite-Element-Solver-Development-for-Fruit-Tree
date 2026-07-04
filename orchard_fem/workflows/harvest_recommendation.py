@@ -540,16 +540,30 @@ def build_frequency_grid(
     resonance_hz: float,
     secondary_hz: list[float],
     band_hz: tuple[float, float],
+    *,
+    step_hz: float = 1.0,
 ) -> list[float]:
-    """Primary ±2 Hz cluster + ±1 Hz around each secondary, band-guarded (e2e port)."""
-    grid: set[float] = {
-        max(0.5, resonance_hz - 2.0), max(0.5, resonance_hz - 1.0),
-        resonance_hz, resonance_hz + 1.0, resonance_hz + 2.0,
-    }
-    for f_sec in secondary_hz:
-        for df in (-1.0, 0.0, 1.0):
-            grid.add(max(0.5, f_sec + df))
-    return sorted(f for f in grid if band_hz[0] - 1.5 <= f <= band_hz[1] + 1.5)
+    """FULL feasible-band sweep at *step_hz* resolution, UNION the exact modal
+    peaks (primary + secondaries).
+
+    Every branch has its OWN local resonance spread across the band, and driving
+    any clamp at a given frequency detaches whichever branches resonate there.
+    The old grid clustered ±1–2 Hz around one clamp's two subtree modes, which
+    undersampled the band and left most branches unharvested (single-mode ≈0.44
+    branch coverage vs. full-band sweep ≈0.81 on tree_3). So the grid must span
+    the whole feasible band; the modal peaks are added on top for precision.
+    """
+    lo = max(0.5, float(band_hz[0]))
+    hi = float(band_hz[1])
+    grid: set[float] = set()
+    steps = max(int(round((hi - lo) / max(step_hz, 1e-6))), 0)
+    for i in range(steps + 1):
+        grid.add(round(lo + i * step_hz, 3))
+    grid.add(round(hi, 3))
+    for f_mode in (resonance_hz, *secondary_hz):
+        if band_hz[0] - 1.5 <= f_mode <= band_hz[1] + 1.5:
+            grid.add(round(max(0.5, float(f_mode)), 3))
+    return sorted(grid)
 
 
 # --------------------------------------------------------------------------- #
@@ -842,9 +856,13 @@ def recommend_harvest_parameters(
             # evaluated.
             local_fs = global_prominent_frequencies(modes, feasible_band, opt.local_modes_per_clamp)
         clamp_local_mode[clamp_label] = local_fs[0] if local_fs else None
+        # Every clamp sweeps the WHOLE feasible band (branches resonate all over
+        # it); the local modes only sharpen precision. Even a clamp with no in-band
+        # mode still gets the full sweep so it is evaluated.
+        peak = local_fs[0] if local_fs else 0.5 * (feasible_band[0] + feasible_band[1])
         clamp_freq[clamp_label] = build_frequency_grid(
-            local_fs[0], local_fs[1:], feasible_band,
-        ) if local_fs else []
+            peak, local_fs[1:], feasible_band,
+        )
 
     f_union = sorted({f for grid in clamp_freq.values() for f in grid})
     log(f"Per-clamp local-mode grids: {len(clamp_labels)} clamps, "
@@ -865,10 +883,12 @@ def recommend_harvest_parameters(
             "No rig-feasible (f, A) work points: every grid cell is outside the "
             "cylinder envelope. Relax the grids or re-clamp."
         )
-    theta = {
-        "E": float(model.materials[0].youngs_modulus),
-        "rho": float(model.materials[0].density),
-    }
+    # Empty θ keeps the model's real COMPOSITE section (pith core + xylem ring +
+    # phloem). A non-empty {"E":…} homogenises EVERY material to one value inside
+    # _apply_theta_to_model — the old θ=materials[0]=pith made the whole tree ~8×
+    # too soft (0.6 vs 4.7 GPa) and crushed detachment coverage to ~0. θ exists
+    # only for calibration overrides; the harvest pipeline must not set it.
+    theta: dict[str, float] = {}
     # Parallelise only the default FE backend (an injected evaluator may hold an
     # unpicklable closure → run it serially in-process).
     injected = evaluator_factory is not None

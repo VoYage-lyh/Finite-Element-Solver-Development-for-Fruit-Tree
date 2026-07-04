@@ -23,12 +23,17 @@ from __future__ import annotations
 import errno
 import glob
 import os
+import re
 import shutil
 import subprocess
 import time
 
 # Substrings that mark a USB-serial adapter row in ``usbipd list``.
 _SERIAL_HINTS = ("SERIAL", "CH340", "CH341", "CP210", "FTDI", "(COM")
+# A real usbip BUSID is ``bus-port`` (e.g. ``1-4``, ``2-1.3``). The ``Persisted:``
+# section instead lists a GUID whose first char is also a digit, so match the
+# busid shape explicitly to avoid handing a GUID to ``--busid``.
+_BUSID_RE = re.compile(r"^\d+-\d+(?:\.\d+)*$")
 # Open() errnos that mean "node exists but the device/usbip pipe is dead" — the
 # WSL2 'zombie' attachment (kernel ``-62`` timeouts) cured by a detach+re-attach.
 _STALE_ERRNOS = frozenset({errno.EIO, errno.ENXIO, errno.ENODEV})
@@ -123,17 +128,35 @@ def _find_serial_target(usbipd: str, busid: str | None) -> tuple[str | None, boo
     except Exception as exc:  # noqa: BLE001
         return None, False, f"Could not run usbipd list: {exc}"
 
+    in_persisted = False
+    persisted_serial = False
     for line in listing.splitlines():
         upper = line.upper()
-        if not (line[:1].isdigit() and any(h in upper for h in _SERIAL_HINTS)):
+        # Only the live "Connected:" section carries real busids; the trailing
+        # "Persisted:" section lists GUIDs (bound-but-unplugged) — a serial
+        # adapter that shows *only* there has fallen off the bus.
+        if upper.startswith("PERSISTED"):
+            in_persisted = True
             continue
-        bid = line.split()[0]
+        if in_persisted:
+            if any(h in upper for h in _SERIAL_HINTS):
+                persisted_serial = True
+            continue
+        tok = line.split()[0] if line.split() else ""
+        if not (_BUSID_RE.match(tok) and any(h in upper for h in _SERIAL_HINTS)):
+            continue
+        bid = tok
         if busid and bid != busid:
             continue
         if "NOT SHARED" in upper:
             return None, False, (f"USB serial {bid} is not shared — run once as admin on "
                                  f"Windows:  usbipd bind --busid {bid}")
         return bid, ("ATTACHED" in upper), None
+    if persisted_serial:
+        return None, False, ("USB-serial adapter is bound but not connected to the bus "
+                             "(it shows only under `usbipd list` → Persisted). It likely "
+                             "dropped out (WSL -62 / EMI) — unplug and re-plug the adapter "
+                             "or power-cycle it, then retry.")
     return None, False, "No USB-serial adapter found in `usbipd list` (check the cable)."
 
 

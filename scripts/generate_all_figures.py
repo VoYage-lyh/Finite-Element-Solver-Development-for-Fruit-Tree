@@ -17,6 +17,18 @@ figure type:
 * ``<out>/sequence/sequence_tree_<n>.{png,pdf}``— multi-clamp staged sequence
   (per-stage side-view tree response — replaces the dropped standalone response/)
 * ``<out>/summary/knees.{png,pdf}`` + ``summary_sequence_coverage.{png,pdf}``
+* ``<out>/verification/*`` — refreshed in the same run by orchestrating the
+  standalone verification scripts (Duffing, quadratic-damping, linear-vs-nonlinear,
+  measured-vs-simulation), so ONE call regenerates every figure in ``results/``.
+
+Cache / recompute:
+
+* no flag   → harvest figures render from ``cache/figures_<out>/`` (fast); the
+  verification scripts reuse their own caches. Every figure is still produced.
+* ``--force``→ recompute the harvest FE and clear the verification caches so
+  everything is regenerated from scratch.
+* ``--only-figures`` → strict: harvest-from-cache only, and the verification
+  scripts (which may run FE) are skipped.
 """
 from __future__ import annotations
 
@@ -183,6 +195,9 @@ class TreeResult:
     model: object = None
     theta: dict = field(default_factory=dict)
     label_map: dict = field(default_factory=dict)
+    # Human-readable excitation of the FRF-sweep figure (harvest working point),
+    # read back into the figure title — never hardcode the excitation there.
+    frf_excitation_note: str = ""
 
     @property
     def best(self) -> ClampResult:
@@ -193,27 +208,35 @@ class TreeResult:
 #  Per-tree workflow
 # ────────────────────────────────────────────────────────────────────────────
 def _coarse_frf_sweep(model, f_min: float, f_max: float, steps: int):
+    """FRF over [f_min, f_max] as INDEPENDENT single-frequency solves.
+
+    Each frequency gets its own solve (exactly like the harvest outcome solver).
+    The first-harmonic nonlinear solve is amplitude-dependent, and a single
+    multi-point sweep converges to ONE frequency-independent solution for it
+    (harmless for a small-signal linear FRF, but flat/wrong at harvest
+    amplitude). One fresh solve per frequency avoids that.
+    """
     from orchard_fem.fenicsx.frequency_response import (
         solve_embedded_beam_frequency_response_experiment,
     )
-    swept = replace(
-        model,
-        analysis=replace(
-            model.analysis,
-            frequency_start_hz=float(f_min),
-            frequency_end_hz=float(f_max),
-            frequency_steps=int(steps),
-        ),
-    )
-    exp = solve_embedded_beam_frequency_response_experiment(swept, polynomial_degree=2)
-    res = exp.result
-    freqs = np.array([p.frequency_hz for p in res.points])
-    name_to_idx = {n: i for i, n in enumerate(res.observation_names)}
-    tip_obs = [n for n in res.observation_names if n.endswith("_tip_ux")]
+    freqs = np.linspace(float(f_min), float(f_max), int(steps))
     mags = np.zeros_like(freqs)
-    for j, p in enumerate(res.points):
-        mags[j] = float(np.mean([p.observation_magnitudes[name_to_idx[n]]
-                                  for n in tip_obs]))
+    for j, f in enumerate(freqs):
+        one = replace(model, analysis=replace(
+            model.analysis,
+            frequency_start_hz=float(f),
+            frequency_end_hz=float(f) + 1.0e-6,
+            frequency_steps=1,
+        ))
+        exp = solve_embedded_beam_frequency_response_experiment(
+            one, polynomial_degree=2,
+        )
+        res = exp.result
+        point = res.points[0]
+        name_to_idx = {n: i for i, n in enumerate(res.observation_names)}
+        tip_obs = [n for n in res.observation_names if n.endswith("_tip_ux")]
+        mags[j] = float(np.mean([point.observation_magnitudes[name_to_idx[n]]
+                                 for n in tip_obs]))
     return freqs, mags
 
 
@@ -342,9 +365,6 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     # for the FRF curve and the per-fruit response map the figures need.
     fmodel = build_scheduling_model(model, opt)
 
-    print(f"[{label}] FRF sweep (figure) …")
-    freqs, mags = _coarse_frf_sweep(fmodel, 0.5, 30.0, 60)
-
     label_map = _build_hierarchical_label_map(model)
     clamps = [_clamp_result_from_rec(cr, label_map)
               for cr in result.clamps if cr.knee is not None]
@@ -353,15 +373,35 @@ def _evaluate_tree(model_path: Path, label: str) -> TreeResult:
     best_label = result.best.clamp_label
     best_idx = next((i for i, c in enumerate(clamps) if c.clamp_label == best_label), 0)
 
-    theta = {"E": float(model.materials[0].youngs_modulus),
-             "rho": float(model.materials[0].density)}
+    # Empty θ = real composite section; materials[0]=pith would homogenise the
+    # tree ~8× too soft in _apply_theta_to_model (see harvest pipeline note).
+    theta: dict = {}
     disp_model = replace(fmodel, excitation=replace(
         fmodel.excitation, kind=ExcitationKind.HARMONIC_DISPLACEMENT))
+
+    # FRF at the actual HARVEST working condition: displacement-driven at the
+    # recommended clamp + amplitude (same regime as the harvest sim), NOT a
+    # small-signal reference force. The figure title reads the note back so the
+    # excitation is never hardcoded.
+    from orchard_fem.calibration.fenicsx_bridge import _parse_clamp_label
+    b_id, b_s = _parse_clamp_label(best_label)
+    frf_A_mm = float(result.best.knee.amplitude_mm)
+    frf_model = replace(disp_model, excitation=replace(
+        disp_model.excitation,
+        target_branch_id=b_id,
+        target_s=b_s if b_s is not None else disp_model.excitation.target_s,
+        amplitude=frf_A_mm / 1000.0,
+    ))
+    frf_note = f"A = {frf_A_mm:g} mm at {clamps[best_idx].display_label}"
+    print(f"[{label}] FRF sweep (figure, {frf_note}) …")
+    freqs, mags = _coarse_frf_sweep(frf_model, 0.5, 30.0, 60)
+
     return TreeResult(
         label=label, n_fruits=len(fmodel.fruits), freqs=freqs, mags=mags,
         f_resonance=float(result.resonance_hz), clamps=clamps, best_idx=best_idx,
         amplitude_grid_mm=list(result.amplitude_grid_mm),
         model=disp_model, theta=theta, label_map=label_map,
+        frf_excitation_note=frf_note,
     )
 
 def _load_or_evaluate(model_path: Path, label: str, *,
@@ -388,6 +428,53 @@ def _load_or_evaluate(model_path: Path, label: str, *,
     size_kb = cache_file.stat().st_size / 1024.0
     print(f"[{label}] cached → {cache_file.relative_to(REPO)} ({size_kb:.0f} KB)")
     return result
+
+
+def _run_verification_figures(repo: Path, *, force: bool) -> None:
+    """Refresh results/verification/ in the SAME run, so one generate_all_figures
+    call produces every figure in results/.
+
+    Each verification figure stays its own independently runnable script; here we
+    just orchestrate them as subprocesses (from the repo root). ``--force`` clears
+    their FE caches first so they recompute; otherwise they reuse whatever cache
+    they have. The measured-vs-simulation overlay has a data-processing
+    prerequisite and is best-effort — a failure there warns but never aborts.
+    """
+    import shutil
+    import subprocess
+
+    if force:
+        for cache in (repo / "cache" / "hammer_test",):
+            if cache.exists():
+                shutil.rmtree(cache)
+
+    def _run(name: str, argv: list[str], *, required: bool = True) -> bool:
+        print(f"\n[verification] {name} …", flush=True)
+        rc = subprocess.run([sys.executable, *argv], cwd=repo).returncode
+        if rc != 0:
+            mark = "✗" if required else "⚠"
+            tail = "" if required else " — skipping its figure(s)."
+            print(f"[verification] {mark} {name} failed (exit {rc}){tail}")
+        return rc == 0
+
+    # Self-contained (need only the tree JSONs) — always produced.
+    _run("Duffing SDOF describing function",
+         ["scripts/paper/verify_duffing_describing_function.py"])
+    _run("Quadratic-damping suppression",
+         ["scripts/paper/verify_quadratic_damping_effect.py"])
+    _run("Linear vs nonlinear FRF shift",
+         ["scripts/paper/compare_linear_vs_nonlinear.py"])
+
+    # Measured-vs-simulation: needs the processed hammer FRF (produced here) plus
+    # the harvest cache written by the pipeline above. Best-effort.
+    if _run("Hammer-test processing",
+            ["scripts/validation/process_hammer_test.py",
+             "--prefix", "trees/tree1_p1",
+             "--out-dir", "results/hammer_test/tree1_p1"],
+            required=False):
+        _run("Measured vs simulation overlay",
+             ["scripts/validation/compare_measured_vs_sim.py", "--tree", "1"],
+             required=False)
 
 
 def main() -> int:
@@ -455,7 +542,7 @@ def main() -> int:
     out_sequence.mkdir(parents=True, exist_ok=True)
     results_with_stages: list[tuple[TreeResult, list[dict]]] = []
     for n, result in zip((1, 2, 3, 4, 5), results):
-        stages = _greedy_sequence(result, target=0.95, max_stages=10)
+        stages = _greedy_sequence(result, target=0.95, max_stages=None)
         results_with_stages.append((result, stages))
         _save_sequence_panel(
             result, stages,
@@ -477,6 +564,13 @@ def main() -> int:
               f"{results_label}/frf/frf_all_trees.{{png,pdf}} + "
               f"{results_label}/summary/summary_knees.{{png,pdf}} + "
               f"{results_label}/summary/summary_sequence_coverage.{{png,pdf}}")
+
+    # results/verification/ — same run produces every figure in results/.
+    if args.only_figures:
+        print("\n[verification] skipped (--only-figures runs no FE; the aux "
+              "scripts may). Run without --only-figures to refresh verification/.")
+    else:
+        _run_verification_figures(REPO, force=args.force)
 
     _print_recommendation_table(results)
     _print_sequence_table(results_with_stages)
@@ -579,7 +673,7 @@ def _compute_fruit_outcomes_at_best(result: TreeResult) -> list[dict]:
 
 
 def _greedy_sequence(
-    result: TreeResult, *, target: float = 0.95, max_stages: int = 10,
+    result: TreeResult, *, target: float = 0.95, max_stages: int | None = None,
 ) -> list[dict]:
     """Multi-clamp staged sequence via the package scheduler (replaces the old
     single-clamp greedy). Builds a branch-outcome grid on the top candidate
@@ -595,10 +689,13 @@ def _greedy_sequence(
     # subset of options.amplitude_grid_mm), so the schedule scans identical (f, A)
     # cells to the Pareto. Fall back for pre-field caches.
     a_grid = list(result.amplitude_grid_mm) or list(_AMPLITUDE_GRID_MM)
-    # Best-covering clamps across subtrees so later stages can reach branches the
-    # first grip could not excite. The shared builder (used by the console too)
-    # runs each clamp on its own Pareto-front frequencies → identical schedules.
-    cand = sorted(result.clamps, key=lambda c: c.knee.detachment_coverage, reverse=True)[:6]
+    # ALL feasible clamps (not a top-N cut): every extra grip reaches branches the
+    # others cannot, so more clamps = more branches covered. The greedy scheduler
+    # picks the order; unused clamps just cost their grid solve.
+    cand = sorted(
+        (c for c in result.clamps if c.knee is not None),
+        key=lambda c: c.knee.detachment_coverage, reverse=True,
+    )
     clamp_freqs = {
         c.clamp_label: sorted(float(x) for x in c.front.frequencies_hz.tolist())
         for c in cand
@@ -630,119 +727,6 @@ def _branch_polyline_xz(branch, n: int = 30):
     xs = np.array([p.x for p in pts])
     zs = np.array([p.z for p in pts])
     return xs, zs
-
-
-def _draw_tree_response(
-    ax, model, outcomes, best_clamp_label, label_map,
-    *, show_branch_labels: bool = True, fontsize: float = 9,
-):
-    """Render a single side-view tree-response panel onto *ax*."""
-    from orchard_fem.calibration.fenicsx_bridge import _parse_clamp_label
-
-    activated = {o["branch_id"] for o in outcomes if o["detached"]}
-    fruit_branches = {o["branch_id"] for o in outcomes}
-
-    for branch in model.branches:
-        xs, zs = _branch_polyline_xz(branch)
-        if branch.branch_id == "trunk":
-            color, lw = "#444444", 2.6
-        elif branch.branch_id in activated:
-            color, lw = "#1B7837", 2.2
-        elif branch.branch_id in fruit_branches:
-            color, lw = "#E08214", 1.6
-        else:
-            color, lw = "#bbbbbb", 1.0
-        ax.plot(xs, zs, color=color, linewidth=lw,
-                solid_capstyle="round", zorder=2)
-
-        if show_branch_labels:
-            hier = label_map.get(branch.branch_id, "")
-            if hier == "T":
-                continue
-            if "." not in hier and hier:  # primary branches only
-                ax.text(xs[-1], zs[-1] + 0.04, f"B{hier}",
-                        color="#222222", fontsize=fontsize,
-                        ha="center", va="bottom", fontweight="bold")
-
-    for o in outcomes:
-        if o["detached"]:
-            ax.scatter([o["x"]], [o["z"]],
-                       color="#1B7837", s=55, marker="o",
-                       edgecolors="white", linewidths=0.8, zorder=4)
-        else:
-            ax.scatter([o["x"]], [o["z"]],
-                       color="#cccccc", s=26, marker="o",
-                       edgecolors="#888888", linewidths=0.5, zorder=3)
-
-    bid, s_clamp = _parse_clamp_label(best_clamp_label)
-    if s_clamp is None:
-        s_clamp = 0.5
-    branch = next(b for b in model.branches if b.branch_id == bid)
-    pos = branch.path.point_at(float(s_clamp))
-    ax.scatter([pos.x], [pos.z],
-               color="#B2182B", s=320, marker="*",
-               edgecolors="white", linewidths=1.4, zorder=10)
-
-
-def _save_tree_response_map(
-    result: TreeResult, outcomes: list[dict], stem: Path,
-) -> None:
-    import matplotlib.pyplot as plt
-    from matplotlib.lines import Line2D
-
-    fig, ax = plt.subplots(figsize=(7.6, 7.4))
-    _draw_tree_response(ax, result.model, outcomes,
-                        result.best.clamp_label, result.label_map)
-
-    n_total = len(outcomes)
-    n_det = sum(1 for o in outcomes if o["detached"])
-    fruit_branches = {o["branch_id"] for o in outcomes}
-    activated = {o["branch_id"] for o in outcomes if o["detached"]}
-
-    # Title: two lines, no percentages.
-    ax.set_title(
-        f"{result.label}\n"
-        f"{n_det}/{n_total} fruits detached  •  "
-        f"{len(activated)}/{len(fruit_branches)} branches activated",
-        fontsize=15,
-    )
-
-    handles = [
-        Line2D([], [], color="#1B7837", linewidth=2.2, label="Activated branch"),
-        Line2D([], [], color="#E08214", linewidth=1.6,
-               label="Not activated branch"),
-        Line2D([], [], marker="o", color="w", markerfacecolor="#1B7837",
-               markeredgecolor="white", markersize=10, label="Fruit detached"),
-        Line2D([], [], marker="o", color="w", markerfacecolor="#cccccc",
-               markeredgecolor="#888888", markersize=8, label="Fruit retained"),
-        Line2D([], [], marker="*", color="w", markerfacecolor="#B2182B",
-               markeredgecolor="white", markersize=15,
-               label=f"Clamp ({result.best.display_label})"),
-    ]
-    ax.legend(handles=handles, loc="lower right", fontsize=12, framealpha=0.95)
-    ax.set_xlabel("x [m]")
-    ax.set_ylabel("z [m]")
-    ax.set_aspect("equal")
-    ax.grid(True, alpha=0.3)
-
-    # Working-parameter box in the lower-left, matching the Pareto figure style.
-    k = result.best.knee
-    ax.text(
-        0.02, 0.02,
-        f"$f^* = {k.frequency_hz:.1f}$ Hz\n"
-        f"$A^* = {k.amplitude:.1f}$ mm\n"
-        f"clamp: {result.best.display_label}",
-        transform=ax.transAxes,
-        ha="left", va="bottom",
-        fontsize=13, color="#B2182B",
-        bbox=dict(boxstyle="round,pad=0.45", fc="white",
-                  ec="#B2182B", lw=0.9, alpha=0.95),
-        zorder=10,
-    )
-
-    fig.tight_layout(pad=0.4)
-    _save_both(fig, stem)
-    plt.close(fig)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -894,7 +878,8 @@ def _save_frf(result: TreeResult, stem: Path) -> None:
 
     ax.set_xlabel("Frequency [Hz]")
     ax.set_ylabel("Mean canopy-tip displacement [mm]")
-    ax.set_title(f"FRF sweep — {result.label} (F = 10 N at trunk mid)")
+    _note = getattr(result, "frf_excitation_note", "") or "harvest working point"
+    ax.set_title(f"FRF sweep — {result.label} ({_note})")
     ax.set_xlim(0.0, freqs.max())
     ax.grid(True, which="major", linewidth=0.6, color="#d0d0d0")
     ax.grid(True, which="minor", linewidth=0.4, color="#ececec")
@@ -1069,6 +1054,21 @@ def _save_sequence_panel(
     from matplotlib.lines import Line2D
 
     if not stages:
+        # Always emit a figure so a stale one never survives a rerun. An empty
+        # schedule is itself the result: no rig-feasible (f, A) detached a branch.
+        fig, ax = plt.subplots(figsize=(7.6, 7.4))
+        ax.axis("off")
+        ax.text(
+            0.5, 0.5,
+            f"{result.label}\n\nNo feasible harvest schedule\n"
+            "(0 stages — no rig-feasible (f, A) detached any branch\n"
+            "under the soft-pedicel + measured-damping model)",
+            ha="center", va="center", fontsize=15, color="#B2182B",
+            transform=ax.transAxes,
+        )
+        fig.tight_layout(pad=0.4)
+        _save_both(fig, stem)
+        plt.close(fig)
         return
 
     # Map every branch to the stage (0-indexed) that first activated it.
