@@ -78,7 +78,8 @@ def test_python_modal_assembler_matches_demo_dof_count() -> None:
     expected_branch_dofs = sum(
         6 * (max(branch.discretization.num_elements, 1) + 1) for branch in model.branches
     )
-    expected_total_dofs = expected_branch_dofs + len(model.fruits)
+    # Each fruit is a 2-DOF horizontal pendulum (x-swing + y-swing).
+    expected_total_dofs = expected_branch_dofs + 2 * len(model.fruits)
 
     assert len(assembled.dof_labels) == expected_total_dofs
     assert "trunk" in assembled.branch_nodes

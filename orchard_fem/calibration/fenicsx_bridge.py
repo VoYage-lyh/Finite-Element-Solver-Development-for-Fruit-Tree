@@ -257,6 +257,33 @@ def _parse_clamp_label(clamp_label: str) -> tuple[str, float | None]:
     return clamp_label.strip(), None
 
 
+def _radial_horizontal_direction(model, branch_id: str, s: float | None):
+    """Excitation direction ``ê = ẑ × t̂`` at the clamp: perpendicular to the
+    branch axis ``t̂`` (RADIAL to the cross-section, so the clamp can grip) and as
+    horizontal as possible (drives the horizontal fruit swing).
+
+    This is the Part-C innovation — excitation need not lie in the ground plane;
+    it follows each branch's skeleton orientation. For a near-vertical branch
+    ``ẑ × t̂ ≈ 0`` (the whole horizontal plane is already radial), so it falls back
+    to a global horizontal axis.
+    """
+    branch = next(b for b in model.branches if b.branch_id == branch_id)
+    s0 = 0.5 if s is None else float(s)
+    p0 = branch.path.point_at(max(0.0, s0 - 0.05))
+    p1 = branch.path.point_at(min(1.0, s0 + 0.05))
+    tx, ty, tz = (p1.x - p0.x), (p1.y - p0.y), (p1.z - p0.z)
+    tnorm = (tx * tx + ty * ty + tz * tz) ** 0.5
+    if tnorm < 1.0e-12:
+        return (1.0, 0.0, 0.0)
+    tx, ty, tz = tx / tnorm, ty / tnorm, tz / tnorm
+    # ẑ × t̂ = (-ty, tx, 0): horizontal and ⊥ to the branch axis.
+    ex, ey = -ty, tx
+    enorm = (ex * ex + ey * ey) ** 0.5
+    if enorm < 1.0e-6:  # near-vertical branch → any horizontal radial works
+        return (1.0, 0.0, 0.0)
+    return (ex / enorm, ey / enorm, 0.0)
+
+
 def _trunk_outer_radius(model, branch_id: str) -> float:
     """Return the outermost radius at the trunk's root section (s = 0)."""
     branch = next(b for b in model.branches if b.branch_id == branch_id)
@@ -323,19 +350,21 @@ def _augment_observations_for_evaluation(model, trunk_branch_id: str):
     from orchard_fem.topology import ObservationPoint
 
     extra: list[ObservationPoint] = []
-    fruit_keys: list[tuple[str, str]] = []   # (obs_id, fruit_id)
+    fruit_keys: list[tuple[str, str, str]] = []   # (obs_id_x, obs_id_y, fruit_id)
     for fruit in model.fruits:
-        oid = f"__pareto_fruit_{fruit.fruit_id}"
-        # Fruit augmentation produces one scalar DOF (the attachment-direction
-        # response). Only one component slot is needed.
+        # Fruit is a 2-DOF horizontal pendulum: observe BOTH swing axes (x, y);
+        # the detachment criterion combines them into |u_swing| = √(ux²+uy²).
+        oid_x = f"__pareto_fruit_{fruit.fruit_id}_x"
+        oid_y = f"__pareto_fruit_{fruit.fruit_id}_y"
         extra.append(ObservationPoint(
-            observation_id=oid,
-            target_type="fruit",
-            target_id=fruit.fruit_id,
-            target_node="tip",
-            target_components=[fruit.target_component],
+            observation_id=oid_x, target_type="fruit", target_id=fruit.fruit_id,
+            target_node="tip", target_components=["ux"],
         ))
-        fruit_keys.append((oid, fruit.fruit_id))
+        extra.append(ObservationPoint(
+            observation_id=oid_y, target_type="fruit", target_id=fruit.fruit_id,
+            target_node="tip", target_components=["uy"],
+        ))
+        fruit_keys.append((oid_x, oid_y, fruit.fruit_id))
 
     # Trunk rotation at root and mid. Use named nodes because the response
     # mapping resolver ignores target_s on branch observations.
@@ -455,7 +484,7 @@ def build_fenicsx_pareto_evaluator(
         # 1. θ → model
         cloned = _apply_theta_to_model(model, params)
 
-        # 2. Reroute excitation to the candidate clamp.
+        # 2. Reroute excitation to the candidate clamp (radial to the branch).
         branch_id, target_s = _parse_clamp_label(clamp_label)
         new_exc = replace(
             cloned.excitation,
@@ -463,6 +492,7 @@ def build_fenicsx_pareto_evaluator(
             target_s=target_s if target_s is not None else cloned.excitation.target_s,
             amplitude=float(amplitude) * A_scale,
             driving_frequency_hz=float(frequency_hz),
+            target_direction=_radial_horizontal_direction(cloned, branch_id, target_s),
         )
         cloned = replace(cloned, excitation=new_exc)
 
@@ -504,14 +534,16 @@ def build_fenicsx_pareto_evaluator(
         cplx = point.observation_complex
         if cplx is None:
             cplx = tuple(complex(m, 0.0) for m in point.observation_magnitudes)
-        for obs_id, fruit_id in fruit_keys:
+        for obs_id_x, obs_id_y, fruit_id in fruit_keys:
             fruit = fruit_lookup.get(fruit_id)
             if fruit is None or fruit.mass <= 0.0 or fruit.stiffness <= 0.0:
                 continue
-            idx = name_to_idx.get(obs_id)
-            if idx is None:
+            idx_x = name_to_idx.get(obs_id_x)
+            idx_y = name_to_idx.get(obs_id_y)
+            if idx_x is None or idx_y is None:
                 continue
-            u_mag = float(abs(cplx[idx]))
+            # Horizontal swing magnitude |u_swing| = √(|ux|² + |uy|²).
+            u_mag = float((abs(cplx[idx_x]) ** 2 + abs(cplx[idx_y]) ** 2) ** 0.5)
             a_fruit = omega * omega * u_mag                  # m/s²
             inertia = fruit.mass * a_fruit                   # N
             detach_force = (
@@ -622,6 +654,10 @@ def build_outcome_solver(
             target_s=target_s if target_s is not None else cloned.excitation.target_s,
             amplitude=float(amplitude) * A_scale,
             driving_frequency_hz=float(frequency_hz),
+            # Part C: excite RADIAL to the branch (⊥ skeleton line), horizontal to
+            # drive the fruit swing — the clamp grips radially and need not be
+            # ground-parallel.
+            target_direction=_radial_horizontal_direction(cloned, branch_id, target_s),
         ))
         cloned = replace(cloned, analysis=replace(
             cloned.analysis,
@@ -651,16 +687,18 @@ def build_outcome_solver(
         n_detached = 0
         n_total = 0
         branches_with_fruit: set = set()
-        for obs_id, fruit_id in fruit_keys:
+        for obs_id_x, obs_id_y, fruit_id in fruit_keys:
             fruit = fruit_lookup.get(fruit_id)
             if fruit is None or fruit.mass <= 0.0 or fruit.stiffness <= 0.0:
                 continue
-            idx = name_to_idx.get(obs_id)
-            if idx is None:
+            idx_x = name_to_idx.get(obs_id_x)
+            idx_y = name_to_idx.get(obs_id_y)
+            if idx_x is None or idx_y is None:
                 continue
             n_total += 1
             branches_with_fruit.add(fruit.branch_id)
-            u_mag = float(abs(cplx[idx]))
+            # Horizontal swing magnitude |u_swing| = √(|ux|² + |uy|²).
+            u_mag = float((abs(cplx[idx_x]) ** 2 + abs(cplx[idx_y]) ** 2) ** 0.5)
             inertia = fruit.mass * omega * omega * u_mag
             detach_force = (
                 fruit.detach_force

@@ -13,7 +13,6 @@ from orchard_fem.fenicsx.beam_forms import EmbeddedBeamCellData
 from orchard_fem.fenicsx.branch_dofs import BranchNodeDofMap, resolve_branch_node_dofs
 from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
 from orchard_fem.fenicsx.fields import EmbeddedBeamFunctionSpaceBundle
-from orchard_fem.fenicsx.fruits import fruit_component_index
 from orchard_fem.fenicsx.mpc import apply_mpc_to_vector_in_place
 from orchard_fem.fenicsx.operator_bundle import EmbeddedBeamOperatorBundle
 from orchard_fem.fenicsx.petsc_ops import (
@@ -84,16 +83,19 @@ def _build_gravity_load_vector(
         0.0,
     )
     for fruit in model.fruits:
-        fruit_dof = operator_bundle.fruit_dofs.get(fruit.fruit_id)
-        if fruit_dof is None:
+        swing = operator_bundle.fruit_dofs.get(fruit.fruit_id)
+        if swing is None:
             continue
-        component_index = fruit_component_index(fruit)
-        accumulate_owned_vector_value(
-            load_vector,
-            owned_rows,
-            fruit_dof,
-            max(fruit.mass, 0.0) * gravity_scale * gravity_components[component_index],
-        )
+        # Fruit = 2-DOF horizontal pendulum (x-, y-swing). Gravity is vertical, so
+        # the horizontal swing DOFs carry only the (near-zero) horizontal gravity
+        # component; the mg/L pendulum restoring is already in the fruit stiffness.
+        for fruit_dof, component_index in zip(swing, (0, 1)):
+            accumulate_owned_vector_value(
+                load_vector,
+                owned_rows,
+                fruit_dof,
+                max(fruit.mass, 0.0) * gravity_scale * gravity_components[component_index],
+            )
 
     load_vector.assemblyBegin()
     load_vector.assemblyEnd()

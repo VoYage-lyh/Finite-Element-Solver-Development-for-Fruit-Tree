@@ -137,12 +137,14 @@ def _remove_fruit_mass_proportional_damping(
 
     mass_by_id = {f.fruit_id: float(f.mass) for f in fruits}
     lo, hi = damping_matrix.getOwnershipRange()
-    for fruit_id, dof in fruit_dofs.items():
-        if lo <= dof < hi:
-            damping_matrix.setValue(
-                dof, dof, -float(alpha) * mass_by_id.get(fruit_id, 0.0),
-                addv=PETSc.InsertMode.ADD_VALUES,
-            )
+    for fruit_id, dofs in fruit_dofs.items():
+        m = mass_by_id.get(fruit_id, 0.0)
+        for dof in dofs:  # 2-DOF horizontal swing (x, y)
+            if lo <= dof < hi:
+                damping_matrix.setValue(
+                    dof, dof, -float(alpha) * m,
+                    addv=PETSc.InsertMode.ADD_VALUES,
+                )
     damping_matrix.assemble()
 
 
@@ -200,6 +202,7 @@ def _build_frequency_rhs_vector(
     damping_matrix: Any,
     excitation,
     omega: float,
+    excitation_direction_dofs: list[tuple[int, float]] | None = None,
 ) -> Any:
     """RHS for the real-block frequency system.
 
@@ -219,8 +222,16 @@ def _build_frequency_rhs_vector(
         phase = excitation.phase_degrees * (pi / 180.0)
         load_real = excitation.amplitude * cos(phase)
         load_imag = excitation.amplitude * sin(phase)
-        rhs_vector.setValue(int(excitation_dof), float(load_real))
-        rhs_vector.setValue(int(size + excitation_dof), float(load_imag))
+        # Directional force spreads over the node's DOFs by the unit-direction
+        # weights; otherwise the whole load sits on the single excitation DOF.
+        targets = (
+            excitation_direction_dofs
+            if excitation_direction_dofs is not None
+            else [(excitation_dof, 1.0)]
+        )
+        for dof, weight in targets:
+            rhs_vector.setValue(int(dof), float(load_real * weight))
+            rhs_vector.setValue(int(size + dof), float(load_imag * weight))
 
     rhs_vector.assemblyBegin()
     rhs_vector.assemblyEnd()
@@ -236,6 +247,7 @@ def _pin_excitation_dof_via_penalty(
     excitation,
     omega: float,
     penalty: float = _DISPLACEMENT_PENALTY,
+    excitation_direction_dofs: list[tuple[int, float]] | None = None,
 ) -> None:
     """Impose ``u_exc = U·e^{jφ}`` for displacement/acceleration excitation.
 
@@ -272,22 +284,28 @@ def _pin_excitation_dof_via_penalty(
     u_real = u_amp * cos(phase)
     u_imag = u_amp * sin(phase)
 
-    block_matrix.setValue(
-        int(excitation_dof), int(excitation_dof),
-        float(penalty), addv=PETSc.InsertMode.ADD_VALUES,
+    # Single-component excitation → one DOF at weight 1; directional excitation →
+    # the node's translational DOFs pinned to u·(direction weight), so the node
+    # moves as u·ê (a general 3-D / radial direction).
+    targets = (
+        excitation_direction_dofs
+        if excitation_direction_dofs is not None
+        else [(excitation_dof, 1.0)]
     )
-    block_matrix.setValue(
-        int(system_size + excitation_dof),
-        int(system_size + excitation_dof),
-        float(penalty), addv=PETSc.InsertMode.ADD_VALUES,
-    )
+    for dof, _weight in targets:
+        block_matrix.setValue(
+            int(dof), int(dof), float(penalty), addv=PETSc.InsertMode.ADD_VALUES,
+        )
+        block_matrix.setValue(
+            int(system_size + dof), int(system_size + dof),
+            float(penalty), addv=PETSc.InsertMode.ADD_VALUES,
+        )
     block_matrix.assemblyBegin()
     block_matrix.assemblyEnd()
 
-    rhs_vector.setValue(int(excitation_dof), float(penalty * u_real))
-    rhs_vector.setValue(
-        int(system_size + excitation_dof), float(penalty * u_imag),
-    )
+    for dof, weight in targets:
+        rhs_vector.setValue(int(dof), float(penalty * u_real * weight))
+        rhs_vector.setValue(int(system_size + dof), float(penalty * u_imag * weight))
     rhs_vector.assemblyBegin()
     rhs_vector.assemblyEnd()
 
@@ -472,6 +490,7 @@ def _solve_harmonic_balance_frequency_point(
     omega: float,
     initial_solution: Any | None,
     mpc: Any | None = None,
+    excitation_direction_dofs: list[tuple[int, float]] | None = None,
 ) -> Any:
     require_petsc()
 
@@ -493,6 +512,7 @@ def _solve_harmonic_balance_frequency_point(
         damping_matrix=damping_matrix,
         excitation=excitation,
         omega=omega,
+        excitation_direction_dofs=excitation_direction_dofs,
     )
     _pin_excitation_dof_via_penalty(
         block_matrix,
@@ -501,6 +521,7 @@ def _solve_harmonic_balance_frequency_point(
         system_size=stiffness_matrix.getSize()[0],
         excitation=excitation,
         omega=omega,
+        excitation_direction_dofs=excitation_direction_dofs,
     )
     apply_mpc_to_real_block_vector_in_place(
         mpc,
@@ -727,6 +748,7 @@ def solve_embedded_beam_frequency_response_experiment(
                 omega=2.0 * pi * frequency_hz,
                 initial_solution=initial_solution,
                 mpc=experiment.operator_bundle.mpc,
+                excitation_direction_dofs=response_mapping.excitation_direction_dofs,
             ),
             _solution_relative_change,
         )
@@ -761,6 +783,7 @@ def solve_embedded_beam_frequency_response_experiment(
                 damping_matrix=damping_matrix,
                 excitation=model.excitation,
                 omega=omega,
+                excitation_direction_dofs=response_mapping.excitation_direction_dofs,
             )
             _pin_excitation_dof_via_penalty(
                 block_matrix,
@@ -769,6 +792,7 @@ def solve_embedded_beam_frequency_response_experiment(
                 system_size=system_size,
                 excitation=model.excitation,
                 omega=omega,
+                excitation_direction_dofs=response_mapping.excitation_direction_dofs,
             )
             apply_mpc_to_real_block_vector_in_place(
                 experiment.operator_bundle.mpc,

@@ -14,7 +14,6 @@ from orchard_fem.discretization.dofs import DOFManager, branch_dof, resolve_node
 from orchard_fem.discretization.matrix_ops import add_pair_penalty, scatter, zero_matrix
 from orchard_fem.discretization.types import (
     COMPONENT_LABELS,
-    COMPONENT_INDEX,
     CONSTRAINT_PENALTY,
     BranchElementState,
     BranchNodeState,
@@ -109,7 +108,7 @@ class OrchardSystemAssembler:
         dof_manager = DOFManager()
         branch_nodes: dict[str, list[BranchNodeState]] = {}
         branch_elements: dict[str, list[BranchElementState]] = {}
-        fruit_dofs: dict[str, int] = {}
+        fruit_dofs: dict[str, tuple[int, int]] = {}
         nonlinear_links: list[NonlinearLinkDefinition] = []
 
         for branch in model.branches:
@@ -133,7 +132,11 @@ class OrchardSystemAssembler:
             branch_nodes[branch.branch_id] = nodes
 
         for fruit in model.fruits:
-            fruit_dofs[fruit.fruit_id] = dof_manager.register_label(f"fruit:{fruit.fruit_id}")
+            # 2-DOF horizontal pendulum: x-swing + y-swing.
+            fruit_dofs[fruit.fruit_id] = (
+                dof_manager.register_label(f"fruit:{fruit.fruit_id}:x"),
+                dof_manager.register_label(f"fruit:{fruit.fruit_id}:y"),
+            )
 
         stiffness = zero_matrix(dof_manager.size())
         mass = zero_matrix(dof_manager.size())
@@ -314,47 +317,32 @@ class OrchardSystemAssembler:
                 )
 
         for fruit in model.fruits:
-            fruit_dof = fruit_dofs[fruit.fruit_id]
             nodes = branch_nodes[fruit.branch_id]
             nearest_node = min(nodes, key=lambda node: fabs(node.station - fruit.location_s))
-            try:
-                component_index = COMPONENT_INDEX[fruit.target_component]
-            except KeyError as exc:
-                raise ValueError(
-                    f"Unsupported fruit target_component '{fruit.target_component}' "
-                    f"for fruit '{fruit.fruit_id}'"
-                ) from exc
-            if component_index >= 3:
-                raise ValueError(
-                    f"Fruit '{fruit.fruit_id}' must target a translational component "
-                    "(ux, uy, or uz)."
-                )
-            coupled_branch_dof = nearest_node.dofs[component_index]
-
-            mass[fruit_dof][fruit_dof] += max(fruit.mass, 1.0e-9)
-            if apply_gravity_prestress:
-                gravity_components = (
-                    gravity_direction.x,
-                    gravity_direction.y,
-                    gravity_direction.z,
-                )
-                gravity_load[fruit_dof] += (
-                    max(fruit.mass, 0.0)
-                    * gravity_scale
-                    * gravity_components[component_index]
-                )
-
             stiffness_value = max(fruit.stiffness, 1.0e-6)
-            stiffness[fruit_dof][fruit_dof] += stiffness_value
-            stiffness[fruit_dof][coupled_branch_dof] -= stiffness_value
-            stiffness[coupled_branch_dof][fruit_dof] -= stiffness_value
-            stiffness[coupled_branch_dof][coupled_branch_dof] += stiffness_value
-
             damping_value = max(fruit.damping, 0.0)
-            damping[fruit_dof][fruit_dof] += damping_value
-            damping[fruit_dof][coupled_branch_dof] -= damping_value
-            damping[coupled_branch_dof][fruit_dof] -= damping_value
-            damping[coupled_branch_dof][coupled_branch_dof] += damping_value
+            gravity_components = (
+                gravity_direction.x, gravity_direction.y, gravity_direction.z,
+            )
+            # 2-DOF horizontal pendulum: x-swing ↔ branch ux (0), y-swing ↔ uy (1).
+            for fruit_dof, component_index in zip(fruit_dofs[fruit.fruit_id], (0, 1)):
+                coupled_branch_dof = nearest_node.dofs[component_index]
+                mass[fruit_dof][fruit_dof] += max(fruit.mass, 1.0e-9)
+                if apply_gravity_prestress:
+                    gravity_load[fruit_dof] += (
+                        max(fruit.mass, 0.0)
+                        * gravity_scale
+                        * gravity_components[component_index]
+                    )
+                stiffness[fruit_dof][fruit_dof] += stiffness_value
+                stiffness[fruit_dof][coupled_branch_dof] -= stiffness_value
+                stiffness[coupled_branch_dof][fruit_dof] -= stiffness_value
+                stiffness[coupled_branch_dof][coupled_branch_dof] += stiffness_value
+
+                damping[fruit_dof][fruit_dof] += damping_value
+                damping[fruit_dof][coupled_branch_dof] -= damping_value
+                damping[coupled_branch_dof][fruit_dof] -= damping_value
+                damping[coupled_branch_dof][coupled_branch_dof] += damping_value
 
         if apply_gravity_prestress:
             from orchard_fem.solver_core import compute_gravity_axial_forces
@@ -430,8 +418,11 @@ class OrchardSystemAssembler:
                             )
                         )
             elif observation.target_type == "fruit":
+                # 2-DOF horizontal pendulum; component picks the axis (uy→y-swing).
+                swing = fruit_dofs[observation.target_id]
+                comp = (observation.target_components or ["ux"])[0]
                 observation_names.append(observation.observation_id)
-                observation_dofs.append(fruit_dofs[observation.target_id])
+                observation_dofs.append(swing[1] if comp == "uy" else swing[0])
             else:
                 raise ValueError(
                     f"Unsupported observation target type: {observation.target_type}"

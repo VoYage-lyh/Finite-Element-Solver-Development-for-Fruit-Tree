@@ -105,6 +105,12 @@ class HarmonicExcitation:
     target_component: str = "ux"
     driving_frequency_hz: float = 0.0
     target_s: float | None = None   # 0..1 normalized arc-length; overrides target_node when set
+    # Optional excitation DIRECTION (dx, dy, dz) in global coords; overrides the
+    # single translational ``target_component`` when set. Enables non-axis-aligned
+    # excitation — e.g. RADIAL to the branch cross-section (⊥ the skeleton line),
+    # breaking the "excite only in the horizontal plane" convention. Need not be
+    # normalized; the solver normalizes it.
+    target_direction: tuple[float, float, float] | None = None
 
 
 @dataclass(frozen=True)

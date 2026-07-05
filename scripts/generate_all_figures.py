@@ -1077,13 +1077,14 @@ def _save_sequence_panel(
         for b in stage["new_branches"]:
             branch_first_stage.setdefault(b, idx)
 
-    # Clamp position (same across all stages)
+    # Clamp position is PER STAGE — the scheduler may re-clamp (move the grip) or
+    # stay on one clamp and only change frequency. Resolve each stage's own clamp.
     from orchard_fem.calibration.fenicsx_bridge import _parse_clamp_label
-    bid, s_clamp = _parse_clamp_label(result.best.clamp_label)
-    if s_clamp is None:
-        s_clamp = 0.5
-    clamp_branch = next(b for b in result.model.branches if b.branch_id == bid)
-    clamp_pos = clamp_branch.path.point_at(float(s_clamp))
+
+    def _clamp_xz(clamp_label: str):
+        bid, s_clamp = _parse_clamp_label(clamp_label)
+        clamp_branch = next(b for b in result.model.branches if b.branch_id == bid)
+        return clamp_branch.path.point_at(0.5 if s_clamp is None else float(s_clamp))
 
     import math
     from matplotlib.gridspec import GridSpec
@@ -1175,6 +1176,7 @@ def _save_sequence_panel(
             ax.plot(xs, zs, color=color, linewidth=lw,
                     solid_capstyle="round", zorder=2)
 
+        clamp_pos = _clamp_xz(stage["clamp"])
         ax.scatter([clamp_pos.x], [clamp_pos.z],
                    color="#B2182B", s=260, marker="*",
                    edgecolors="white", linewidths=1.3, zorder=6)
@@ -1188,6 +1190,7 @@ def _save_sequence_panel(
 
         ax.text(
             0.02, 0.02,
+            f"clamp: {_pretty_clamp_label(stage['clamp'], result.label_map)}\n"
             f"$f = {stage['f_hz']:.1f}$ Hz\n"
             f"$A = {stage['A_mm']:.0f}$ mm\n"
             f"+{stage['n_new_branches']} branches\n"

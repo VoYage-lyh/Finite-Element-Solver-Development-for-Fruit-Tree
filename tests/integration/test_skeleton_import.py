@@ -94,7 +94,7 @@ def test_skeleton_import_outputs_loadable_polyline_model_with_default_sections(t
     assert model.fruits[0].target_component == "uz"
 
 
-def test_fruit_gravity_load_is_applied_to_target_component(tmp_path) -> None:
+def test_fruit_swing_dofs_get_no_vertical_static_gravity(tmp_path) -> None:
     pytest.importorskip("petsc4py")
 
     output_payload = convert_skeleton_payload_to_orchard_payload(_skeleton_payload())
@@ -103,9 +103,12 @@ def test_fruit_gravity_load_is_applied_to_target_component(tmp_path) -> None:
 
     model = load_orchard_model(str(model_path))
     assembled = OrchardSystemAssembler().assemble(model)
-    fruit_dof = assembled.fruit_dofs["fruit_tip"]
-
-    assert assembled.gravity_load[fruit_dof] == pytest.approx(-0.2 * 9.81)
+    # Fruit is a 2-DOF HORIZONTAL pendulum (x-swing, y-swing). Vertical gravity has
+    # no horizontal component, so it applies no static load to the swing DOFs — the
+    # mg/L pendulum restoring lives in the fruit stiffness, not a static load.
+    x_swing, y_swing = assembled.fruit_dofs["fruit_tip"]
+    assert assembled.gravity_load[x_swing] == pytest.approx(0.0)
+    assert assembled.gravity_load[y_swing] == pytest.approx(0.0)
 
 
 def test_linear_child_branch_shares_coincident_parent_node(tmp_path) -> None:

@@ -24,7 +24,7 @@ class EmbeddedBeamOperatorBundle:
     gravity_static_displacement: Any | None = None
     geometric_stiffness_matrix: Any | None = None
     prestress_axial_forces: dict[str, list[float]] = field(default_factory=dict)
-    fruit_dofs: dict[str, int] = field(default_factory=dict)
+    fruit_dofs: dict[str, tuple[int, int]] = field(default_factory=dict)
     nonlinear_links: list[NonlinearLinkDefinition] = field(default_factory=list)
     mpc: Any | None = None
     mpc_constrained_branch_ids: frozenset[str] = frozenset()
@@ -38,4 +38,4 @@ class EmbeddedBeamExperimentBundle:
     coefficient_functions: EmbeddedBeamCoefficientFunctions
     form_bundle: EmbeddedBeamFormBundle
     operator_bundle: EmbeddedBeamOperatorBundle
-    fruit_dofs: dict[str, int]
+    fruit_dofs: dict[str, tuple[int, int]]

@@ -19,6 +19,10 @@ class EmbeddedBeamResponseMapping:
     excitation_dof: int
     observation_names: list[str]
     observation_dofs: list[int]
+    # For DIRECTIONAL excitation (excitation.target_direction set): the node's
+    # translational DOFs with their unit-direction weights, [(dof, weight), …].
+    # ``None`` → single-component excitation on ``excitation_dof`` (default).
+    excitation_direction_dofs: list[tuple[int, float]] | None = None
 
 
 def _point_marker(point: tuple[float, float, float], atol: float):
@@ -163,17 +167,38 @@ def resolve_embedded_beam_response_mapping(
     model: OrchardModel,
     space_bundle: EmbeddedBeamFunctionSpaceBundle,
     *,
-    fruit_dofs: dict[str, int] | None = None,
+    fruit_dofs: dict[str, tuple[int, int]] | None = None,
     atol: float = 1.0e-8,
 ) -> EmbeddedBeamResponseMapping:
     excitation_branch = model.require_branch(model.excitation.target_branch_id)
     excitation_point = _target_point(excitation_branch, model.excitation.target_node)
-    excitation_dof = resolve_embedded_beam_component_dof(
-        space_bundle,
-        excitation_point,
-        model.excitation.target_component,
-        atol=atol,
-    )
+
+    excitation_direction_dofs: list[tuple[int, float]] | None = None
+    direction = model.excitation.target_direction
+    if direction is not None:
+        # DIRECTIONAL excitation: drive the node's ux/uy/uz translational DOFs
+        # weighted by the unit direction (⊥ the branch axis / any 3-D direction).
+        norm = (direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2) ** 0.5
+        if norm <= 1.0e-14:
+            raise ValueError("excitation.target_direction must be non-zero.")
+        excitation_direction_dofs = []
+        for component, weight in zip(("ux", "uy", "uz"), direction):
+            w = float(weight) / norm
+            if abs(w) < 1.0e-12:
+                continue
+            dof = resolve_embedded_beam_component_dof(
+                space_bundle, excitation_point, component, atol=atol,
+            )
+            excitation_direction_dofs.append((dof, w))
+        # The primary DOF (largest |weight|) reports the driven amplitude.
+        excitation_dof = max(excitation_direction_dofs, key=lambda dw: abs(dw[1]))[0]
+    else:
+        excitation_dof = resolve_embedded_beam_component_dof(
+            space_bundle,
+            excitation_point,
+            model.excitation.target_component,
+            atol=atol,
+        )
 
     observation_names: list[str] = []
     observation_dofs: list[int] = []
@@ -207,8 +232,12 @@ def resolve_embedded_beam_response_mapping(
                 raise NotImplementedError(
                     "The experimental FEniCSx branch cannot resolve fruit observations without fruit-DOF augmentation."
                 )
+            # Fruit is a 2-DOF horizontal pendulum (x-swing, y-swing). The
+            # observation component picks the axis: uy→y-swing, else x-swing.
+            swing = fruit_dofs[observation.target_id]
+            comp = (observation.target_components or ["ux"])[0]
             observation_names.append(observation.observation_id)
-            observation_dofs.append(fruit_dofs[observation.target_id])
+            observation_dofs.append(swing[1] if comp == "uy" else swing[0])
         else:
             raise NotImplementedError(
                 "The experimental FEniCSx branch currently supports only branch and fruit observations."
@@ -221,4 +250,5 @@ def resolve_embedded_beam_response_mapping(
         excitation_dof=excitation_dof,
         observation_names=observation_names,
         observation_dofs=observation_dofs,
+        excitation_direction_dofs=excitation_direction_dofs,
     )
