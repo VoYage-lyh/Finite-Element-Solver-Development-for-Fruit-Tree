@@ -208,6 +208,68 @@ def compute_harvest_schedule(
     )
 
 
+def _order_stages_grouped_by_level(
+    raw: list[tuple[str, float, float, Any]],
+    n_total: int,
+    dur: StageDurationModel,
+    limits: DS5L1Limits | None,
+    accel_ms: int,
+) -> list[HarvestStage]:
+    """Reorder the greedy clamp-blocks so NON-TRUNK (primary-branch) grips run
+    first and the trunk last, grouping by level.
+
+    The greedy picks re-clamps purely by "most new branches", which makes the
+    operator hop primary→trunk→primary — costly, since each re-clamp is a physical
+    reposition. Branch coverage is the UNION over stages, which is order-independent,
+    so we can safely regroup: all primary-branch clamps first (in their greedy
+    order), then the trunk. Coverage/new-branch attribution and indices are
+    recomputed for the new order, and stages that add no NEW branch (already
+    covered by an earlier block) are dropped.
+    """
+    if not raw:
+        return []
+
+    def _is_trunk(clamp_label: str) -> bool:
+        return clamp_label.split("@", 1)[0] == "trunk"
+
+    # Group consecutive same-clamp entries into blocks (greedy makes them contiguous).
+    blocks: list[tuple[str, list[tuple[float, float, Any]]]] = []
+    for clamp, f, a, info in raw:
+        if blocks and blocks[-1][0] == clamp:
+            blocks[-1][1].append((f, a, info))
+        else:
+            blocks.append((clamp, [(f, a, info)]))
+    ordered = ([b for b in blocks if not _is_trunk(b[0])]
+               + [b for b in blocks if _is_trunk(b[0])])
+
+    stages: list[HarvestStage] = []
+    activated: set[str] = set()
+    for clamp, cells in ordered:
+        for f, a, info in cells:
+            new = set(info.detached_branches) - activated
+            if not new:
+                continue  # already covered by an earlier block → drop
+            governing_ratio = min(info.branch_governing_ratio[b] for b in new)
+            plan = plan_harvest_execution(
+                frequency_hz=f,
+                clamp_peak_to_peak_mm=2.0 * a,
+                duration_s=dur.duration_s(f, governing_ratio),
+                limits=limits,
+                accel_ms=accel_ms,
+                excitation_label=clamp,
+            )
+            activated |= new
+            stages.append(HarvestStage(
+                index=len(stages) + 1,
+                plan=plan,
+                new_branches=tuple(sorted(new)),
+                cumulative_coverage=len(activated) / max(n_total, 1),
+                trunk_stress_pa=info.trunk_stress_pa,
+                n_detached_fruits=info.n_detached_fruits,
+            ))
+    return stages
+
+
 def compute_multiclamp_harvest_schedule(
     grids: dict[str, BranchOutcomeGrid],
     *,
@@ -278,8 +340,8 @@ def compute_multiclamp_harvest_schedule(
     current = max(grids, key=lambda c: len(_reach(c)))
 
     activated: set[str] = set()
-    stages: list[HarvestStage] = []
-    for stage_index in range(1, max_stages + 1):
+    raw: list[tuple[str, float, float, Any]] = []  # (clamp, f, a, outcome)
+    for _stage_index in range(1, max_stages + 1):
         best = _best_cell(current, activated)
         if best is None:
             # Current grip exhausted its reachable branches → re-clamp to the one
@@ -293,29 +355,12 @@ def compute_multiclamp_harvest_schedule(
             )
 
         f, a, new, info = best
-        governing_ratio = min(info.branch_governing_ratio[b] for b in new)
-        duration_s = dur.duration_s(f, governing_ratio)
-        plan = plan_harvest_execution(
-            frequency_hz=f,
-            clamp_peak_to_peak_mm=2.0 * a,
-            duration_s=duration_s,
-            limits=limits,
-            accel_ms=accel_ms,
-            excitation_label=current,
-        )
         activated |= new
-        coverage = len(activated) / n_total
-        stages.append(HarvestStage(
-            index=stage_index,
-            plan=plan,
-            new_branches=tuple(sorted(new)),
-            cumulative_coverage=coverage,
-            trunk_stress_pa=info.trunk_stress_pa,
-            n_detached_fruits=info.n_detached_fruits,
-        ))
-        if coverage >= target_coverage:
+        raw.append((current, f, a, info))
+        if len(activated) / n_total >= target_coverage:
             break
 
+    stages = _order_stages_grouped_by_level(raw, n_total, dur, limits, accel_ms)
     return HarvestSchedule(
         stages=tuple(stages),
         clamp_label=(stages[0].plan.excitation_label if stages else ""),
