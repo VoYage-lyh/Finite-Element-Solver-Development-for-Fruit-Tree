@@ -245,10 +245,16 @@ def _order_stages_grouped_by_level(
     stages: list[HarvestStage] = []
     activated: set[str] = set()
     for clamp, cells in ordered:
+        # Within a clamp, cover with the FEWEST cells: take the highest-coverage
+        # (usually highest-amplitude) cell first, so a near-duplicate lower cell
+        # whose branches are a subset (e.g. 5.0 Hz/15 mm ⊂ 5.1 Hz/20 mm) drops out
+        # as redundant instead of becoming a wasteful extra stage. Amplitude
+        # increases detachment monotonically, so the big cell dominates the small.
+        cells = sorted(cells, key=lambda c: len(c[2].detached_branches), reverse=True)
         for f, a, info in cells:
             new = set(info.detached_branches) - activated
             if not new:
-                continue  # already covered by an earlier block → drop
+                continue  # already covered by an earlier cell/block → drop
             governing_ratio = min(info.branch_governing_ratio[b] for b in new)
             plan = plan_harvest_execution(
                 frequency_hz=f,
