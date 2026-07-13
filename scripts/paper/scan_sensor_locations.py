@@ -16,8 +16,8 @@ sub-second per sensor regardless of how many candidates we scan.
 Usage::
 
     python scripts/scan_sensor_locations.py \\
-        --sensor sensor1=results/calibration/fixed_freq_segments_sensor1.csv \\
-        --sensor sensor2=results/calibration/fixed_freq_segments_sensor2.csv \\
+        --sensor sensor1=workspace/outputs/calibration/fixed_freq_segments_sensor1.csv \\
+        --sensor sensor2=workspace/outputs/calibration/fixed_freq_segments_sensor2.csv \\
         --top 8
 
 The shaker amplitude F is held fixed at ``--F`` (default 210 N — the
@@ -42,6 +42,9 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from orchard_fem.io.loaders.orchard import load_orchard_model
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
+
+WORKSPACE = workspace_paths()
 
 
 def _override_excitation(model, *, branch_id, node, comp, amplitude):
@@ -117,7 +120,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--calibration-cache",
-        default="cache/calibration/tree_1_left_leader_root_ux_fit.npz",
+        default=str(WORKSPACE.cache / "calibration" / "tree_1_left_leader_root_ux_fit.npz"),
     )
     parser.add_argument("--input-branch", default="left_leader")
     parser.add_argument("--input-node", default="root",
@@ -170,7 +173,7 @@ def main() -> int:
           f"({all_freqs.min():.1f}–{all_freqs.max():.1f} Hz)")
 
     # ------------------------------ load model, override excitation + β
-    model = load_orchard_model(str(REPO / "trees" / f"tree_{args.tree}.json"))
+    model = load_orchard_model(str(example_trees_dir() / f"tree_{args.tree}.json"))
     model = _override_excitation(
         model, branch_id=args.input_branch, node=args.input_node,
         comp=args.input_comp, amplitude=args.F,
@@ -247,7 +250,7 @@ def main() -> int:
               f"log-RMSE={best[f'{sname}_log_rmse']:.3f})")
 
     # ------------------------------ write full ranking CSV
-    out_dir = REPO / "results" / "calibration"
+    out_dir = WORKSPACE.outputs / "calibration"
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "sensor_location_scan.csv"
     fieldnames = ["observation", "combined_log_rmse"]
@@ -259,7 +262,7 @@ def main() -> int:
         w.writeheader()
         for r in rows_out:
             w.writerow({k: r[k] for k in fieldnames})
-    print(f"\nFull ranking: {csv_path.relative_to(REPO)}")
+    print(f"\nFull ranking: {display_path(csv_path)}")
 
     # ------------------------------ emit suggested commands
     print("\nSuggested follow-up commands (render Fig 14 with best output):")
@@ -273,7 +276,7 @@ def main() -> int:
                 branch = rest[:-(len(station) + 1)]
                 print(
                     f"  python scripts/render_fixed_freq_validation.py "
-                    f"--segments-csv results/calibration/fixed_freq_segments_{sname}.csv "
+                    f"--segments-csv {WORKSPACE.outputs / 'calibration' / f'fixed_freq_segments_{sname}.csv'} "
                     f"--output-branch {branch} --output-station {station} "
                     f"--output-comp {comp} --name {sname}_best"
                 )

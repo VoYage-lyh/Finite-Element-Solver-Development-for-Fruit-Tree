@@ -12,7 +12,7 @@ simulation→rig linkage in
 
 频率:段转速决定。起步估计来自 ``1/(2f)=6S/rpm+C`` 模型,实际频率需用波形
       采集标定;界面提供在线标定(运行中实测频率,迭代修正转速,存入标定表
-      ``config/ds5l1_freq_calib.json`` 复用,与联动接口共享)。
+      ``workspace/config/ds5l1_freq_calib.json`` 复用,与联动接口共享)。
 安全:① 先低频(1~2Hz)验证再逐步升频;② 启动前回中使缸位于行程中点;
       ③ 关窗/异常自动发停机;④ 桌面保留物理电源开关作急停。
 """
@@ -41,7 +41,7 @@ class App:
         self.root = root
         self.drv = DS5L1()
         self.running = False
-        self.calib = load_calib()   # (S,f)→rpm 在线标定表,存 config/ds5l1_freq_calib.json
+        self.calib = load_calib()   # (S,f)→rpm 在线标定表,存 workspace/config/
         self.mid_enc = None         # 本次会话中点的编码器值;有值→无接触静音回中
         root.title("DS5L1 Reciprocating Vibration Control")
         root.protocol("WM_DELETE_WINDOW", self.on_close)

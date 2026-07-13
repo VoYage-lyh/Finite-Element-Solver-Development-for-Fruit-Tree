@@ -19,15 +19,16 @@ New work should go into the active Python package and its documentation, tests, 
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[ubuntu-test]"
+python -m pip install -e ".[dev,viz,vision]"
 python -m orchard_fem doctor
 ```
 
 ### Full PETSc/SLEPc Environment
 
 ```bash
-conda env create -f config/fenicsx_pinn_environment.yml
+conda env create -f config/orchard_fenicsx.yml
 conda activate orchard-fenicsx
+python -m pip install -e . --no-deps
 python -m orchard_fem doctor
 ```
 
@@ -36,7 +37,7 @@ python -m orchard_fem doctor
 Run a model:
 
 ```bash
-python -m orchard_fem run examples/tree_3.json
+python -m orchard_fem run examples/trees/tree_3.json
 ```
 
 Run package validation:

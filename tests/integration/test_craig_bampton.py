@@ -5,7 +5,6 @@ FEniCSx-dependent tests are skipped if petsc4py is not available.
 """
 from __future__ import annotations
 
-import math
 
 import pytest
 

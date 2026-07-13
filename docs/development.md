@@ -24,24 +24,30 @@ New code should go into these package layers:
 Active work should stay inside the shipped Orchard FEM project roots:
 
 - `orchard_fem/`
+- `orchard_vision/`
 - `orchard_pinn/`
 - `examples/`
 - `tests/`
 - `docs/`
 - `config/`
+- `scripts/`
+
+Large data, model checkpoints, generated outputs, caches, and machine-specific
+configuration belong in the ignored `workspace/` tree described in
+[environment_setup.md](environment_setup.md).
 
 ## Common Workflows
 
 Run a model:
 
 ```bash
-python -m orchard_fem run examples/tree_3.json
+python -m orchard_fem run examples/trees/tree_3.json
 ```
 
 Generate plots:
 
 ```bash
-python -m orchard_fem visualize examples/tree_3.json build/demo_frequency_response.csv
+python -m orchard_fem visualize examples/trees/tree_3.json build/demo_frequency_response.csv
 ```
 
 Run validation:
@@ -60,6 +66,20 @@ conda run -n orchard-fenicsx python -m orchard_fem demo-suite --output-dir build
 ## Testing Matrix
 
 Use the smallest test scope that still covers your change.
+
+Fast unit loop:
+
+```bash
+python -m pytest -q -m "unit and not slow and not ml and not uq"
+```
+
+Integration and backend scopes:
+
+```bash
+python -m pytest -q tests/integration
+ORCHARD_RUN_DOLFINX_TESTS=1 python -m pytest -q tests/backend/fenicsx
+python -m pytest -q tests/verification
+```
 
 Lightweight package validation:
 - `python -m orchard_fem verify`

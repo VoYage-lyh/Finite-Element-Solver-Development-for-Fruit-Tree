@@ -39,13 +39,14 @@ from orchard_vision.segmentation import (  # noqa: E402
 )
 from orchard_vision.skeleton_graph import build_graph, skeletonize_mask  # noqa: E402
 from orchard_vision.types import Branch  # noqa: E402
+from orchard_fem.workspace import workspace_paths  # noqa: E402
 
 
 @dataclass
 class Sam2Segmenter:
     """Refine the classical branch mask with SAM 2 point prompts (no AMG)."""
 
-    checkpoint: str = "sam2_t.pt"
+    checkpoint: str = field(default_factory=lambda: str(workspace_paths().sam_checkpoint))
     device: str = "cuda:1"  # idle GPU; falls back to CPU if CUDA is absent
     memory_fraction: float = 0.7  # guardrail so OOM raises instead of hanging
     sam_dimension: int = 640  # run SAM at this longer-side resolution

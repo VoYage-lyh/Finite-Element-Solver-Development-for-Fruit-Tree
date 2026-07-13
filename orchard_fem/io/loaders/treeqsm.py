@@ -60,7 +60,7 @@ Expected TreeQSM JSON schema
     "frequency_end_hz": 30.0,
     "frequency_steps": 60,
     "include_gravity_prestress": true,
-    "output_csv": "results/freq_response.csv"
+    "output_csv": "build/freq_response.csv"
   },
   // Optional: observation points
   "observations": [ ... ],

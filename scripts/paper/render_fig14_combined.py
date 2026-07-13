@@ -15,7 +15,10 @@ from pathlib import Path
 
 import numpy as np
 
+from orchard_fem.workspace import display_path, workspace_paths
+
 REPO = Path(__file__).resolve().parents[2]
+WORKSPACE = workspace_paths()
 
 
 def load_table5(path: Path):
@@ -84,10 +87,12 @@ def draw_panel(ax_top, ax_err, data, *, title, accent="#B2182B"):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--left", default="results/calibration/table5_fixed_freq_sensor1.csv",
+        "--left",
+        default=str(WORKSPACE.outputs / "calibration" / "table5_fixed_freq_sensor1.csv"),
     )
     parser.add_argument(
-        "--right", default="results/calibration/table5_fixed_freq_sensor2.csv",
+        "--right",
+        default=str(WORKSPACE.outputs / "calibration" / "table5_fixed_freq_sensor2.csv"),
     )
     parser.add_argument(
         "--left-title", default=r"(a) sensor 1 — left\_leader / tip / $u_x$",
@@ -96,7 +101,7 @@ def main() -> int:
         "--right-title", default=r"(b) sensor 2 — right\_terminal\_spray / tip / $u_x$",
     )
     parser.add_argument(
-        "--out-stem", default="results/calibration/fig14_combined",
+        "--out-stem", default=str(WORKSPACE.outputs / "calibration" / "fig14_combined"),
     )
     args = parser.parse_args()
 
@@ -129,7 +134,7 @@ def main() -> int:
     fig.savefig(stem.with_suffix(".png"), dpi=150)
     fig.savefig(stem.with_suffix(".pdf"))
     plt.close(fig)
-    print(f"Wrote: {stem.relative_to(REPO)}.{{png,pdf}}")
+    print(f"Wrote: {display_path(stem)}.{{png,pdf}}")
     return 0
 
 

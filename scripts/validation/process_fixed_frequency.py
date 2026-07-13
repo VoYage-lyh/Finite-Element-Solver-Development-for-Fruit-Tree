@@ -23,9 +23,9 @@ Pipeline
 
 Outputs
 -------
-  - ``results/calibration/fixed_freq_segments.csv``  one row per segment
-  - ``results/calibration/fixed_freq_summary.csv``   one row per nominal freq
-  - ``results/calibration/fixed_freq_overview.{png,pdf}`` time-history +
+  - ``workspace/outputs/calibration/fixed_freq_segments.csv``  one row per segment
+  - ``workspace/outputs/calibration/fixed_freq_summary.csv``   one row per nominal freq
+  - ``workspace/outputs/calibration/fixed_freq_overview.{png,pdf}`` time-history +
      spectrogram + segment markers
 
 This script is intentionally agnostic about which sensor the recording came
@@ -41,7 +41,10 @@ from pathlib import Path
 
 import numpy as np
 
+from orchard_fem.workspace import display_path, workspace_paths
+
 REPO = Path(__file__).resolve().parents[2]
+WORKSPACE = workspace_paths()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -271,7 +274,7 @@ def plot_overview(t, ay, az, segments, segment_rows, out_stem, fs):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--input", default="trees/变频激振数据.csv",
+        "--input", default=str(WORKSPACE.tree_models / "变频激振数据.csv"),
         help="GBK-encoded triaxial accel CSV (default: 变频激振数据.csv).",
     )
     parser.add_argument("--fs", type=float, default=1000.0)
@@ -292,8 +295,8 @@ def main() -> int:
         help="Comma-separated nominal hold frequencies in Hz.",
     )
     parser.add_argument(
-        "--out-dir", default="results/calibration",
-        help="Output directory (default results/calibration).",
+        "--out-dir", default=str(WORKSPACE.outputs / "calibration"),
+        help="Output directory (default: workspace outputs/calibration).",
     )
     parser.add_argument(
         "--name", required=True,
@@ -304,7 +307,9 @@ def main() -> int:
     args = parser.parse_args()
 
     nominal_freqs = [float(s) for s in args.nominal_freqs.split(",")]
-    out_dir = REPO / args.out_dir
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = REPO / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading {args.input} …")
@@ -387,11 +392,11 @@ def main() -> int:
                         f"{s['rms_mean']:.4f}",
                         f"{s['rms_std']:.4f}"])
 
-    print(f"\nWrote: {seg_csv.relative_to(REPO)}, {summary_csv.relative_to(REPO)}")
+    print(f"\nWrote: {display_path(seg_csv)}, {display_path(summary_csv)}")
 
     plot_overview(t, ay_g, az_g, segments, rows,
                   out_dir / f"fixed_freq_overview_{suffix}", fs)
-    print(f"Wrote: {(out_dir / ('fixed_freq_overview_' + suffix)).relative_to(REPO)}.{{png,pdf}}")
+    print(f"Wrote: {display_path(out_dir / ('fixed_freq_overview_' + suffix))}.{{png,pdf}}")
     return 0
 
 

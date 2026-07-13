@@ -9,6 +9,7 @@ from orchard_fem.dynamics.frequency_response import (
     PETScFrequencyResponseSolver,
     solve_frequency_response_system,
 )
+from orchard_fem.dynamics.excitation import TimeExcitationState
 from orchard_fem.dynamics.rayleigh import (
     RayleighCoefficients,
     rayleigh_from_modal_damping,
@@ -16,7 +17,6 @@ from orchard_fem.dynamics.rayleigh import (
 )
 from orchard_fem.dynamics.time_history import (
     PETScTimeHistorySolver,
-    TimeExcitationState,
     TimeHistoryPoint,
     TimeHistoryRequest,
     TimeHistoryResult,

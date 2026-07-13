@@ -3,14 +3,14 @@
 Three curves on a common axis:
 
   1. **Measured**  — hammer-impact test, tip–z accelerance |H_a| read from
-     ``results/hammer_test/<test>/frf_tip.csv``; converted to displacement
+     ``workspace/outputs/hammer_test/<test>/frf_tip.csv``; converted to displacement
      compliance |H_x| = |H_a| / (2π f)² so the unit lines up with the sim.
   2. **Linear sim (k_3 = 0, c_2 = 0)** — pareto-pipeline FRF curve cached at
-     ``cache/figures_results/tree_<n>.pkl``.
+     ``workspace/cache/figures_outputs/tree_<n>.pkl``.
      Magnitudes are displacement amplitudes at the model's excitation amplitude
      F (10 N for the supplied tree JSONs), so |H_x|_sim = |U_tip| / F.
   3. **Nonlinear sim (k_3 ≠ 0, c_2 ≠ 0)** — same conversion, cached at
-     ``cache/figures_results/tree_<n>.pkl``.
+     ``workspace/cache/figures_outputs/tree_<n>.pkl``.
 
 The script ALSO back-estimates physical (k_3, c_2) ranges from the
 simulation's observed cubic-only frequency shift and c_2 peak suppression
@@ -19,7 +19,7 @@ using the standard Duffing describing function — see ``estimate_k3_c2``.
 Output (default): a two-panel figure (|H_x| overlay above, measured
 coherence γ² below) written to BOTH
   - ``<measured-dir>/compare_vs_sim_tree_<n>.{png,pdf}`` (per-test record),
-  - ``results/verification/measured_vs_simulation_tree_<n>.{png,pdf}``
+  - ``workspace/outputs/verification/measured_vs_simulation_tree_<n>.{png,pdf}``
     (paper validation figure).
 """
 
@@ -35,12 +35,18 @@ from pathlib import Path
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from orchard_fem.workspace import workspace_paths
+
+WORKSPACE = workspace_paths()
 
 # Cache locations populated by generate_all_figures.py (whole-tree-mean FRF).
-PARETO_CACHE_LIN = REPO / "cache" / "figures_results"
-PARETO_CACHE_NL = REPO / "cache" / "figures_results"
+PARETO_CACHE_LIN = WORKSPACE.cache / "figures_outputs"
+PARETO_CACHE_NL = WORKSPACE.cache / "figures_outputs"
 # Cache populated by compute_validation_frf.py (single-branch single-point FRF).
-VALIDATION_CACHE = REPO / "cache" / "validation_frf"
+VALIDATION_CACHE = WORKSPACE.cache / "validation_frf"
 
 # Excitation amplitude used by both pipelines (= tree_*.json "amplitude").
 F_EXCITATION_N = 10.0
@@ -220,7 +226,8 @@ def _configure_paper_style() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--measured-dir", default="results/hammer_test/tree1_p1",
+        "--measured-dir",
+        default=str(WORKSPACE.outputs / "hammer_test" / "tree1_p1"),
         help="Directory containing frf_<station>.csv (default tree1_p1).",
     )
     parser.add_argument("--station", choices=("root", "mid", "tip"), default="tip")
@@ -229,7 +236,7 @@ def main() -> int:
     parser.add_argument("--fmax", type=float, default=30.0)
     parser.add_argument(
         "--no-verification-copy", action="store_true",
-        help="Skip writing the same figure to results/verification/.",
+        help="Skip writing the same figure to workspace/outputs/verification/.",
     )
     parser.add_argument("--k1", type=float, default=40000.0,
                         help="Linear support stiffness k_1 [N·m⁻¹] for the back-estimate.")
@@ -294,8 +301,8 @@ def main() -> int:
                   "(_calibrated.npz)")
 
     # Summary tables for the k3/c2 back-estimate (still useful for the printout).
-    shift_rows = load_summary_rows(REPO / "results/verification/summary_frequency_shift.csv")
-    c2_rows = load_summary_rows(REPO / "results/verification/summary_c2_suppression.csv")
+    shift_rows = load_summary_rows(WORKSPACE.outputs / "verification/summary_frequency_shift.csv")
+    c2_rows = load_summary_rows(WORKSPACE.outputs / "verification/summary_c2_suppression.csv")
     # Peak frequencies are taken from the loaded curves directly so they match
     # whatever FRF source (pareto whole-tree mean vs single-branch validation)
     # the user picked. The k3/c2 back-estimate optionally pulls cubic-only
@@ -410,7 +417,7 @@ def main() -> int:
 
     stems = [measured_dir / f"compare_vs_sim_tree_{args.tree}"]
     if not args.no_verification_copy:
-        verif_dir = REPO / "results" / "verification"
+        verif_dir = WORKSPACE.outputs / "verification"
         verif_dir.mkdir(parents=True, exist_ok=True)
         stems.append(verif_dir / f"measured_vs_simulation_{measured_dir.name}")
 

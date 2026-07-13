@@ -42,6 +42,8 @@ from skimage.draw import disk  # noqa: E402
 from skimage.io import imread, imsave  # noqa: E402
 from skimage.transform import rescale  # noqa: E402
 
+from orchard_fem.workspace import workspace_paths  # noqa: E402
+
 _MIN_BOX_PX = 6
 _FORMAT = "orchard_visible_wood_annotation"
 _VERSION = 2
@@ -56,7 +58,7 @@ class WoodAnnotator:
         image_paths: list[Path],
         out_dir: Path,
         *,
-        checkpoint: str = "sam2_t.pt",
+        checkpoint: str | None = None,
         device: str = "cuda:1",
         memory_fraction: float = 0.7,
         work_dim: int = 1024,
@@ -65,7 +67,7 @@ class WoodAnnotator:
         self.image_paths = [Path(path) for path in image_paths]
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        self.checkpoint = checkpoint
+        self.checkpoint = checkpoint or str(workspace_paths().sam_checkpoint)
         self.device = device
         self.memory_fraction = memory_fraction
         self.work_dim = work_dim
@@ -563,9 +565,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Annotate visible wood for one selected target tree in field photos."
     )
-    parser.add_argument("inputs", nargs="+", help="Raw field photo path(s), e.g. trees/tree1.jpg")
-    parser.add_argument("--out-dir", default="datasets/wood_field", help="Output dataset directory")
-    parser.add_argument("--sam-checkpoint", default="weights/sam2_t.pt", help="SAM 2 checkpoint")
+    paths = workspace_paths()
+    parser.add_argument("inputs", nargs="+", help="Raw field photo path(s)")
+    parser.add_argument(
+        "--out-dir",
+        default=str(paths.wood_annotations),
+        help="Output dataset directory (default: workspace wood annotations)",
+    )
+    parser.add_argument(
+        "--sam-checkpoint",
+        default=str(paths.sam_checkpoint),
+        help="SAM 2 checkpoint",
+    )
     parser.add_argument("--sam-device", default="cuda:1", help="SAM device, e.g. cuda:1 or cpu")
     parser.add_argument("--work-dim", type=int, default=1024, help="Longer working-image side")
     args = parser.parse_args(argv)

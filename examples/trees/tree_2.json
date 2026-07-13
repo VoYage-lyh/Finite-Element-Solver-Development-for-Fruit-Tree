@@ -1,0 +1,1433 @@
+{
+  "metadata": {
+    "name": "tree_2_asymmetric_multi_leader",
+    "training_system": "image-derived upright multi-leader open crown / \u56fe\u7247\u62d3\u6251\u76f4\u7acb\u591a\u9886\u5bfc\u679d\u5f00\u51a0\u5f62",
+    "typical_crop": "\u82f9\u679c\u3001\u68a8\u3001\u6843\u7b49\u679c\u6811",
+    "notes": "\u6839\u636e\u7528\u6237\u63d0\u4f9b\u7684 tree2 \u56fe\u50cf\u91cd\u5199\uff1a\u5355\u4e00\u957f\u4e3b\u5e72\u5728\u51a0\u5c42\u4e0b\u65b9\u5206\u6210\u5de6\u3001\u4e2d\u3001\u53f3\u4e09\u6761\u76f4\u7acb\u4e3b\u8f74\uff1b\u5de6\u4e3b\u8f74\u4e0a\u90e8\u6709\u4e00\u6761\u6a2a\u5411\u5de6\u4f38\u9aa8\u5e72\u679d\uff0c\u53f3\u4e3b\u8f74\u5e26\u4e00\u6761\u5f3a\u659c\u4f38\u53f3\u4fa7\u9aa8\u5e72\u679d\u548c\u4e00\u6761\u8fd1\u6c34\u5e73\u53f3\u4fa7\u679d\uff0c\u9876\u90e8\u7531\u591a\u6839\u7ed3\u679c\u679d\u7ec4\u6210\u3002"
+  },
+  "materials": [
+    {
+      "id": "pith_default",
+      "tissue": "pith",
+      "model": "linear",
+      "density": 492.4,
+      "youngs_modulus": 608000000.0,
+      "poisson_ratio": 0.35,
+      "damping_ratio": 0.025
+    },
+    {
+      "id": "xylem_default",
+      "tissue": "xylem",
+      "model": "linear",
+      "density": 671.5,
+      "youngs_modulus": 6080000000.0,
+      "poisson_ratio": 0.3,
+      "damping_ratio": 0.012
+    },
+    {
+      "id": "phloem_default",
+      "tissue": "phloem",
+      "model": "linear",
+      "density": 555.1,
+      "youngs_modulus": 1216000000.0,
+      "poisson_ratio": 0.35,
+      "damping_ratio": 0.02
+    }
+  ],
+  "branches": [
+    {
+      "id": "trunk",
+      "parent_branch_id": null,
+      "level": 0,
+      "start": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "end": [
+        0.01,
+        0.0,
+        1.08
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.044
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.03
+        }
+      ],
+      "points": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.02,
+          0.0,
+          0.55
+        ],
+        [
+          0.01,
+          0.0,
+          1.08
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "left_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        0.0119,
+        0.0,
+        0.98
+      ],
+      "end": [
+        -0.3,
+        0.03,
+        2.1
+      ],
+      "discretization": {
+        "num_elements": 7,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.026
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.013
+        }
+      ],
+      "points": [
+        [
+          0.0119,
+          0.0,
+          0.98
+        ],
+        [
+          -0.1,
+          0.02,
+          1.35
+        ],
+        [
+          -0.22,
+          0.03,
+          1.72
+        ],
+        [
+          -0.3,
+          0.03,
+          2.1
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "center_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        0.0111,
+        0.0,
+        1.02
+      ],
+      "end": [
+        0.05,
+        0.06,
+        2.34
+      ],
+      "discretization": {
+        "num_elements": 8,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.024
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.011
+        }
+      ],
+      "points": [
+        [
+          0.0111,
+          0.0,
+          1.02
+        ],
+        [
+          0.0,
+          0.05,
+          1.42
+        ],
+        [
+          0.03,
+          0.06,
+          1.86
+        ],
+        [
+          0.05,
+          0.06,
+          2.34
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "right_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        0.013,
+        0.0,
+        0.9199
+      ],
+      "end": [
+        0.42,
+        -0.03,
+        2.1
+      ],
+      "discretization": {
+        "num_elements": 7,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.026
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.012
+        }
+      ],
+      "points": [
+        [
+          0.013,
+          0.0,
+          0.9199
+        ],
+        [
+          0.18,
+          -0.03,
+          1.3
+        ],
+        [
+          0.32,
+          -0.04,
+          1.7
+        ],
+        [
+          0.42,
+          -0.03,
+          2.1
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "inner_left_stem",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        0.0149,
+        0.0,
+        0.8203
+      ],
+      "end": [
+        -0.16,
+        0.04,
+        1.55
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.02
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        }
+      ],
+      "points": [
+        [
+          0.0149,
+          0.0,
+          0.8203
+        ],
+        [
+          -0.1,
+          0.04,
+          1.18
+        ],
+        [
+          -0.16,
+          0.04,
+          1.55
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "left_upper_shelf",
+      "parent_branch_id": "left_leader",
+      "level": 2,
+      "start": [
+        -0.22,
+        0.03,
+        1.72
+      ],
+      "end": [
+        -1.04,
+        0.01,
+        1.82
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.014
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.006
+        }
+      ],
+      "points": [
+        [
+          -0.22,
+          0.03,
+          1.72
+        ],
+        [
+          -0.48,
+          0.03,
+          1.84
+        ],
+        [
+          -0.78,
+          0.02,
+          1.87
+        ],
+        [
+          -1.04,
+          0.01,
+          1.82
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "left_outer_top",
+      "parent_branch_id": "left_leader",
+      "level": 2,
+      "start": [
+        -0.3,
+        0.03,
+        2.1
+      ],
+      "end": [
+        -0.72,
+        0.03,
+        2.44
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.011
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.005
+        }
+      ],
+      "points": [
+        [
+          -0.3,
+          0.03,
+          2.1
+        ],
+        [
+          -0.52,
+          0.04,
+          2.3
+        ],
+        [
+          -0.72,
+          0.03,
+          2.44
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "left_inner_top",
+      "parent_branch_id": "left_leader",
+      "level": 2,
+      "start": [
+        -0.1732,
+        0.0261,
+        1.5758
+      ],
+      "end": [
+        -0.08,
+        0.04,
+        2.26
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0045
+        }
+      ],
+      "points": [
+        [
+          -0.1732,
+          0.0261,
+          1.5758
+        ],
+        [
+          -0.12,
+          0.04,
+          1.94
+        ],
+        [
+          -0.08,
+          0.04,
+          2.26
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "left_shelf_tip_spray",
+      "parent_branch_id": "left_upper_shelf",
+      "level": 3,
+      "start": [
+        -0.78,
+        0.02,
+        1.87
+      ],
+      "end": [
+        -1.14,
+        0.02,
+        2.2
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.007
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0035
+        }
+      ],
+      "points": [
+        [
+          -0.78,
+          0.02,
+          1.87
+        ],
+        [
+          -0.98,
+          0.02,
+          2.04
+        ],
+        [
+          -1.14,
+          0.02,
+          2.2
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "center_terminal",
+      "parent_branch_id": "center_leader",
+      "level": 2,
+      "start": [
+        0.0379,
+        0.06,
+        2.0501
+      ],
+      "end": [
+        0.0,
+        0.07,
+        2.6
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0045
+        }
+      ],
+      "points": [
+        [
+          0.0379,
+          0.06,
+          2.0501
+        ],
+        [
+          0.02,
+          0.07,
+          2.36
+        ],
+        [
+          0.0,
+          0.07,
+          2.6
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "center_left_shoot",
+      "parent_branch_id": "center_leader",
+      "level": 2,
+      "start": [
+        0.0019,
+        0.0412,
+        1.3499
+      ],
+      "end": [
+        -0.3,
+        0.08,
+        2.22
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.0019,
+          0.0412,
+          1.3499
+        ],
+        [
+          -0.12,
+          0.06,
+          1.66
+        ],
+        [
+          -0.22,
+          0.07,
+          1.95
+        ],
+        [
+          -0.3,
+          0.08,
+          2.22
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_diagonal_scaffold",
+      "parent_branch_id": "right_leader",
+      "level": 2,
+      "start": [
+        0.2455,
+        -0.0347,
+        1.4871
+      ],
+      "end": [
+        0.88,
+        -0.1,
+        2.1
+      ],
+      "discretization": {
+        "num_elements": 7,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.015
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.006
+        }
+      ],
+      "points": [
+        [
+          0.2455,
+          -0.0347,
+          1.4871
+        ],
+        [
+          0.43,
+          -0.05,
+          1.72
+        ],
+        [
+          0.66,
+          -0.08,
+          1.92
+        ],
+        [
+          0.88,
+          -0.1,
+          2.1
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "right_mid_horizontal",
+      "parent_branch_id": "right_leader",
+      "level": 2,
+      "start": [
+        0.2455,
+        -0.0347,
+        1.4871
+      ],
+      "end": [
+        1.16,
+        -0.08,
+        1.92
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.012
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0055
+        }
+      ],
+      "points": [
+        [
+          0.2455,
+          -0.0347,
+          1.4871
+        ],
+        [
+          0.5,
+          -0.04,
+          1.62
+        ],
+        [
+          0.85,
+          -0.07,
+          1.78
+        ],
+        [
+          1.16,
+          -0.08,
+          1.92
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "right_inner_top",
+      "parent_branch_id": "right_leader",
+      "level": 2,
+      "start": [
+        0.3741,
+        -0.0346,
+        1.9166
+      ],
+      "end": [
+        0.62,
+        -0.02,
+        2.48
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.3741,
+          -0.0346,
+          1.9166
+        ],
+        [
+          0.5,
+          -0.02,
+          2.2
+        ],
+        [
+          0.62,
+          -0.02,
+          2.48
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_outer_top",
+      "parent_branch_id": "right_diagonal_scaffold",
+      "level": 3,
+      "start": [
+        0.6117,
+        -0.0737,
+        1.878
+      ],
+      "end": [
+        1.12,
+        -0.13,
+        2.22
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0075
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0035
+        }
+      ],
+      "points": [
+        [
+          0.6117,
+          -0.0737,
+          1.878
+        ],
+        [
+          0.92,
+          -0.12,
+          2.02
+        ],
+        [
+          1.12,
+          -0.13,
+          2.22
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_mid_tip_spray",
+      "parent_branch_id": "right_mid_horizontal",
+      "level": 3,
+      "start": [
+        0.9084,
+        -0.0719,
+        1.8064
+      ],
+      "end": [
+        1.32,
+        -0.1,
+        1.98
+      ],
+      "discretization": {
+        "num_elements": 4,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0065
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.003
+        }
+      ],
+      "points": [
+        [
+          0.9084,
+          -0.0719,
+          1.8064
+        ],
+        [
+          1.16,
+          -0.1,
+          1.82
+        ],
+        [
+          1.32,
+          -0.1,
+          1.98
+        ]
+      ],
+      "is_terminal": true
+    }
+  ],
+  "joints": [],
+  "fruits": [],
+  "clamps": [
+    {
+      "branch_id": "trunk",
+      "support_stiffness": 40000.0,
+      "support_damping": 35.0
+    }
+  ],
+  "excitation": {
+    "kind": "harmonic_force",
+    "target_branch_id": "trunk",
+    "target_node": "mid",
+    "target_component": "ux",
+    "amplitude": 10.0,
+    "phase_degrees": 0.0,
+    "driving_frequency_hz": 5.0
+  },
+  "analysis": {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 25.0,
+    "frequency_steps": 25,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 0.0001,
+    "include_gravity_prestress": true,
+    "auto_nonlinear_levels": [
+      2,
+      3
+    ],
+    "auto_nonlinear_randomize": true,
+    "auto_nonlinear_seed": 20262,
+    "nonlinear_tolerance": 1e-05,
+    "max_nonlinear_iterations": 30,
+    "output_csv": "results_nonlinear/tree_2_asymmetric_multi_leader/frf.csv"
+  },
+  "observations": [
+    {
+      "id": "obs_trunk_root",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_trunk_mid",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_trunk_tip",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_leader_root",
+      "target_type": "branch",
+      "target_id": "left_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_leader_mid",
+      "target_type": "branch",
+      "target_id": "left_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_leader_tip",
+      "target_type": "branch",
+      "target_id": "left_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_leader_root",
+      "target_type": "branch",
+      "target_id": "center_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_leader_mid",
+      "target_type": "branch",
+      "target_id": "center_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_leader_tip",
+      "target_type": "branch",
+      "target_id": "center_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_leader_root",
+      "target_type": "branch",
+      "target_id": "right_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_leader_mid",
+      "target_type": "branch",
+      "target_id": "right_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_leader_tip",
+      "target_type": "branch",
+      "target_id": "right_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_stem_root",
+      "target_type": "branch",
+      "target_id": "inner_left_stem",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_stem_mid",
+      "target_type": "branch",
+      "target_id": "inner_left_stem",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_stem_tip",
+      "target_type": "branch",
+      "target_id": "inner_left_stem",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_upper_shelf_root",
+      "target_type": "branch",
+      "target_id": "left_upper_shelf",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_upper_shelf_mid",
+      "target_type": "branch",
+      "target_id": "left_upper_shelf",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_upper_shelf_tip",
+      "target_type": "branch",
+      "target_id": "left_upper_shelf",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_outer_top_root",
+      "target_type": "branch",
+      "target_id": "left_outer_top",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_outer_top_mid",
+      "target_type": "branch",
+      "target_id": "left_outer_top",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_outer_top_tip",
+      "target_type": "branch",
+      "target_id": "left_outer_top",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_inner_top_root",
+      "target_type": "branch",
+      "target_id": "left_inner_top",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_inner_top_mid",
+      "target_type": "branch",
+      "target_id": "left_inner_top",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_inner_top_tip",
+      "target_type": "branch",
+      "target_id": "left_inner_top",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_shelf_tip_spray_root",
+      "target_type": "branch",
+      "target_id": "left_shelf_tip_spray",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_shelf_tip_spray_mid",
+      "target_type": "branch",
+      "target_id": "left_shelf_tip_spray",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_shelf_tip_spray_tip",
+      "target_type": "branch",
+      "target_id": "left_shelf_tip_spray",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_terminal_root",
+      "target_type": "branch",
+      "target_id": "center_terminal",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_terminal_mid",
+      "target_type": "branch",
+      "target_id": "center_terminal",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_terminal_tip",
+      "target_type": "branch",
+      "target_id": "center_terminal",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_left_shoot_root",
+      "target_type": "branch",
+      "target_id": "center_left_shoot",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_left_shoot_mid",
+      "target_type": "branch",
+      "target_id": "center_left_shoot",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_left_shoot_tip",
+      "target_type": "branch",
+      "target_id": "center_left_shoot",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_diagonal_scaffold_root",
+      "target_type": "branch",
+      "target_id": "right_diagonal_scaffold",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_diagonal_scaffold_mid",
+      "target_type": "branch",
+      "target_id": "right_diagonal_scaffold",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_diagonal_scaffold_tip",
+      "target_type": "branch",
+      "target_id": "right_diagonal_scaffold",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_mid_horizontal_root",
+      "target_type": "branch",
+      "target_id": "right_mid_horizontal",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_mid_horizontal_mid",
+      "target_type": "branch",
+      "target_id": "right_mid_horizontal",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_mid_horizontal_tip",
+      "target_type": "branch",
+      "target_id": "right_mid_horizontal",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_inner_top_root",
+      "target_type": "branch",
+      "target_id": "right_inner_top",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_inner_top_mid",
+      "target_type": "branch",
+      "target_id": "right_inner_top",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_inner_top_tip",
+      "target_type": "branch",
+      "target_id": "right_inner_top",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_outer_top_root",
+      "target_type": "branch",
+      "target_id": "right_outer_top",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_outer_top_mid",
+      "target_type": "branch",
+      "target_id": "right_outer_top",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_outer_top_tip",
+      "target_type": "branch",
+      "target_id": "right_outer_top",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_mid_tip_spray_root",
+      "target_type": "branch",
+      "target_id": "right_mid_tip_spray",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_mid_tip_spray_mid",
+      "target_type": "branch",
+      "target_id": "right_mid_tip_spray",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_mid_tip_spray_tip",
+      "target_type": "branch",
+      "target_id": "right_mid_tip_spray",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    }
+  ],
+  "fruit_distribution_policy": {
+    "total_fruit_count": 20,
+    "seed": 2026,
+    "include_terminal_primary": false,
+    "detachment_displacement_m": 0.01,
+    "attachment_damping_ratio": 0.05,
+    "attachment_component": "uz"
+  }
+}

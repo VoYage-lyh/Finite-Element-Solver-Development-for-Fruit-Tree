@@ -7,7 +7,6 @@ from typing import Sequence
 
 from orchard_fem.visualization.dependencies import MissingDependencyError, require_plotting_dependencies
 from orchard_fem.visualization.io import (
-    build_parser,
     frequency_figure_path,
     geometry_figure_path,
     load_model,

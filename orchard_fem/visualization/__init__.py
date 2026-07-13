@@ -1,8 +1,6 @@
 from orchard_fem.visualization.app import (
     VisualizationOutputs,
-    build_parser,
     main,
-    parse_args,
     visualize_analysis,
 )
 from orchard_fem.visualization.dependencies import MissingDependencyError, PLOT_INSTALL_HINT
@@ -10,6 +8,7 @@ from orchard_fem.visualization.frf_comparison import (
     plot_detachment_spectrum,
     plot_frf_comparison,
 )
+from orchard_fem.visualization.io import build_parser, parse_args
 from orchard_fem.visualization.rendering import (
     available_trajectory_nodes,
     plot_frequency_response,

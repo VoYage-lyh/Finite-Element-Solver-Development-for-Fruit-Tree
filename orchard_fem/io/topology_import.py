@@ -172,8 +172,6 @@ def _polyline_points(
     # Segment k (1-indexed) direction is initial_direction rotated by
     # (k − 0.5) * curve_total / n_segments — midpoint-rule integration gives a
     # tip direction that matches curve_total_rad after n_segments steps.
-    step = curve_total_rad / n_segments
-
     points = [list(start)]
     current_pos = list(start)
     for k in range(n_segments):

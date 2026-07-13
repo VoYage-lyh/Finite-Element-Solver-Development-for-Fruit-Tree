@@ -28,8 +28,8 @@ the unsmooth Pareto/peak-detector cost surface).
 Forward evaluations: ~30–60 FE FRF sweeps × ~2 s each ≈ 1–2 min total.
 
 Outputs:
-  cache/calibration/tree_<n>_<input>_<output>_fit.npz   (optimal params)
-  results/calibration/calibrated_frf_tree_<n>.{png,pdf} (before/after plot)
+  workspace/cache/calibration/tree_<n>_<input>_<output>_fit.npz   (optimal params)
+  workspace/outputs/calibration/calibrated_frf_tree_<n>.{png,pdf} (before/after plot)
 """
 
 from __future__ import annotations
@@ -49,8 +49,10 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from orchard_fem.io.loaders.orchard import load_orchard_model
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
 
-CALIBRATION_CACHE = REPO / "cache" / "calibration"
+WORKSPACE = workspace_paths()
+CALIBRATION_CACHE = WORKSPACE.cache / "calibration"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,7 +98,7 @@ class ForwardModel:
 
     def __init__(self, *, tree_n, input_branch, input_node, input_comp,
                  output_branch, output_station, output_comp, amplitude=10.0):
-        path = REPO / "trees" / f"tree_{tree_n}.json"
+        path = example_trees_dir() / f"tree_{tree_n}.json"
         self.base_model = _override_excitation(
             load_orchard_model(str(path)),
             branch_id=input_branch, node=input_node,
@@ -274,7 +276,10 @@ def plot_calibration_result(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tree", type=int, default=1)
-    parser.add_argument("--measured-dir", default="results/hammer_test/tree1_p1")
+    parser.add_argument(
+        "--measured-dir",
+        default=str(WORKSPACE.outputs / "hammer_test" / "tree1_p1"),
+    )
     parser.add_argument("--measured-comp", default="Z",
                         help="Column suffix in frf_tip.csv (H_<comp>_mag_ms2_per_N).")
     parser.add_argument("--input-branch", default="left_leader")
@@ -401,9 +406,9 @@ def main() -> int:
         zeta_1_eq=zeta_1_eq, cost_final=float(res.fun),
         n_evals=int(res.nfev),
     )
-    print(f"\nCache: {cache_path.relative_to(REPO)}")
+    print(f"\nCache: {display_path(cache_path)}")
 
-    out_dir = REPO / "results" / "calibration"
+    out_dir = WORKSPACE.outputs / "calibration"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_stem = out_dir / f"calibrated_frf_tree_{args.tree}"
     plot_calibration_result(

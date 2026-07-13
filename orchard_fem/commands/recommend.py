@@ -2,12 +2,12 @@
 
 Run with::
 
-    orchard-fem recommend trees/tree_3.json \
+    orchard-fem recommend examples/trees/tree_3.json \
         --material-test data/material.json \
         --measured-frf data/T3_frf.csv \
         --measured-modal 6.05 11.21 18.38 \
         --candidate-clamps trunk:0.35,0.50,0.65 \
-        --output-dir results/T3_recommendation/
+        --output-dir workspace/outputs/T3_recommendation/
 
 Writes a JSON summary + posterior samples (NPZ) + paper figures.
 
@@ -77,15 +77,14 @@ def _handle_recommend(args: argparse.Namespace, application) -> int:
         BranchMaterialTestSummary, priors_from_material_test,
     )
     from orchard_fem.calibration import (
-        BayesianLikelihood, ForwardResult,
-        cache_forward, cache_pareto,
+        BayesianLikelihood, cache_forward, cache_pareto,
         run_emcee_calibration, gelman_rubin, effective_sample_size,
     )
     from orchard_fem.recommendation import (
-        HarvestObjective, propagate_posterior_to_pareto,
+        propagate_posterior_to_pareto,
     )
     from orchard_fem.sensitivity import (
-        SobolInputDef, run_sobol_analysis,
+        run_sobol_analysis,
     )
 
     output_dir = Path(args.output_dir)

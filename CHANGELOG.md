@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-07-13
+
+### Changed
+
+- Separated version-controlled source from machine-local artifacts under one configurable `workspace/`.
+- Moved the five reproducible tree models to `examples/trees/` and centralized runtime paths through `orchard_fem.workspace`.
+- Reclassified tests into unit, integration, FEniCSx-backend, and verification scopes with pytest markers.
+- Made `pyproject.toml` the authoritative Python dependency source and renamed the solver environment to `config/orchard_fenicsx.yml`.
+- Moved DS5L1 site calibration to the ignored workspace while retaining a tracked schema example.
+- Added lightweight CI and resolved all Ruff findings.
+
+### Removed
+
+- Redundant `orchard_fem.topology.tree` re-export module.
+- Empty `orchard_pinn.inverse` and `orchard_pinn.surrogate` placeholder packages.
+- Duplicated dependency checklist files and `requirements.txt`.
+
 ## 2026-04-24
 
 ### Changed

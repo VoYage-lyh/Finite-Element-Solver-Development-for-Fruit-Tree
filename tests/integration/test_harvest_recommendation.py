@@ -57,7 +57,7 @@ def test_candidate_clamp_labels_override(model):
 
 def test_generate_linear_fruits():
     # demo_orchard.json carries explicit fruits but no policy → use tree_1
-    tree = load_orchard_model("trees/tree_1.json")
+    tree = load_orchard_model("examples/trees/tree_1.json")
     fruits = generate_linear_fruits(tree, tree.fruit_policy, spacing=0.25)
     non_trunk = [b for b in tree.branches if b.branch_id != "trunk"]
     assert len(fruits) == 4 * len(non_trunk)

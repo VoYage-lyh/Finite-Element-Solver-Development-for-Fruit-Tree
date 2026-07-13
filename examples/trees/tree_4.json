@@ -1,0 +1,1570 @@
+{
+  "metadata": {
+    "name": "tree_4_y_fan_canopy",
+    "training_system": "image-derived asymmetric fan canopy / \u56fe\u7247\u62d3\u6251\u504f\u5fc3\u6247\u5f62\u51a0",
+    "typical_crop": "\u82f9\u679c\u3001\u68a8\u3001\u6843\u7b49\u679c\u6811",
+    "notes": "\u6839\u636e\u7528\u6237\u63d0\u4f9b\u7684 tree4 \u56fe\u50cf\u91cd\u5199\uff1a\u957f\u76f4\u4e3b\u5e72\u4e0a\u90e8\u5f62\u6210\u591a\u6839\u5de6/\u4e2d\u76f4\u7acb\u4e3b\u8f74\uff0c\u5de6\u4fa7\u51a0\u5c42\u8f83\u5bc6\uff1b\u53f3\u4fa7\u4ece\u8f83\u4f4e\u4f4d\u7f6e\u4f38\u51fa\u4e00\u6839\u957f\u62f1\u5f62\u8fd1\u6c34\u5e73\u9aa8\u5e72\u679d\uff0c\u5e76\u5728\u53f3\u7aef\u5f62\u6210\u7ed3\u679c\u679d\u7fa4\u3002"
+  },
+  "materials": [
+    {
+      "id": "pith_default",
+      "tissue": "pith",
+      "model": "linear",
+      "density": 492.4,
+      "youngs_modulus": 608000000.0,
+      "poisson_ratio": 0.35,
+      "damping_ratio": 0.025
+    },
+    {
+      "id": "xylem_default",
+      "tissue": "xylem",
+      "model": "linear",
+      "density": 671.5,
+      "youngs_modulus": 6080000000.0,
+      "poisson_ratio": 0.3,
+      "damping_ratio": 0.012
+    },
+    {
+      "id": "phloem_default",
+      "tissue": "phloem",
+      "model": "linear",
+      "density": 555.1,
+      "youngs_modulus": 1216000000.0,
+      "poisson_ratio": 0.35,
+      "damping_ratio": 0.02
+    }
+  ],
+  "branches": [
+    {
+      "id": "trunk",
+      "parent_branch_id": null,
+      "level": 0,
+      "start": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "end": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.045
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.029
+        }
+      ],
+      "points": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.01,
+          0.0,
+          0.3
+        ],
+        [
+          -0.02,
+          0.0,
+          0.6
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "left_main_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "end": [
+        -0.52,
+        0.04,
+        2.48
+      ],
+      "discretization": {
+        "num_elements": 9,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.029
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.012
+        }
+      ],
+      "points": [
+        [
+          -0.02,
+          0.0,
+          0.6
+        ],
+        [
+          -0.1,
+          0.01,
+          0.95
+        ],
+        [
+          -0.2,
+          0.03,
+          1.35
+        ],
+        [
+          -0.32,
+          0.04,
+          1.8
+        ],
+        [
+          -0.42,
+          0.04,
+          2.15
+        ],
+        [
+          -0.52,
+          0.04,
+          2.48
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "inner_left_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "end": [
+        -0.34,
+        0.06,
+        2.35
+      ],
+      "discretization": {
+        "num_elements": 8,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.025
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.011
+        }
+      ],
+      "points": [
+        [
+          -0.02,
+          0.0,
+          0.6
+        ],
+        [
+          -0.08,
+          0.02,
+          0.95
+        ],
+        [
+          -0.15,
+          0.04,
+          1.3
+        ],
+        [
+          -0.22,
+          0.05,
+          1.7
+        ],
+        [
+          -0.3,
+          0.06,
+          2.1
+        ],
+        [
+          -0.34,
+          0.06,
+          2.35
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "center_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "end": [
+        0.08,
+        0.06,
+        2.58
+      ],
+      "discretization": {
+        "num_elements": 9,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.026
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.011
+        }
+      ],
+      "points": [
+        [
+          -0.02,
+          0.0,
+          0.6
+        ],
+        [
+          -0.01,
+          0.02,
+          0.95
+        ],
+        [
+          0.0,
+          0.03,
+          1.25
+        ],
+        [
+          0.03,
+          0.05,
+          1.65
+        ],
+        [
+          0.06,
+          0.06,
+          2.1
+        ],
+        [
+          0.08,
+          0.06,
+          2.58
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "right_inner_leader",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "end": [
+        0.44,
+        -0.03,
+        2.36
+      ],
+      "discretization": {
+        "num_elements": 8,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.024
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        }
+      ],
+      "points": [
+        [
+          -0.02,
+          0.0,
+          0.6
+        ],
+        [
+          0.05,
+          -0.01,
+          0.95
+        ],
+        [
+          0.12,
+          -0.02,
+          1.3
+        ],
+        [
+          0.22,
+          -0.03,
+          1.7
+        ],
+        [
+          0.34,
+          -0.04,
+          2.05
+        ],
+        [
+          0.44,
+          -0.03,
+          2.36
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "right_low_arch",
+      "parent_branch_id": "trunk",
+      "level": 1,
+      "start": [
+        -0.02,
+        0.0,
+        0.6
+      ],
+      "end": [
+        1.18,
+        -0.1,
+        1.52
+      ],
+      "discretization": {
+        "num_elements": 8,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.023
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        }
+      ],
+      "points": [
+        [
+          -0.02,
+          0.0,
+          0.6
+        ],
+        [
+          0.12,
+          -0.05,
+          0.85
+        ],
+        [
+          0.35,
+          -0.1,
+          1.05
+        ],
+        [
+          0.65,
+          -0.12,
+          1.25
+        ],
+        [
+          0.95,
+          -0.11,
+          1.4
+        ],
+        [
+          1.18,
+          -0.1,
+          1.52
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "left_lower_lateral",
+      "parent_branch_id": "left_main_leader",
+      "level": 2,
+      "start": [
+        -0.3015,
+        0.0385,
+        1.7307
+      ],
+      "end": [
+        -1.18,
+        -0.02,
+        1.88
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.014
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.006
+        }
+      ],
+      "points": [
+        [
+          -0.3015,
+          0.0385,
+          1.7307
+        ],
+        [
+          -0.62,
+          0.02,
+          1.72
+        ],
+        [
+          -0.92,
+          0.0,
+          1.74
+        ],
+        [
+          -1.18,
+          -0.02,
+          1.88
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "left_outer_top",
+      "parent_branch_id": "left_main_leader",
+      "level": 2,
+      "start": [
+        -0.4373,
+        0.04,
+        2.2072
+      ],
+      "end": [
+        -0.92,
+        0.03,
+        2.66
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0045
+        }
+      ],
+      "points": [
+        [
+          -0.4373,
+          0.04,
+          2.2072
+        ],
+        [
+          -0.72,
+          0.04,
+          2.44
+        ],
+        [
+          -0.92,
+          0.03,
+          2.66
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "left_terminal",
+      "parent_branch_id": "left_main_leader",
+      "level": 2,
+      "start": [
+        -0.4736,
+        0.04,
+        2.3268
+      ],
+      "end": [
+        -0.54,
+        0.05,
+        2.92
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          -0.4736,
+          0.04,
+          2.3268
+        ],
+        [
+          -0.54,
+          0.05,
+          2.66
+        ],
+        [
+          -0.54,
+          0.05,
+          2.92
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "inner_left_top",
+      "parent_branch_id": "inner_left_leader",
+      "level": 2,
+      "start": [
+        -0.2646,
+        0.0556,
+        1.923
+      ],
+      "end": [
+        -0.1,
+        0.09,
+        2.62
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          -0.2646,
+          0.0556,
+          1.923
+        ],
+        [
+          -0.18,
+          0.09,
+          2.28
+        ],
+        [
+          -0.1,
+          0.09,
+          2.62
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "center_terminal",
+      "parent_branch_id": "center_leader",
+      "level": 2,
+      "start": [
+        0.0587,
+        0.0596,
+        2.0802
+      ],
+      "end": [
+        0.12,
+        0.07,
+        2.72
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.0587,
+          0.0596,
+          2.0802
+        ],
+        [
+          0.1,
+          0.07,
+          2.42
+        ],
+        [
+          0.12,
+          0.07,
+          2.72
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "center_left_shoot",
+      "parent_branch_id": "center_leader",
+      "level": 2,
+      "start": [
+        0.0386,
+        0.0529,
+        1.7785
+      ],
+      "end": [
+        -0.24,
+        0.08,
+        2.44
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.0386,
+          0.0529,
+          1.7785
+        ],
+        [
+          -0.12,
+          0.08,
+          2.12
+        ],
+        [
+          -0.24,
+          0.08,
+          2.44
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_upper_scaffold",
+      "parent_branch_id": "right_inner_leader",
+      "level": 2,
+      "start": [
+        0.2511,
+        -0.0326,
+        1.7907
+      ],
+      "end": [
+        1.04,
+        -0.06,
+        2.28
+      ],
+      "discretization": {
+        "num_elements": 7,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.013
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0055
+        }
+      ],
+      "points": [
+        [
+          0.2511,
+          -0.0326,
+          1.7907
+        ],
+        [
+          0.56,
+          -0.06,
+          1.96
+        ],
+        [
+          0.82,
+          -0.06,
+          2.12
+        ],
+        [
+          1.04,
+          -0.06,
+          2.28
+        ]
+      ],
+      "is_terminal": false
+    },
+    {
+      "id": "right_upright_shoot",
+      "parent_branch_id": "right_inner_leader",
+      "level": 2,
+      "start": [
+        0.3389,
+        -0.0399,
+        2.0468
+      ],
+      "end": [
+        0.68,
+        -0.02,
+        2.62
+      ],
+      "discretization": {
+        "num_elements": 6,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.3389,
+          -0.0399,
+          2.0468
+        ],
+        [
+          0.54,
+          -0.02,
+          2.32
+        ],
+        [
+          0.68,
+          -0.02,
+          2.62
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_arch_lower_spray",
+      "parent_branch_id": "right_low_arch",
+      "level": 2,
+      "start": [
+        0.6281,
+        -0.1185,
+        1.2354
+      ],
+      "end": [
+        1.36,
+        -0.18,
+        1.42
+      ],
+      "discretization": {
+        "num_elements": 7,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.01
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0045
+        }
+      ],
+      "points": [
+        [
+          0.6281,
+          -0.1185,
+          1.2354
+        ],
+        [
+          0.82,
+          -0.16,
+          1.18
+        ],
+        [
+          1.1,
+          -0.18,
+          1.26
+        ],
+        [
+          1.36,
+          -0.18,
+          1.42
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_arch_terminal_spray",
+      "parent_branch_id": "right_low_arch",
+      "level": 2,
+      "start": [
+        0.951,
+        -0.11,
+        1.4005
+      ],
+      "end": [
+        1.42,
+        -0.12,
+        1.76
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.009
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.004
+        }
+      ],
+      "points": [
+        [
+          0.951,
+          -0.11,
+          1.4005
+        ],
+        [
+          1.18,
+          -0.12,
+          1.62
+        ],
+        [
+          1.42,
+          -0.12,
+          1.76
+        ]
+      ],
+      "is_terminal": true
+    },
+    {
+      "id": "right_upper_tip_spray",
+      "parent_branch_id": "right_upper_scaffold",
+      "level": 3,
+      "start": [
+        0.82,
+        -0.06,
+        2.12
+      ],
+      "end": [
+        1.2,
+        -0.08,
+        2.56
+      ],
+      "discretization": {
+        "num_elements": 5,
+        "hotspot": false
+      },
+      "stations": [
+        {
+          "s": 0.0,
+          "shorthand": "circular",
+          "outer_radius": 0.0065
+        },
+        {
+          "s": 1.0,
+          "shorthand": "circular",
+          "outer_radius": 0.003
+        }
+      ],
+      "points": [
+        [
+          0.82,
+          -0.06,
+          2.12
+        ],
+        [
+          1.04,
+          -0.08,
+          2.36
+        ],
+        [
+          1.2,
+          -0.08,
+          2.56
+        ]
+      ],
+      "is_terminal": true
+    }
+  ],
+  "joints": [],
+  "fruits": [],
+  "clamps": [
+    {
+      "branch_id": "trunk",
+      "support_stiffness": 40000.0,
+      "support_damping": 35.0
+    }
+  ],
+  "excitation": {
+    "kind": "harmonic_force",
+    "target_branch_id": "trunk",
+    "target_node": "mid",
+    "target_component": "ux",
+    "amplitude": 10.0,
+    "phase_degrees": 0.0,
+    "driving_frequency_hz": 5.0
+  },
+  "analysis": {
+    "mode": "frequency_response",
+    "solver_backend": "fenicsx",
+    "frequency_start_hz": 1.0,
+    "frequency_end_hz": 25.0,
+    "frequency_steps": 25,
+    "rayleigh_alpha": 0.0,
+    "rayleigh_beta": 0.0001,
+    "include_gravity_prestress": true,
+    "auto_nonlinear_levels": [
+      2,
+      3
+    ],
+    "auto_nonlinear_randomize": true,
+    "auto_nonlinear_seed": 20264,
+    "nonlinear_tolerance": 1e-05,
+    "max_nonlinear_iterations": 30,
+    "output_csv": "results_nonlinear/tree_4_y_fan_canopy/frf.csv"
+  },
+  "observations": [
+    {
+      "id": "obs_trunk_root",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_trunk_mid",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_trunk_tip",
+      "target_type": "branch",
+      "target_id": "trunk",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_main_leader_root",
+      "target_type": "branch",
+      "target_id": "left_main_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_main_leader_mid",
+      "target_type": "branch",
+      "target_id": "left_main_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_main_leader_tip",
+      "target_type": "branch",
+      "target_id": "left_main_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_leader_root",
+      "target_type": "branch",
+      "target_id": "inner_left_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_leader_mid",
+      "target_type": "branch",
+      "target_id": "inner_left_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_leader_tip",
+      "target_type": "branch",
+      "target_id": "inner_left_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_leader_root",
+      "target_type": "branch",
+      "target_id": "center_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_leader_mid",
+      "target_type": "branch",
+      "target_id": "center_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_leader_tip",
+      "target_type": "branch",
+      "target_id": "center_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_inner_leader_root",
+      "target_type": "branch",
+      "target_id": "right_inner_leader",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_inner_leader_mid",
+      "target_type": "branch",
+      "target_id": "right_inner_leader",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_inner_leader_tip",
+      "target_type": "branch",
+      "target_id": "right_inner_leader",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_low_arch_root",
+      "target_type": "branch",
+      "target_id": "right_low_arch",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_low_arch_mid",
+      "target_type": "branch",
+      "target_id": "right_low_arch",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_low_arch_tip",
+      "target_type": "branch",
+      "target_id": "right_low_arch",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_lower_lateral_root",
+      "target_type": "branch",
+      "target_id": "left_lower_lateral",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_lower_lateral_mid",
+      "target_type": "branch",
+      "target_id": "left_lower_lateral",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_lower_lateral_tip",
+      "target_type": "branch",
+      "target_id": "left_lower_lateral",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_outer_top_root",
+      "target_type": "branch",
+      "target_id": "left_outer_top",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_outer_top_mid",
+      "target_type": "branch",
+      "target_id": "left_outer_top",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_outer_top_tip",
+      "target_type": "branch",
+      "target_id": "left_outer_top",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_terminal_root",
+      "target_type": "branch",
+      "target_id": "left_terminal",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_terminal_mid",
+      "target_type": "branch",
+      "target_id": "left_terminal",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_left_terminal_tip",
+      "target_type": "branch",
+      "target_id": "left_terminal",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_top_root",
+      "target_type": "branch",
+      "target_id": "inner_left_top",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_top_mid",
+      "target_type": "branch",
+      "target_id": "inner_left_top",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_inner_left_top_tip",
+      "target_type": "branch",
+      "target_id": "inner_left_top",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_terminal_root",
+      "target_type": "branch",
+      "target_id": "center_terminal",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_terminal_mid",
+      "target_type": "branch",
+      "target_id": "center_terminal",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_terminal_tip",
+      "target_type": "branch",
+      "target_id": "center_terminal",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_left_shoot_root",
+      "target_type": "branch",
+      "target_id": "center_left_shoot",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_left_shoot_mid",
+      "target_type": "branch",
+      "target_id": "center_left_shoot",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_center_left_shoot_tip",
+      "target_type": "branch",
+      "target_id": "center_left_shoot",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upper_scaffold_root",
+      "target_type": "branch",
+      "target_id": "right_upper_scaffold",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upper_scaffold_mid",
+      "target_type": "branch",
+      "target_id": "right_upper_scaffold",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upper_scaffold_tip",
+      "target_type": "branch",
+      "target_id": "right_upper_scaffold",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upright_shoot_root",
+      "target_type": "branch",
+      "target_id": "right_upright_shoot",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upright_shoot_mid",
+      "target_type": "branch",
+      "target_id": "right_upright_shoot",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upright_shoot_tip",
+      "target_type": "branch",
+      "target_id": "right_upright_shoot",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_arch_lower_spray_root",
+      "target_type": "branch",
+      "target_id": "right_arch_lower_spray",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_arch_lower_spray_mid",
+      "target_type": "branch",
+      "target_id": "right_arch_lower_spray",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_arch_lower_spray_tip",
+      "target_type": "branch",
+      "target_id": "right_arch_lower_spray",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_arch_terminal_spray_root",
+      "target_type": "branch",
+      "target_id": "right_arch_terminal_spray",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_arch_terminal_spray_mid",
+      "target_type": "branch",
+      "target_id": "right_arch_terminal_spray",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_arch_terminal_spray_tip",
+      "target_type": "branch",
+      "target_id": "right_arch_terminal_spray",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upper_tip_spray_root",
+      "target_type": "branch",
+      "target_id": "right_upper_tip_spray",
+      "target_node": "root",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upper_tip_spray_mid",
+      "target_type": "branch",
+      "target_id": "right_upper_tip_spray",
+      "target_node": "mid",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    },
+    {
+      "id": "obs_right_upper_tip_spray_tip",
+      "target_type": "branch",
+      "target_id": "right_upper_tip_spray",
+      "target_node": "tip",
+      "target_components": [
+        "ux",
+        "uy",
+        "uz"
+      ]
+    }
+  ],
+  "fruit_distribution_policy": {
+    "total_fruit_count": 20,
+    "seed": 2026,
+    "include_terminal_primary": false,
+    "detachment_displacement_m": 0.01,
+    "attachment_damping_ratio": 0.05,
+    "attachment_component": "uz"
+  }
+}

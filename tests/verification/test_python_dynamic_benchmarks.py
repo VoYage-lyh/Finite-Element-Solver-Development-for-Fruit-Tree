@@ -15,7 +15,7 @@ from orchard_fem.domain import (
     ExcitationKind,
     HarmonicExcitation,
 )
-from orchard_fem.dynamics import solve_frequency_response_system, solve_time_history_system
+from orchard_fem.dynamics import solve_frequency_response_system
 from orchard_fem.verification import build_hinged_two_bar_system, solve_generalized_frequencies
 
 

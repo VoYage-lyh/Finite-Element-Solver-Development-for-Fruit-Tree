@@ -16,7 +16,7 @@ Paper baseline: ``N_base = 512`` → ``13312`` evaluations per tree.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal, Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 

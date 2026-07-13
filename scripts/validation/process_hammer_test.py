@@ -28,8 +28,8 @@ Outputs (under ``--out-dir``):
 
 Run::
 
-    python scripts/process_hammer_test.py --prefix trees/tree1_p1 \
-        --out-dir results/hammer_test/tree1_p1
+    python scripts/process_hammer_test.py --prefix workspace/tree_models/tree1_p1 \
+        --out-dir workspace/outputs/hammer_test/tree1_p1
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import csv
 import pickle
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,13 @@ STATIONS = ("root", "mid", "tip")
 COMPONENTS = ("X", "Y", "Z")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CACHE_ROOT = REPO_ROOT / "cache" / "hammer_test"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from orchard_fem.workspace import workspace_paths
+
+WORKSPACE = workspace_paths()
+CACHE_ROOT = WORKSPACE.cache / "hammer_test"
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +483,7 @@ def compute_frf_ensemble(
 
 # ---------------------------------------------------------------------------
 # Cache for the heavy preprocessing pipeline (load + resample + auto-align).
-# Stored under cache/hammer_test/<test>/processed.pkl with a small signature
+# Stored under workspace/cache/hammer_test/<test>/processed.pkl with a small signature
 # of input file mtimes + preprocessing args. Invalidated automatically when
 # any of those change; --force on the CLI bypasses the cache.
 # ---------------------------------------------------------------------------
@@ -545,7 +552,7 @@ def _write_cache(cache_path: Path, blob: _ProcessedBlob) -> None:
         pickle.dump(blob, fh, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-# Styling reused across hammer-test figures so they match results/frf/frf_tree_*.png.
+# Styling reused across hammer-test figures so they match workspace/outputs/frf/frf_tree_*.png.
 PRIMARY_COLOR = "#2166AC"
 ACCENT_COLOR = "#B2182B"
 GRID_MAJOR = "#d0d0d0"
@@ -816,13 +823,13 @@ def main() -> int:
     parser.add_argument(
         "--prefix",
         required=True,
-        help="Common file prefix, e.g. 'trees/tree1_p1'. Files <prefix>_force.csv "
+        help="Common file prefix, e.g. 'workspace/tree_models/tree1_p1'. Files <prefix>_force.csv "
         "and <prefix>_{root,mid,tip}.csv must exist.",
     )
     parser.add_argument(
         "--out-dir",
         default=None,
-        help="Output directory (default: results/hammer_test/<prefix-stem>).",
+        help="Output directory (default: workspace/outputs/hammer_test/<prefix-stem>).",
     )
     parser.add_argument(
         "--branch-id",
@@ -845,7 +852,7 @@ def main() -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Ignore cached preprocessing under cache/hammer_test/<name>/ and recompute.",
+        help="Ignore cached preprocessing under workspace/cache/hammer_test/<name>/ and recompute.",
     )
     parser.add_argument(
         "--num-impacts",
@@ -933,7 +940,11 @@ def main() -> int:
         print("Missing accel CSV(s):\n  " + "\n  ".join(missing))
         return 2
 
-    out_dir = Path(args.out_dir) if args.out_dir else Path("results/hammer_test") / prefix.name
+    out_dir = (
+        Path(args.out_dir)
+        if args.out_dir
+        else WORKSPACE.outputs / "hammer_test" / prefix.name
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     force_clock_start = _parse_force_start(args.force_start)
@@ -951,7 +962,7 @@ def main() -> int:
     if not args.force:
         blob = _try_load_cache(cache_path, signature)
         if blob is not None:
-            print(f"[cache] hit {cache_path.relative_to(REPO_ROOT)} "
+            print(f"[cache] hit {cache_path} "
                   f"(lag={blob.lag_s:+.3f} s, {blob.peaks.size} impacts)")
 
     if blob is None:
@@ -995,7 +1006,7 @@ def main() -> int:
             signature=signature, rejected_peaks=rejected,
         )
         _write_cache(cache_path, blob)
-        print(f"[cache] wrote {cache_path.relative_to(REPO_ROOT)}")
+        print(f"[cache] wrote {cache_path}")
 
     record = blob.record
     all_peaks = blob.peaks

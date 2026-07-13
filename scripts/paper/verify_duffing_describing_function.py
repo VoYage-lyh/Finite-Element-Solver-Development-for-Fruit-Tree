@@ -21,7 +21,7 @@ We sweep frequency near resonance for three parameter sets:
 * cubic only (k3 != 0, c2 = 0)
 * cubic + quadratic damping (k3 != 0, c2 != 0)
 
-Output (under ``results/verification/``):
+Output (under ``workspace/outputs/verification/``):
 
 * ``duffing_sdof_frf.{png,pdf}`` — three FRFs overlaid, with RK45 markers
   showing the HB prediction matches the time-history ground truth.
@@ -47,6 +47,8 @@ from scipy.integrate import solve_ivp
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+
+from orchard_fem.workspace import display_path, workspace_paths
 
 from orchard_fem.discretization.types import NonlinearLinkDefinition, NonlinearLinkKind
 from orchard_fem.dynamics.harmonic_balance import first_harmonic_link_response
@@ -178,7 +180,7 @@ def _apply_pub_style() -> None:
 
 def main() -> int:
     _apply_pub_style()
-    out_dir = REPO / "results" / "verification"
+    out_dir = workspace_paths().outputs / "verification"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     freqs_hz = np.linspace(FREQ_MIN_HZ, FREQ_MAX_HZ, FREQ_STEPS)
@@ -253,7 +255,7 @@ def main() -> int:
     suppression = (cubic_amp - full_amp) / cubic_amp * 100.0 if cubic_amp > 0 else 0.0
     print()
     print(f"c2 peak suppression (cubic_only -> full, HB): {suppression:+.2f} %")
-    print(f"Output: {out_dir.relative_to(REPO)}/duffing_sdof_frf.{{png,pdf}}, "
+    print(f"Output: {display_path(out_dir)}/duffing_sdof_frf.{{png,pdf}}, "
           f"duffing_sdof_results.csv")
     print("=" * 72)
     return 0

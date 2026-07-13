@@ -25,7 +25,7 @@ Example::
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
@@ -287,7 +287,6 @@ def estimate_h1_average(
     n = kept[0].force.shape[0]
     nps = nperseg if nperseg is not None else min(2048, n)
 
-    h_sum: np.ndarray | None = None
     g_ff_sum: np.ndarray | None = None
     g_aa_sum: np.ndarray | None = None
     g_af_sum: np.ndarray | None = None

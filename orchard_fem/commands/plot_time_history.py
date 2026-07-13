@@ -37,6 +37,6 @@ def register_plot_time_history_command(
         "--output",
         type=Path,
         default=None,
-        help="Save the figure to this path (e.g. results/accel.png).",
+        help="Save the figure to this path (e.g. build/accel.png).",
     )
     parser.set_defaults(handler=partial(_handle_plot_time_history, application=application))

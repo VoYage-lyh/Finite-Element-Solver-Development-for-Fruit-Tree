@@ -1,9 +1,7 @@
 """Tests for FRF measurement CSV loading and comparison (no FEniCSx required)."""
 from __future__ import annotations
 
-import io
 import math
-import tempfile
 from pathlib import Path
 
 import pytest

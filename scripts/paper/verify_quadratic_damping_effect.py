@@ -13,7 +13,7 @@ velocity is large.  To isolate it we run three FRF sweeps per tree:
 The cubic_only -> full delta is the quadratic damping contribution.  We
 expect the response peak to drop and the peak to widen (added dissipation).
 
-Outputs (under ``results/verification/``):
+Outputs (under ``workspace/outputs/verification/``):
 
 * ``c2_effect_tree_<n>.{png,pdf}`` — three-curve overlay per tree.
 * ``summary_c2_suppression.{png,pdf}`` — peak amplitude reduction across trees.
@@ -37,6 +37,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from orchard_fem.io.loaders.orchard import load_orchard_model
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
 from orchard_fem.fenicsx.frequency_response import (
     solve_embedded_beam_frequency_response_experiment,
 )
@@ -245,12 +246,12 @@ def _plot_summary(out_stem: Path, rows: list[tuple]) -> None:
 # ---------------------------------------------------------------------------
 def main() -> int:
     _apply_pub_style()
-    out_dir = REPO / "results" / "verification"
+    out_dir = workspace_paths().outputs / "verification"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[tuple] = []
     for n in (1, 2, 3, 4, 5):
-        path = REPO / "trees" / f"tree_{n}.json"
+        path = example_trees_dir() / f"tree_{n}.json"
         if not path.exists():
             print(f"[skip] {path} missing")
             continue
@@ -337,8 +338,8 @@ def main() -> int:
           f"(positive = damping clipped the peak)")
     print(f"Mean further freq shift     : {float(np.nanmean(shifts)):+.2f} %  "
           "(cubic-only -> full)")
-    print(f"Summary CSV  : {csv_path.relative_to(REPO)}")
-    print(f"Per-tree fig : {out_dir.relative_to(REPO)}/c2_effect_tree_<n>.{{png,pdf}}")
+    print(f"Summary CSV  : {display_path(csv_path)}")
+    print(f"Per-tree fig : {display_path(out_dir)}/c2_effect_tree_<n>.{{png,pdf}}")
     print("=" * 72)
     return 0
 

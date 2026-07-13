@@ -3,7 +3,7 @@
 
 三步流程(Notebook 标签页),共享底部日志:
 
-① **树模型** — 选择 tree JSON(``trees/*.json``),加载并显示主要参数；也可从照片
+① **树模型** — 选择版本化示例或 ``workspace/tree_models/`` 中的 tree JSON；也可从照片
    提取/人工编辑有图像证据的骨架，再转换并载入求解器模型
    (:func:`orchard_fem.workflows.harvest_recommendation.summarize_orchard_model`)。
 ② **仿真** — 后台线程一键跑完整条流水线:
@@ -14,7 +14,7 @@
    够不够、不够就分阶段;每阶段时长由疲劳模型算)。结果表 + 推荐/序列两面板并排显示。
 ③ **执行** — 串口连接、清报警、回中,一个 RUN 把②的序列在电动缸上逐阶段跑
    (:func:`~orchard_fem.actuator.ds5l1.run_harvest_schedule_on_rig`),STOP 立即断使能;
-   每次运行归档至 ``results/harvest_runs/``。
+   每次运行归档至本地 ``workspace/outputs/harvest_runs/``。
 
 运行:``python -m orchard_fem.actuator.harvest_console``(仿真需 dolfinx)。
 """
@@ -34,6 +34,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from orchard_fem.actuator.ds5l1 import DS5L1, run_harvest_schedule_on_rig
 from orchard_fem.actuator.harvest_bridge import DS5L1Limits
+from orchard_fem.workspace import REPOSITORY_ROOT, example_trees_dir, workspace_paths
 from orchard_fem.workflows.harvest_recommendation import (
     RecommendationOptions,
     RecommendationResult,
@@ -41,9 +42,12 @@ from orchard_fem.workflows.harvest_recommendation import (
     summarize_orchard_model,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TREES_DIR = REPO_ROOT / "trees"
-RUNS_DIR = REPO_ROOT / "results" / "harvest_runs"
+REPO_ROOT = REPOSITORY_ROOT
+WORKSPACE = workspace_paths()
+TREES_DIR = WORKSPACE.tree_models
+EXAMPLE_TREES_DIR = example_trees_dir()
+PHOTO_DIR = WORKSPACE.raw_photos
+RUNS_DIR = WORKSPACE.harvest_runs
 
 LIMITS = DS5L1Limits()
 
@@ -389,7 +393,7 @@ class HarvestConsole:
         vision.pack(fill="x", padx=6, pady=(0, 3))
         default_segmenter = (
             "wood"
-            if (REPO_ROOT / "weights" / "wood_seg.pt").exists()
+            if WORKSPACE.wood_checkpoint.exists()
             and _has("torch")
             and _has("timm")
             else "classical"
@@ -453,7 +457,9 @@ class HarvestConsole:
 
     def on_browse_model(self) -> None:
         path = filedialog.askopenfilename(
-            initialdir=str(TREES_DIR if TREES_DIR.exists() else REPO_ROOT),
+            initialdir=str(
+                TREES_DIR if TREES_DIR.exists() else EXAMPLE_TREES_DIR
+            ),
             filetypes=[("Tree model JSON", "*.json")])
         if path:
             self.var_model_path.set(path)
@@ -523,7 +529,7 @@ class HarvestConsole:
             return
         image_path = filedialog.askopenfilename(
             parent=self.root,
-            initialdir=str(TREES_DIR if TREES_DIR.exists() else REPO_ROOT),
+            initialdir=str(PHOTO_DIR if PHOTO_DIR.exists() else REPO_ROOT),
             filetypes=[
                 ("Tree photos", "*.png *.jpg *.jpeg *.tif *.tiff"),
                 ("All files", "*.*"),
@@ -576,13 +582,13 @@ class HarvestConsole:
                     from orchard_vision.wood_seg import WoodSegmenter
 
                     segmenter = WoodSegmenter(
-                        checkpoint=str(REPO_ROOT / "weights" / "wood_seg.pt")
+                        checkpoint=str(WORKSPACE.wood_checkpoint)
                     )
                 elif segmenter_name == "sam2":
                     from orchard_vision.segmentation_sam2 import Sam2Segmenter
 
                     segmenter = Sam2Segmenter(
-                        checkpoint=str(REPO_ROOT / "weights" / "sam2_t.pt")
+                        checkpoint=str(WORKSPACE.sam_checkpoint)
                     )
                 else:
                     from orchard_vision.segmentation import ClassicalSegmenter
@@ -1158,7 +1164,7 @@ class HarvestConsole:
                      "3) Alarm code 0 after connecting (clear it otherwise).   "
                      "4) First-time homing needs one drive power cycle.\n"
                      "5) Physical power switch within reach (emergency stop).   "
-                     "6) Every run is archived under results/harvest_runs/.")
+                     "6) Every run is archived under workspace/outputs/harvest_runs/.")
         check.configure(state="disabled")
         check.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -1299,7 +1305,11 @@ class HarvestConsole:
             path = RUNS_DIR / f"run_{time.strftime('%Y%m%d_%H%M%S')}.json"
             path.write_text(json.dumps(record, ensure_ascii=False, indent=1),
                             encoding="utf-8")
-            self.log(f"Run record → {path.relative_to(REPO_ROOT)}")
+            try:
+                display_path = path.relative_to(REPO_ROOT)
+            except ValueError:
+                display_path = path
+            self.log(f"Run record → {display_path}")
         except Exception as e:  # noqa: BLE001
             self.log(f"Failed to save run record: {e}")
 

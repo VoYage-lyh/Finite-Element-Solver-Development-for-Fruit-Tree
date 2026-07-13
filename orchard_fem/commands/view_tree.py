@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from functools import partial
 from pathlib import Path
 
@@ -38,6 +37,6 @@ def register_view_tree_command(
         "--output",
         type=Path,
         default=None,
-        help="Save the figure to this path (e.g. results/tree.png).",
+        help="Save the figure to this path (e.g. build/tree.png).",
     )
     parser.set_defaults(handler=partial(_handle_view_tree, application=application))

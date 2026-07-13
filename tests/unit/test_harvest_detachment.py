@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
 
 import pytest
 
@@ -101,7 +100,6 @@ def test_no_detachment_below_threshold():
     mass = 0.05
 
     freq = 2.0
-    omega = 2.0 * math.pi * freq
     H = 0.001   # small compliance → small inertia force
 
     fruit = _make_fruit("f1", mass=mass, stiffness=k)

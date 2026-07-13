@@ -73,7 +73,6 @@ def plot_geometry(model: dict, output_path: Path, show: bool,
     if not branches:
         raise RuntimeError("Model JSON contains no branches")
 
-    max_level = max(int(branch.get("level", 0)) for branch in branches) or 1
     branch_lookup = build_branch_lookup(model)
     labels = hierarchical_labels(branches)
 

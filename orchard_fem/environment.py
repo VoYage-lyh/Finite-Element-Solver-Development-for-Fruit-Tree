@@ -12,14 +12,27 @@ from typing import Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
-CONDA_ENV_PATH = REPO_ROOT / "config" / "fenicsx_pinn_environment.yml"
-PREFERRED_PYPROJECT_GROUPS = ("project", "dev", "viz", "ml", "ubuntu-test")
+CONDA_ENV_PATH = REPO_ROOT / "config" / "orchard_fenicsx.yml"
+PREFERRED_PYPROJECT_GROUPS = (
+    "project",
+    "dev",
+    "viz",
+    "vision",
+    "ml",
+    "vision-sam",
+    "uq",
+    "rig",
+)
 FENICSX_ENV_LABEL = "conda::orchard-fenicsx"
 
 PACKAGE_IMPORT_ALIASES = {
     "pytest-cov": "pytest_cov",
     "pyyaml": "yaml",
     "pytorch": "torch",
+    "pillow": "PIL",
+    "pyserial": "serial",
+    "salib": "SALib",
+    "scikit-image": "skimage",
 }
 
 REQUIRED_TOOL_COMMANDS = {
@@ -160,8 +173,8 @@ def run_environment_audit() -> int:
         print(f"  {group_name}: {', '.join(missing_packages)}")
     print()
     print("Suggested next steps")
-    print('  Python test extras: python -m pip install -e ".[ubuntu-test]"')
-    print("  FEniCSx/PETSc env: conda env create -f config/fenicsx_pinn_environment.yml")
+    print('  Development extras: python -m pip install -e ".[dev,viz,vision]"')
+    print("  FEniCSx/PETSc env: conda env create -f config/orchard_fenicsx.yml")
     return 0
 
 

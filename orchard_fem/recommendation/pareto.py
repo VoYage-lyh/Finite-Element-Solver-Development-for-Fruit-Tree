@@ -24,7 +24,7 @@ a callable that evaluates ``y`` for a given ``(params, f, A, clamp_node)``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Sequence
 
 import numpy as np

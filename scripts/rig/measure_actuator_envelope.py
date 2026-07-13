@@ -35,6 +35,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
+from orchard_fem.workspace import workspace_paths
+
 
 def _connect(drv, port: str, parity: str, stopbits: int):
     """Open *port*, auto-trying serial framings if the explicit one fails.
@@ -80,7 +82,10 @@ def main() -> int:
     ap.add_argument("--i-understand", action="store_true",
                     help="acknowledge motion / allow --max-rpm > 1500")
     ap.add_argument("--dry-run", action="store_true", help="print the plan, no motion")
-    ap.add_argument("--out", default="results/calibration/actuator_envelope.csv")
+    ap.add_argument(
+        "--out",
+        default=str(workspace_paths().outputs / "calibration" / "actuator_envelope.csv"),
+    )
     args = ap.parse_args()
 
     from orchard_fem.actuator.ds5l1 import DS5L1

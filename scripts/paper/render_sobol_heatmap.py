@@ -1,13 +1,13 @@
 """Render Fig 15(b) — cross-tree heat map of total-effect Sobol indices.
 
-Reads ``results/calibration/sobol_t{1..5}_indices.csv`` and draws a
+Reads ``workspace/outputs/calibration/sobol_t{1..5}_indices.csv`` and draws a
 parameters × trees heat map of $S_T$, with each cell annotated by its
 numerical value. Missing trees are simply skipped (so the heat map
 adapts to whatever has finished so far).
 
 Output:
-  ``results/calibration/fig15b_sobol_heatmap.{png,pdf}``
-  ``results/calibration/sobol_st_table.csv``  (Table 6 data)
+  ``workspace/outputs/calibration/fig15b_sobol_heatmap.{png,pdf}``
+  ``workspace/outputs/calibration/sobol_st_table.csv``  (Table 6 data)
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ import csv
 from pathlib import Path
 
 import numpy as np
+
+from orchard_fem.workspace import display_path, workspace_paths
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -63,7 +65,7 @@ def main() -> int:
         help="Comma-separated tree ids to include (default 1,2,3,4,5).",
     )
     parser.add_argument(
-        "--in-dir", default="results/calibration",
+        "--in-dir", default=str(workspace_paths().outputs / "calibration"),
     )
     args = parser.parse_args()
 
@@ -141,7 +143,7 @@ def main() -> int:
     fig.savefig(stem.with_suffix(".png"), dpi=150)
     fig.savefig(stem.with_suffix(".pdf"))
     plt.close(fig)
-    print(f"\nFig 15(b): {stem.relative_to(REPO)}.{{png,pdf}}")
+    print(f"\nFig 15(b): {display_path(stem)}.{{png,pdf}}")
 
     # ----------------- Table 6 (CSV)
     tbl_path = in_dir / "table6_sobol_st_cross_tree.csv"
@@ -156,7 +158,7 @@ def main() -> int:
             w.writerow(row)
         # Mean row
         w.writerow(["mean"] + [f"{means[order_cols[j]]:.3f}" for j in range(n_p)])
-    print(f"Table 6:  {tbl_path.relative_to(REPO)}")
+    print(f"Table 6:  {display_path(tbl_path)}")
 
     # Print top-3 per tree
     print("\nTop-3 parameters per tree:")

@@ -12,10 +12,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VALIDATION_OUTPUT_DIR = Path("build/validation/python")
 
 INTEGRATION_TEST_TARGETS = [
-    "tests/integration/test_cross_section_defaults.py",
-    "tests/integration/test_auto_nonlinear_injection.py",
-    "tests/integration/test_gravity_prestress.py",
-    "tests/integration/test_frequency_continuation.py",
+    "tests/unit/test_cross_section_defaults.py",
+    "tests/unit/test_auto_nonlinear_injection.py",
+    "tests/backend/fenicsx/test_gravity_prestress.py",
+    "tests/unit/test_frequency_continuation.py",
     "tests/integration/test_python_cli.py",
     "tests/integration/test_python_scaffold.py",
 ]
@@ -23,30 +23,30 @@ INTEGRATION_TEST_TARGETS = [
 VERIFICATION_TEST_TARGETS = [
     "tests/verification/test_python_beam_benchmarks.py",
     "tests/verification/test_python_dynamic_benchmarks.py",
-    "tests/integration/test_gravity_prestress.py::test_gravity_prestress_adds_load_and_reduces_first_mode",
+    "tests/backend/fenicsx/test_gravity_prestress.py::test_gravity_prestress_adds_load_and_reduces_first_mode",
 ]
 
 DOLFINX_TEST_TARGETS = [
-    "tests/integration/test_fenicsx_boundary_conditions.py::test_build_model_clamp_boundary_conditions_smoke",
-    "tests/integration/test_fenicsx_embedded_mesh.py::test_create_dolfinx_embedded_line_mesh_smoke",
-    "tests/integration/test_fenicsx_fields.py::test_create_embedded_beam_function_space_smoke",
-    "tests/integration/test_fenicsx_beam_forms.py::test_fenicsx_system_assembly_facade_is_exported",
-    "tests/integration/test_fenicsx_beam_forms.py::test_fenicsx_system_assembly_reports_pipeline_stages",
-    "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_form_bundle_smoke",
-    "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_operator_bundle_smoke",
-    "tests/integration/test_fenicsx_beam_forms.py::test_embedded_beam_ufl_jacobian_matches_linear_stiffness_form",
-    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_experiment_smoke",
-    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_cantilever_first_mode_matches_analytic_reference",
-    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_fruit_attachment",
-    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_gravity_prestress",
-    "tests/integration/test_fenicsx_modal.py::test_embedded_beam_modal_supports_linear_joint_constraint",
-    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_experiment_smoke",
-    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode",
-    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment",
-    "tests/integration/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_harmonic_balance_nonlinear_links",
-    "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke",
-    "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_polynomial_joint_law",
-    "tests/integration/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_auto_and_clamp_nonlinear_links",
+    "tests/backend/fenicsx/test_fenicsx_boundary_conditions.py::test_build_model_clamp_boundary_conditions_smoke",
+    "tests/backend/fenicsx/test_fenicsx_embedded_mesh.py::test_create_dolfinx_embedded_line_mesh_smoke",
+    "tests/backend/fenicsx/test_fenicsx_fields.py::test_create_embedded_beam_function_space_smoke",
+    "tests/backend/fenicsx/test_fenicsx_beam_forms.py::test_fenicsx_system_assembly_facade_is_exported",
+    "tests/backend/fenicsx/test_fenicsx_beam_forms.py::test_fenicsx_system_assembly_reports_pipeline_stages",
+    "tests/backend/fenicsx/test_fenicsx_beam_forms.py::test_embedded_beam_form_bundle_smoke",
+    "tests/backend/fenicsx/test_fenicsx_beam_forms.py::test_embedded_beam_operator_bundle_smoke",
+    "tests/backend/fenicsx/test_fenicsx_beam_forms.py::test_embedded_beam_ufl_jacobian_matches_linear_stiffness_form",
+    "tests/backend/fenicsx/test_fenicsx_modal.py::test_embedded_beam_modal_experiment_smoke",
+    "tests/backend/fenicsx/test_fenicsx_modal.py::test_embedded_beam_cantilever_first_mode_matches_analytic_reference",
+    "tests/backend/fenicsx/test_fenicsx_modal.py::test_embedded_beam_modal_supports_fruit_attachment",
+    "tests/backend/fenicsx/test_fenicsx_modal.py::test_embedded_beam_modal_supports_gravity_prestress",
+    "tests/backend/fenicsx/test_fenicsx_modal.py::test_embedded_beam_modal_supports_linear_joint_constraint",
+    "tests/backend/fenicsx/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_experiment_smoke",
+    "tests/backend/fenicsx/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_peak_tracks_first_mode",
+    "tests/backend/fenicsx/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_fruit_attachment",
+    "tests/backend/fenicsx/test_fenicsx_frequency_response.py::test_embedded_beam_frequency_response_supports_harmonic_balance_nonlinear_links",
+    "tests/backend/fenicsx/test_fenicsx_time_history.py::test_embedded_beam_time_history_experiment_smoke",
+    "tests/backend/fenicsx/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_polynomial_joint_law",
+    "tests/backend/fenicsx/test_fenicsx_time_history.py::test_embedded_beam_time_history_supports_auto_and_clamp_nonlinear_links",
 ]
 
 
@@ -65,8 +65,8 @@ def require_pytest() -> None:
         return
     raise RuntimeError(
         "Validation requires pytest. Install the repository test extras with "
-        '`python -m pip install -e ".[ubuntu-test]"` or use the conda environment from '
-        "`config/fenicsx_pinn_environment.yml`. Run `python -m orchard_fem doctor` to audit "
+        '`python -m pip install -e ".[dev,viz,vision]"` or use the conda environment from '
+        "`config/orchard_fenicsx.yml`. Run `python -m orchard_fem doctor` to audit "
         "the active environment."
     )
 

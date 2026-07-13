@@ -22,12 +22,14 @@ frequency response, time-history response, and repeatable validation workflows.
 
 ```text
 orchard_fem/       Main solver package, CLI, workflows, post-processing, and visualization
-orchard_pinn/      Placeholder package for future surrogate/inverse modelling work
+orchard_vision/    Field-photo annotation, wood segmentation, skeleton extraction, and editing
+orchard_pinn/      Dataset, parameter-space, and metrics utilities for surrogate/inverse work
 examples/          Small runnable example models
-trees/             Orchard architecture examples and generated solver-ready models
 docs/              User, input-format, architecture, verification, and development notes
-config/            Conda/environment setup files
-tests/             Integration and verification tests
+config/            Tracked solver defaults, environment YAML, and example configurations
+tests/             Unit, integration, FEniCSx-backend, and verification tests
+scripts/           Paper reproduction, validation, studies, and physical-rig tools
+workspace/         Ignored local data, checkpoints, tree models, outputs, caches, and manuals
 build/             Generated local artifacts; safe to recreate
 ```
 
@@ -43,7 +45,7 @@ Use this for code inspection, importers, plotting, and tests that do not require
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[ubuntu-test]"
+python -m pip install -e ".[dev,viz,vision]"
 python -m orchard_fem doctor
 ```
 
@@ -52,16 +54,17 @@ python -m orchard_fem doctor
 Use this for the default solver backend and PETSc/SLEPc-backed analyses.
 
 ```bash
-conda env create -f config/fenicsx_pinn_environment.yml
+conda env create -f config/orchard_fenicsx.yml
 conda activate orchard-fenicsx
-python -m pip install -e ".[ubuntu-test]"
+python -m pip install -e . --no-deps
 python -m orchard_fem doctor
 ```
 
 If the environments already exist, typical local usage is:
 
 ```bash
-conda run -n orchard-fenicsx python -m pytest -q tests/integration
+conda run -n orchard-fenicsx python -m pytest -q \
+  -m "unit and not slow and not ml and not uq"
 conda run -n orchard-fenicsx python -m orchard_fem --help
 ```
 
@@ -70,7 +73,7 @@ conda run -n orchard-fenicsx python -m orchard_fem --help
 Run the frequency-response demo:
 
 ```bash
-python -m orchard_fem run examples/tree_3.json \
+python -m orchard_fem run examples/trees/tree_3.json \
   --output-csv build/tree_3_frequency_response.csv
 
 python -m orchard_fem plot-frequency-response build/tree_3_frequency_response.csv \
@@ -90,7 +93,7 @@ python -m orchard_fem plot-time-history build/demo_time_history.csv \
 Run the open-vase tree model:
 
 ```bash
-python -m orchard_fem run trees/tree_1.json \
+python -m orchard_fem run examples/trees/tree_1.json \
   --output-csv build/results/tree_1/frf.csv
 
 python -m orchard_fem plot-frequency-response \
@@ -98,12 +101,12 @@ python -m orchard_fem plot-frequency-response \
   --no-show
 
 python -m orchard_fem visualize \
-  trees/tree_1.json \
+  examples/trees/tree_1.json \
   build/results/tree_1/frf.csv \
   --output-prefix build/results/tree_1/visual
 
 python -m orchard_fem view-tree \
-  trees/tree_1.json \
+  examples/trees/tree_1.json \
   --no-show \
   --output build/results/tree_1/tree_3d.png
 ```
@@ -150,42 +153,48 @@ Backend selection can be set in the model JSON through `analysis.solver_backend`
 the CLI where supported:
 
 ```bash
-python -m orchard_fem run examples/tree_3.json --solver-backend native
-python -m orchard_fem modal trees/tree_1.json --solver-backend fenicsx
+python -m orchard_fem run examples/trees/tree_3.json --solver-backend native
+python -m orchard_fem modal examples/trees/tree_1.json --solver-backend fenicsx
 ```
 
 ## Inputs And Outputs
 
 Model input is JSON. The most useful starting points are:
 
-- `examples/tree_3.json`: the canonical example tree (frequency-response) — best first run.
+- `examples/trees/tree_3.json`: the canonical example tree (frequency-response) — best first run.
 - `tests/fixtures/demo_orchard_time_history.json`: compact time-history model.
-- `trees/tree_1.json`: image-derived multi-stem open-crown model.
-- `trees/tree_2.json`, `trees/tree_3.json`,
-  `trees/tree_4.json`, `trees/tree_5.json`: additional architecture
+- `examples/trees/tree_1.json`: image-derived multi-stem open-crown model.
+- `examples/trees/tree_2.json`, `examples/trees/tree_3.json`,
+  `examples/trees/tree_4.json`, `examples/trees/tree_5.json`: additional architecture
   examples.
 
 Solver outputs are CSV files. Plot commands write PNG figures when `--output` is provided. Generated
-files are usually written under `build/` or `results/`.
+files are usually written under `build/` or `workspace/outputs/`.
+
+Large datasets, model weights, generated tree models, caches, hardware manuals,
+and run outputs live under the ignored `workspace/` directory. Set
+`ORCHARD_WORKSPACE=/absolute/path` to keep them elsewhere. See
+[workspace/README.md](workspace/README.md) for the layout.
 
 See [docs/input_format.md](docs/input_format.md) for the model schema.
 
 ## Testing And Validation
 
-Python integration tests:
+Fast unit tests:
+
+```bash
+conda run -n orchard-fenicsx python -m pytest -q \
+  -m "unit and not slow and not ml and not uq"
+```
+
+Integration and FEniCSx/PETSc/SLEPc tests:
 
 ```bash
 conda run -n orchard-fenicsx python -m pytest -q tests/integration
-```
 
-FEniCSx/PETSc/SLEPc tests:
-
-```bash
 ORCHARD_RUN_DOLFINX_TESTS=1 \
 conda run -n orchard-fenicsx python -m pytest -q \
-  tests/integration/test_fenicsx_time_history.py \
-  tests/integration/test_fenicsx_modal.py \
-  tests/integration/test_fenicsx_frequency_response.py
+  tests/backend/fenicsx
 ```
 
 Project validation commands:
@@ -199,6 +208,7 @@ python -m orchard_fem full-validate
 
 - [docs/README.md](docs/README.md): documentation index.
 - [docs/getting_started.md](docs/getting_started.md): installation and first runs.
+- [docs/environment_setup.md](docs/environment_setup.md): dependency extras, FEniCSx, tests, and workspace.
 - [docs/input_format.md](docs/input_format.md): model JSON reference.
 - [docs/orchard_fem_architecture.md](docs/orchard_fem_architecture.md): package architecture.
 - [docs/verification.md](docs/verification.md): verification strategy and benchmark coverage.

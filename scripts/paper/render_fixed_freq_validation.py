@@ -1,9 +1,9 @@
 """Render Fig 14 + Table 5 — fixed-frequency posterior-predictive validation.
 
 Reads:
-  - ``results/calibration/fixed_freq_segments.csv``     measured hold segments
-  - ``cache/calibration/tree_<N>_..._fit.npz``          calibrated (β, k3, c2)
-  - ``trees/tree_<N>.json``                             FE model
+  - ``workspace/outputs/calibration/fixed_freq_segments.csv``     measured hold segments
+  - ``workspace/cache/calibration/tree_<N>_..._fit.npz``          calibrated (β, k3, c2)
+  - ``examples/trees/tree_<N>.json``                    FE model
 
 Pipeline:
   1. For each measured segment (drive_hz, rms_steady), forward-evaluate the
@@ -42,6 +42,9 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from orchard_fem.io.loaders.orchard import load_orchard_model
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
+
+WORKSPACE = workspace_paths()
 
 
 def _override_excitation(model, *, branch_id, node, comp, amplitude):
@@ -118,11 +121,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tree", type=int, default=1)
     parser.add_argument(
-        "--segments-csv", default="results/calibration/fixed_freq_segments.csv",
+        "--segments-csv",
+        default=str(WORKSPACE.outputs / "calibration" / "fixed_freq_segments.csv"),
     )
     parser.add_argument(
         "--calibration-cache",
-        default="cache/calibration/tree_1_left_leader_root_ux_fit.npz",
+        default=str(WORKSPACE.cache / "calibration" / "tree_1_left_leader_root_ux_fit.npz"),
     )
     parser.add_argument("--input-branch", default="left_leader")
     parser.add_argument("--input-node", default="root",
@@ -169,7 +173,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    out_dir = REPO / "results" / "calibration"
+    out_dir = WORKSPACE.outputs / "calibration"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve output suffix from --name or segments-CSV stem
@@ -209,7 +213,7 @@ def main() -> int:
     print(f"Calibrated: β={beta_opt:.3e}, k3×{k3_scale_opt:.2f}, c2×{c2_scale_opt:.2f}")
 
     # ------------------------------ load + override model
-    base_model_raw = load_orchard_model(str(REPO / "trees" / f"tree_{args.tree}.json"))
+    base_model_raw = load_orchard_model(str(example_trees_dir() / f"tree_{args.tree}.json"))
     output_branch = args.output_branch or args.input_branch
     output_obs = f"obs_{output_branch}_{args.output_station}_{args.output_comp}"
     print(f"Forward target: excitation @ {args.input_branch}/{args.input_node}/{args.input_comp},"
@@ -321,7 +325,7 @@ def main() -> int:
                 f"{pred_q05[i]:.3f}", f"{pred_q95[i]:.3f}",
                 f"{rel_err[i]:+.1f}", "yes" if in_band[i] else "no",
             ])
-    print(f"\nTable 5: {tbl_path.relative_to(REPO)}")
+    print(f"\nTable 5: {display_path(tbl_path)}")
 
     # ------------------------------ Fig 14
     _configure_paper_style()
@@ -376,7 +380,7 @@ def main() -> int:
     fig.savefig(stem.with_suffix(".png"), dpi=150)
     fig.savefig(stem.with_suffix(".pdf"))
     plt.close(fig)
-    print(f"Fig 14: {stem.relative_to(REPO)}.{{png,pdf}}")
+    print(f"Fig 14: {display_path(stem)}.{{png,pdf}}")
     return 0
 
 

@@ -14,6 +14,7 @@ dependencies:
   - pyyaml
   - matplotlib
   - scikit-image
+  - pillow
   - jupyter
   - pytest
   - pytest-cov
@@ -21,5 +22,10 @@ dependencies:
   - mypy
   - pytorch
   - timm
-# Optional and not installed by default:
-#   - deepxde
+  - pyserial
+  - emcee
+  - salib
+  - tqdm
+  - pip
+  - pip:
+      - ultralytics>=8.3

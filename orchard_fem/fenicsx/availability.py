@@ -34,5 +34,5 @@ def require_dolfinx() -> None:
         "FEniCSx backend is not available. Missing modules: "
         + ", ".join(missing)
         + ". Install the full FEniCSx stack by creating the "
-        "`orchard-fenicsx` environment from `config/fenicsx_pinn_environment.yml`."
+        "`orchard-fenicsx` environment from `config/orchard_fenicsx.yml`."
     )

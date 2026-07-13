@@ -5,11 +5,13 @@ This directory contains the active Orchard FEM documentation set.
 ## Start Here
 
 - [getting_started.md](getting_started.md): install the project, run the first demo, and validate the environment.
+- [environment_setup.md](environment_setup.md): dependency extras, FEniCSx setup, test scopes, and local workspace.
 - [development.md](development.md): developer workflow, repository conventions, and testing expectations.
 - [orchard_fem_architecture.md](orchard_fem_architecture.md): active package architecture and module boundaries.
 - [solver_roadmap.md](solver_roadmap.md): current implementation status against the solver roadmap.
 - [input_format.md](input_format.md): model JSON reference.
 - [verification.md](verification.md): verification strategy and benchmark coverage.
+- [model_cards/README.md](model_cards/README.md): trained-model scope and versioned metrics.
 
 ## Active Project Documents
 

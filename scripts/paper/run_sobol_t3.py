@@ -30,10 +30,10 @@ committing to the full run; pass ``--n-base 512`` for the publication-grade
 version.
 
 Outputs:
-  results/calibration/sobol_t3_samples.npz   raw samples + outputs (resumable)
-  results/calibration/sobol_t3_indices.csv   S1, ST per parameter
-  results/calibration/fig15a_sobol_t3.{png,pdf}   bar plot of S1 vs ST
-  results/calibration/sobol_t3_summary.txt   human-readable summary
+  workspace/outputs/calibration/sobol_t3_samples.npz   raw samples + outputs (resumable)
+  workspace/outputs/calibration/sobol_t3_indices.csv   S1, ST per parameter
+  workspace/outputs/calibration/fig15a_sobol_t3.{png,pdf}   bar plot of S1 vs ST
+  workspace/outputs/calibration/sobol_t3_summary.txt   human-readable summary
 """
 
 from __future__ import annotations
@@ -52,6 +52,8 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -259,7 +261,7 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument(
-        "--out-dir", default="results/calibration",
+        "--out-dir", default=str(workspace_paths().outputs / "calibration"),
     )
     parser.add_argument(
         "--resume", action="store_true",
@@ -275,7 +277,7 @@ def main() -> int:
     fig_stem = out_dir / f"fig15a_sobol_t{args.tree}"
 
     # Load baseline model JSON (we deep-copy + mutate it per sample)
-    base_json_path = REPO / "trees" / f"tree_{args.tree}.json"
+    base_json_path = example_trees_dir() / f"tree_{args.tree}.json"
     with base_json_path.open() as fh:
         base_json = json.load(fh)
     print(f"Loaded baseline {base_json_path.name}")
@@ -326,7 +328,7 @@ def main() -> int:
             np.savez(samples_path, X=X, Y=Y, names=np.array(PARAM_NAMES))
 
     np.savez(samples_path, X=X, Y=Y, names=np.array(PARAM_NAMES))
-    print(f"\nWrote: {samples_path.relative_to(REPO)}")
+    print(f"\nWrote: {display_path(samples_path)}")
 
     valid = np.isfinite(Y)
     print(f"Valid evaluations: {valid.sum()}/{Y.size} "
@@ -356,7 +358,7 @@ def main() -> int:
                 f"{Si['S1'][j]:.4f}", f"{Si['S1_conf'][j]:.4f}",
                 f"{Si['ST'][j]:.4f}", f"{Si['ST_conf'][j]:.4f}",
             ])
-    print(f"Wrote: {indices_path.relative_to(REPO)}")
+    print(f"Wrote: {display_path(indices_path)}")
 
     # Summary text
     order = np.argsort(-Si["ST"])
@@ -374,7 +376,7 @@ def main() -> int:
             fh.write(f"  {rank:2d}. {PARAM_NAMES[j]:18s}  "
                      f"S1={Si['S1'][j]:+.3f} ± {Si['S1_conf'][j]:.3f}  "
                      f"ST={Si['ST'][j]:+.3f} ± {Si['ST_conf'][j]:.3f}\n")
-    print(f"Wrote: {summary_path.relative_to(REPO)}")
+    print(f"Wrote: {display_path(summary_path)}")
 
     # Bar plot (Fig 15a)
     import matplotlib as mpl
@@ -412,7 +414,7 @@ def main() -> int:
     fig.savefig(fig_stem.with_suffix(".png"), dpi=150)
     fig.savefig(fig_stem.with_suffix(".pdf"))
     plt.close(fig)
-    print(f"Fig 15a: {fig_stem.relative_to(REPO)}.{{png,pdf}}")
+    print(f"Fig 15a: {display_path(fig_stem)}.{{png,pdf}}")
 
     # Console summary
     elapsed = time.time() - t_total

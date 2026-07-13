@@ -8,30 +8,20 @@ build/
 *.so
 *.dylib
 *.o
-*.csv
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 .venv/
 venv/
-cache/
-weights/
 *.pt
+.DS_Store
 
-# Local data and generated outputs (not hosted)
-dataset/
-datasets/
-trees/
-results*/
-
-# Image files
-*.png
-*.pdf
-*.jpg
-*.jpeg
-*.gif
-*.svg
-*.tif
-*.tiff
+# Machine-local data, model weights, caches, manuals, and generated outputs.
+# Keep workspace/README.md tracked so a fresh clone explains the layout.
+/workspace/*
+!/workspace/README.md

@@ -9,8 +9,8 @@ from typing import Sequence
 
 PLOT_INSTALL_HINT = (
     "Frequency-response plotting requires matplotlib. Install the repository test extras with "
-    '`python -m pip install -e ".[ubuntu-test]"` or create the conda environment from '
-    "`config/fenicsx_pinn_environment.yml`."
+    '`python -m pip install -e ".[viz]"` or create the conda environment from '
+    "`config/orchard_fenicsx.yml`."
 )
 
 

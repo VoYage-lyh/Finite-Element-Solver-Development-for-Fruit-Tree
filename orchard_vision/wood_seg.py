@@ -13,9 +13,8 @@ views ``tree001__view01`` and ``tree001__view02`` to keep them in the same split
 
 Typical commands::
 
-    python -m orchard_vision.wood_seg train --data datasets/wood_field
-    python -m orchard_vision.wood_seg evaluate --data datasets/wood_field \
-        --checkpoint weights/wood_seg.pt --split test
+    python -m orchard_vision.wood_seg train
+    python -m orchard_vision.wood_seg evaluate --split test
 
 This module remains a deliberately small-domain component.  Fully occluded wood
 cannot be learned from visible-wood labels and final skeletons remain editable in
@@ -40,6 +39,8 @@ import torch.nn.functional as F  # noqa: E402
 from skimage.io import imread  # noqa: E402
 from skimage.transform import rotate  # noqa: E402
 from torch import nn  # noqa: E402
+
+from orchard_fem.workspace import workspace_paths  # noqa: E402
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -827,7 +828,7 @@ def _blend_weights(size: int) -> np.ndarray:
 class WoodSegmenter:
     """EfficientFormer segmenter with seam-resistant overlapping-window inference."""
 
-    checkpoint: str = "weights/wood_seg.pt"
+    checkpoint: str = field(default_factory=lambda: str(workspace_paths().wood_checkpoint))
     device: str = "cuda:1"
     size: int | None = None
     overlap: int | None = None
@@ -972,12 +973,13 @@ def evaluate_wood_seg(
 # CLI
 # --------------------------------------------------------------------------------------
 def _build_parser() -> argparse.ArgumentParser:
+    paths = workspace_paths()
     parser = argparse.ArgumentParser(description="EfficientFormer visible-wood segmentation.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     train = subparsers.add_parser("train", help="train with group splits and ROI tiles")
-    train.add_argument("--data", default="datasets/wood_field")
-    train.add_argument("--out", default="weights/wood_seg.pt")
+    train.add_argument("--data", default=str(paths.wood_annotations))
+    train.add_argument("--out", default=str(paths.wood_checkpoint))
     train.add_argument("--backbone", default="efficientformer_l1")
     train.add_argument("--epochs", type=int, default=160)
     train.add_argument("--batch-size", type=int, default=8)
@@ -997,8 +999,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     evaluate = subparsers.add_parser("evaluate", help="evaluate a saved split on full ROIs")
-    evaluate.add_argument("--data", default="datasets/wood_field")
-    evaluate.add_argument("--checkpoint", default="weights/wood_seg.pt")
+    evaluate.add_argument("--data", default=str(paths.wood_annotations))
+    evaluate.add_argument("--checkpoint", default=str(paths.wood_checkpoint))
     evaluate.add_argument("--split", choices=_SPLIT_NAMES, default="test")
     evaluate.add_argument("--device", default="cuda:1")
     evaluate.add_argument("--val-fraction", type=float, default=0.15)

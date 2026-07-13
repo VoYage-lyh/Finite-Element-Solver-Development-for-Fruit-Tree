@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 
 import pytest
 
@@ -236,9 +235,6 @@ def test_fruit_distribution_policy_roundtrip_expands_correct_count(tmp_path) -> 
 
     # The loader should have expanded the policy to FruitAttachment objects
     assert len(model.fruits) > 0, "No fruits generated from policy"
-    total_fruits_in_attachments = sum(
-        att.fruit_id.count("-") >= 1 for att in model.fruits
-    )
     # Each node attachment aggregates multiple individual fruits.
     # Verify total count stored in fruit_policy matches.
     assert model.fruit_policy is not None

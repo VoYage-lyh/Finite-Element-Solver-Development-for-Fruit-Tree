@@ -9,7 +9,7 @@ Pareto, band-tuned ζ≈6 % damping) and
 then renders the figures from that output. The old standalone logic (mean-FRF
 single-peak resonance, single-clamp greedy, P1) was wrong and has been removed.
 
-Outputs default to ``results/`` (``--output-dir`` to change), organised by
+Outputs default to ``workspace/outputs/`` (``--output-dir`` to change), organised by
 figure type:
 
 * ``<out>/pareto/pareto_tree_<n>.{png,pdf}``    — per-clamp Pareto + best knee
@@ -19,11 +19,11 @@ figure type:
 * ``<out>/summary/knees.{png,pdf}`` + ``summary_sequence_coverage.{png,pdf}``
 * ``<out>/verification/*`` — refreshed in the same run by orchestrating the
   standalone verification scripts (Duffing, quadratic-damping, linear-vs-nonlinear,
-  measured-vs-simulation), so ONE call regenerates every figure in ``results/``.
+  measured-vs-simulation), so ONE call regenerates every figure in ``workspace/outputs/``.
 
 Cache / recompute:
 
-* no flag   → harvest figures render from ``cache/figures_<out>/`` (fast); the
+* no flag   → harvest figures render from ``workspace/cache/figures_<out>/`` (fast); the
   verification scripts reuse their own caches. Every figure is still produced.
 * ``--force``→ recompute the harvest FE and clear the verification caches so
   everything is regenerated from scratch.
@@ -41,6 +41,11 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
+
+WORKSPACE = workspace_paths()
+EXAMPLE_TREES = example_trees_dir()
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -419,20 +424,20 @@ def _load_or_evaluate(model_path: Path, label: str, *,
         with open(cache_file, "rb") as fh:
             result = pickle.load(fh)
         print(f"[{label}] loaded from cache: "
-              f"{cache_file.relative_to(REPO)}")
+              f"{display_path(cache_file)}")
         return result
     result = _evaluate_tree(model_path, label=label)
     cache_dir.mkdir(parents=True, exist_ok=True)
     with open(cache_file, "wb") as fh:
         pickle.dump(result, fh, protocol=pickle.HIGHEST_PROTOCOL)
     size_kb = cache_file.stat().st_size / 1024.0
-    print(f"[{label}] cached → {cache_file.relative_to(REPO)} ({size_kb:.0f} KB)")
+    print(f"[{label}] cached → {display_path(cache_file)} ({size_kb:.0f} KB)")
     return result
 
 
 def _run_verification_figures(repo: Path, *, force: bool) -> None:
-    """Refresh results/verification/ in the SAME run, so one generate_all_figures
-    call produces every figure in results/.
+    """Refresh workspace/outputs/verification/ in the SAME run, so one generate_all_figures
+    call produces every figure in workspace/outputs/.
 
     Each verification figure stays its own independently runnable script; here we
     just orchestrate them as subprocesses (from the repo root). ``--force`` clears
@@ -444,7 +449,7 @@ def _run_verification_figures(repo: Path, *, force: bool) -> None:
     import subprocess
 
     if force:
-        for cache in (repo / "cache" / "hammer_test",):
+        for cache in (WORKSPACE.cache / "hammer_test",):
             if cache.exists():
                 shutil.rmtree(cache)
 
@@ -469,8 +474,8 @@ def _run_verification_figures(repo: Path, *, force: bool) -> None:
     # the harvest cache written by the pipeline above. Best-effort.
     if _run("Hammer-test processing",
             ["scripts/validation/process_hammer_test.py",
-             "--prefix", "trees/tree1_p1",
-             "--out-dir", "results/hammer_test/tree1_p1"],
+             "--prefix", str(WORKSPACE.tree_models / "tree1_p1"),
+             "--out-dir", str(WORKSPACE.outputs / "hammer_test" / "tree1_p1")],
             required=False):
         _run("Measured vs simulation overlay",
              ["scripts/validation/compare_measured_vs_sim.py", "--tree", "1"],
@@ -493,7 +498,7 @@ def main() -> int:
              "Use this when only the figure styling has changed.",
     )
     parser.add_argument(
-        "--output-dir", default="results",
+        "--output-dir", default=str(WORKSPACE.outputs),
         help="Directory (relative to repo root, or absolute) where figures are "
              "written (default 'results').",
     )
@@ -505,14 +510,14 @@ def main() -> int:
     out_pareto = results_root / "pareto"
     out_frf = results_root / "frf"
     out_summary = results_root / "summary"
-    cache_dir = REPO / "cache" / f"figures_{results_root.name}"
+    cache_dir = WORKSPACE.cache / f"figures_{results_root.name}"
     for d in (out_pareto, out_frf, out_summary):
         d.mkdir(parents=True, exist_ok=True)
     results_label = results_root.name
 
     results: list[TreeResult] = []
     for n in (1, 2, 3, 4, 5):
-        model_path = REPO / "trees" / f"tree_{n}.json"
+        model_path = EXAMPLE_TREES / f"tree_{n}.json"
         if not model_path.exists():
             print(f"[skip] {model_path} not found")
             continue
@@ -565,7 +570,7 @@ def main() -> int:
               f"{results_label}/summary/summary_knees.{{png,pdf}} + "
               f"{results_label}/summary/summary_sequence_coverage.{{png,pdf}}")
 
-    # results/verification/ — same run produces every figure in results/.
+    # workspace/outputs/verification/ — same run produces every figure in workspace/outputs/.
     if args.only_figures:
         print("\n[verification] skipped (--only-figures runs no FE; the aux "
               "scripts may). Run without --only-figures to refresh verification/.")

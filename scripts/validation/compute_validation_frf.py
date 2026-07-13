@@ -13,7 +13,7 @@ displacement amplitudes of **all** branch tips in the **ux** direction (a
   links injected — so the same point-to-point FRF can be compared in both
   modelling fidelities.
 
-Result is cached at ``cache/validation_frf/tree_<n>_<input>_to_<output>.npz``
+Result is cached at ``workspace/cache/validation_frf/tree_<n>_<input>_to_<output>.npz``
 so re-runs are sub-second.
 """
 
@@ -32,8 +32,10 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from orchard_fem.io.loaders.orchard import load_orchard_model
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
 
-CACHE_DIR = REPO / "cache" / "validation_frf"
+WORKSPACE = workspace_paths()
+CACHE_DIR = WORKSPACE.cache / "validation_frf"
 
 
 def _strip_nonlinear(model):
@@ -178,9 +180,9 @@ def main() -> int:
         freqs = d["freqs"]
         mag_lin = d["mag_lin"]
         mag_nl = d["mag_nl"]
-        print(f"[cache] hit {cache_path.relative_to(REPO)}")
+        print(f"[cache] hit {display_path(cache_path)}")
     else:
-        model_path = REPO / "trees" / f"tree_{args.tree}.json"
+        model_path = example_trees_dir() / f"tree_{args.tree}.json"
         print(f"Loading {model_path}")
         model = load_orchard_model(str(model_path))
 
@@ -244,7 +246,7 @@ def main() -> int:
             output_comp=args.output_comp,
             amplitude=args.amplitude,
         )
-        print(f"[cache] wrote {cache_path.relative_to(REPO)}")
+        print(f"[cache] wrote {display_path(cache_path)}")
 
     print()
     print(f"Result: freqs {freqs.min():.2f}–{freqs.max():.2f} Hz, "

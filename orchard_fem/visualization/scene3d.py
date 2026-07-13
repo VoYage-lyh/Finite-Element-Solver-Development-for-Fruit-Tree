@@ -169,7 +169,6 @@ def plot_tree_3d(
     z_range = max(z_max - z_min, 0.1)
     mid_x = (x_max + x_min) / 2.0
     mid_y = (y_max + y_min) / 2.0
-    mid_z = (z_max + z_min) / 2.0
     # Tight padding around actual tree extent — no forced cube.
     x_pad = max(x_range * 0.08, 0.08)
     y_pad = max(y_range * 0.30, 0.10)

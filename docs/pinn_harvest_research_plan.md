@@ -37,7 +37,7 @@
 
 | 级 | 职责 | 输入 → 输出 | 现有件 |
 |---|---|---|---|
-| ① 表征 | 廉价观测 → 树模型 | 几何(拓扑/直径/长度,来自照片/LiDAR)+ 树种先验 → 模型参数 | `trees/*.json` 导入、`shared_materials.json` |
+| ① 表征 | 廉价观测 → 树模型 | 几何(拓扑/直径/长度,来自照片/LiDAR)+ 树种先验 → 模型参数 | `examples/trees/*.json` 示例、`workspace/tree_models/` 本地导入 |
 | ② 快速预测 | 树 + 作业参数 → 响应/脱落 | (图, f, A, 位置) → 响应 / 脱落率 | `orchard_pinn/data/generator.py`(LHS+FEM→npz)、FEM 真值 |
 | ③ 优化 | 搜最优作业参数 | 响应模型 → argmax 鲁棒目标 | `harvest/optimization.py`、`recommendation/pareto.py` |
 

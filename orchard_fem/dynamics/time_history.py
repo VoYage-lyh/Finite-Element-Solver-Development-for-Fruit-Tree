@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from orchard_fem.discretization import LinearDynamicAssemblyResult, OrchardSystemAssembler
 from orchard_fem.dynamics.excitation import (
-    TimeExcitationState,
     build_time_excitation_state,
     build_time_load_vector,
 )

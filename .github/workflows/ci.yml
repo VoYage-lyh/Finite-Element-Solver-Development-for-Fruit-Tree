@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lightweight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install development dependencies
+        run: python -m pip install -e ".[dev,viz,vision]"
+      - name: Lint
+        run: ruff check .
+      - name: Fast unit tests
+        run: python -m pytest -q -m "unit and not slow and not ml and not uq"
+      - name: Integration and numerical verification
+        run: python -m pytest -q tests/integration tests/verification

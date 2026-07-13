@@ -1,7 +1,7 @@
 """Render four independent figures summarising 20-fruit *Prunus cerasifera*
 field measurements so each can be placed individually in LaTeX.
 
-Outputs (under ``results/summary/``):
+Outputs (under ``workspace/outputs/summary/``):
     * ``fruit_stats_distribution.{png,pdf}`` — geometry / mass / force violins
     * ``fruit_stats_force_vs_mass.{png,pdf}`` — F_det vs mass scatter
     * ``fruit_stats_force_vs_position.{png,pdf}`` — F_det by growing position
@@ -15,6 +15,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+from orchard_fem.workspace import workspace_paths
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -340,7 +342,7 @@ def _save_force_vs_height(out_dir: Path) -> None:
 
 # ────────────────────────────────────────────────────────────────────────────
 def main() -> int:
-    out_dir = REPO / "results" / "summary"
+    out_dir = workspace_paths().outputs / "summary"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     _save_distribution(out_dir)

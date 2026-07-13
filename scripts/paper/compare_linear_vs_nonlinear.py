@@ -13,7 +13,7 @@ The resonance peaks in the harvesting band (3-20 Hz) are extracted via the
 same prominence-based detector that ``generate_all_figures.py`` uses for
 its main pipeline, so the shift number is directly comparable.
 
-Outputs (under ``results/verification/``):
+Outputs (under ``workspace/outputs/verification/``):
 
 * ``frequency_shift_tree_<n>.{png,pdf}`` — overlay of linear vs nonlinear FRF
   with resonance markers and the shift annotation.
@@ -47,6 +47,7 @@ from orchard_fem.io.loaders.orchard import load_orchard_model
 from orchard_fem.fenicsx.frequency_response import (
     solve_embedded_beam_frequency_response_experiment,
 )
+from orchard_fem.workspace import display_path, example_trees_dir, workspace_paths
 
 
 _FEASIBLE_BAND_HZ = (3.0, 20.0)
@@ -240,12 +241,12 @@ def _plot_summary(out_stem: Path, rows: list[tuple]) -> None:
 
 def main() -> int:
     _apply_pub_style()
-    out_dir = REPO / "results" / "verification"
+    out_dir = workspace_paths().outputs / "verification"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[tuple] = []
     for n in (1, 2, 3, 4, 5):
-        model_path = REPO / "trees" / f"tree_{n}.json"
+        model_path = example_trees_dir() / f"tree_{n}.json"
         if not model_path.exists():
             print(f"[skip] {model_path} not found")
             continue
@@ -305,8 +306,8 @@ def main() -> int:
     print(f"Mean resonance shift : {float(np.mean(shifts)):+.2f} %")
     print(f"Std  resonance shift : {float(np.std(shifts)):.2f} %")
     print("Manuscript reference : -11.0 ± 4.1 % (Liu et al., Table 4)")
-    print(f"Summary CSV          : {csv_path.relative_to(REPO)}")
-    print(f"Per-tree overlays    : {out_dir.relative_to(REPO)}/frequency_shift_tree_<n>.{{png,pdf}}")
+    print(f"Summary CSV          : {display_path(csv_path)}")
+    print(f"Per-tree overlays    : {display_path(out_dir)}/frequency_shift_tree_<n>.{{png,pdf}}")
     print("=" * 64)
     return 0
 

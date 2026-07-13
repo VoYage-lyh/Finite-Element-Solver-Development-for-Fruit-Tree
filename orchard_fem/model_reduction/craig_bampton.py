@@ -165,10 +165,7 @@ class CraigBamptonReductor(ReductionStrategy):
 
         K_ii = K_full[np.ix_(i_idx, i_idx)]
         K_ib = K_full[np.ix_(i_idx, b)]
-        K_bb = K_full[np.ix_(b, b)]
         M_ii = M_full[np.ix_(i_idx, i_idx)]
-        M_ib = M_full[np.ix_(i_idx, b)]
-        M_bb = M_full[np.ix_(b, b)]
 
         # Constraint modes: Φ_c = -K_ii⁻¹ K_ib
         try:

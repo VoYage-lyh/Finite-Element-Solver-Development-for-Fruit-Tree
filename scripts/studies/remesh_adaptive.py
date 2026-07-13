@@ -25,8 +25,8 @@ copied through untouched. Output goes to ``<model>_adaptive.json`` unless
 
 Example
 -------
-    python scripts/remesh_adaptive.py trees/tree_1.json --target-h 0.10
-    python scripts/remesh_adaptive.py trees/tree_*.json --target-h 0.10 --in-place
+    python scripts/remesh_adaptive.py examples/trees/tree_1.json --target-h 0.10
+    python scripts/remesh_adaptive.py examples/trees/tree_*.json --target-h 0.10 --in-place
 """
 
 from __future__ import annotations

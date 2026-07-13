@@ -22,7 +22,7 @@ What it does
    response at each observation over the steady tail of the signal, again with a
    relative error versus the smallest Δt.
 
-Outputs (under ``--out-dir``, default ``results/diagnostics/convergence/<model>``):
+Outputs (under ``--out-dir``, default ``workspace/outputs/diagnostics/convergence/<model>``):
     convergence_mesh.csv, convergence_dt.csv, and (unless ``--no-plot``) PNG
     convergence curves.
 
@@ -49,6 +49,7 @@ from orchard_fem.dynamics.time_history import solve_time_history_system
 from orchard_fem.io import load_orchard_model
 from orchard_fem.numerics import create_aij_matrix, solve_linear_system
 from orchard_fem.solver_core.modal import ModalAnalysisRequest, SLEPcModalSolver
+from orchard_fem.workspace import workspace_paths
 
 
 # --------------------------------------------------------------------------- #
@@ -458,7 +459,7 @@ def main() -> int:
     parser.add_argument("--dt-elements", type=int, default=None, help="Fixed mesh for the Δt study (default: min(8, max(--elements)); the time-history solver is dense/Python so very fine meshes are slow).")
     parser.add_argument("--dt-total", type=float, default=None, help="Override total_time_seconds for the Δt study.")
     parser.add_argument("--tail-fraction", type=float, default=0.5, help="Fraction of the signal tail used for peak/RMS.")
-    parser.add_argument("--out-dir", type=Path, default=None, help="Output directory (default results/diagnostics/convergence/<model>).")
+    parser.add_argument("--out-dir", type=Path, default=None, help="Output directory (default workspace/outputs/diagnostics/convergence/<model>).")
     parser.add_argument("--no-dt", action="store_true", help="Skip the time-step study (mesh study only).")
     parser.add_argument("--no-mesh", action="store_true", help="Skip the mesh study (Δt study only); leaves existing mesh outputs untouched.")
     parser.add_argument("--no-plot", action="store_true", help="Skip PNG plots.")
@@ -470,7 +471,9 @@ def main() -> int:
     time_steps = sorted(set(_parse_float_list(args.dt)), reverse=True)
     dt_elements = args.dt_elements if args.dt_elements is not None else min(8, max(element_counts))
 
-    out_dir = args.out_dir or (Path("results/diagnostics/convergence") / args.model_json.stem)
+    out_dir = args.out_dir or (
+        workspace_paths().outputs / "diagnostics" / "convergence" / args.model_json.stem
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     work_dir = out_dir / "_work"
     work_dir.mkdir(exist_ok=True)

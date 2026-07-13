@@ -20,7 +20,7 @@ schedule (``compute_multiclamp_harvest_schedule``).
 
 Example
 -------
-    python scripts/clamp_energy_reach.py trees/tree_3.json --out results/diagnostics/accuracy_study
+    python scripts/clamp_energy_reach.py examples/trees/tree_3.json --out workspace/outputs/diagnostics/accuracy_study
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from orchard_fem.domain import ExcitationKind
 from orchard_fem.io import load_orchard_model
 from orchard_fem.topology import ObservationPoint
 from orchard_fem.visualization.model_scene import hierarchical_labels
+from orchard_fem.workspace import workspace_paths
 from orchard_fem.workflows.harvest_recommendation import (
     RecommendationOptions,
     candidate_clamp_labels,
@@ -60,7 +61,11 @@ def main() -> int:
                         help="Structural damping ratio as band-tuned Rayleigh over --band "
                              "(model default ~0.25%% is far below real green-wood 5–15%%). "
                              "Use a negative value to keep the model's own damping.")
-    parser.add_argument("--out", type=Path, default=Path("results/diagnostics/accuracy_study"))
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=workspace_paths().outputs / "diagnostics" / "accuracy_study",
+    )
     args = parser.parse_args()
 
     from orchard_fem.fenicsx.frequency_response import (

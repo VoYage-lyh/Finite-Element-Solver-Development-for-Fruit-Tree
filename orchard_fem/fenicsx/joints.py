@@ -8,6 +8,20 @@ from orchard_fem.discretization.types import (
     NonlinearLinkDefinition,
     NonlinearLinkKind,
 )
+from orchard_fem.domain import JointDefinition, JointLawKind, OrchardModel
+from orchard_fem.fenicsx.availability import require_dolfinx
+from orchard_fem.fenicsx.branch_dofs import (
+    BranchNodeDofs,
+    nearest_parent_node_index,
+    resolve_branch_node_dofs,
+)
+from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
+from orchard_fem.fenicsx.fields import EmbeddedBeamFunctionSpaceBundle
+from orchard_fem.fenicsx.operator_bundle import EmbeddedBeamOperatorBundle
+from orchard_fem.fenicsx.petsc_ops import (
+    accumulate_owned_matrix_value,
+    allow_new_nonzero_allocation,
+)
 
 
 # Duffing-type parameter ranges adapted from the manuscript (Liu et al., Table 3).
@@ -33,20 +47,6 @@ _SOFTENING_C2_RANGE_NSPM2 = (2.6e4 * _C2_DOWNSCALE, 4.3e4 * _C2_DOWNSCALE)
 # = parent Tip area for that branch level).
 _SOFTENING_PROBABILITY_BY_LEVEL = {2: 0.25, 3: 0.55}
 _DEFAULT_SOFTENING_PROBABILITY = 0.5
-from orchard_fem.domain import JointDefinition, JointLawKind, OrchardModel
-from orchard_fem.fenicsx.availability import require_dolfinx
-from orchard_fem.fenicsx.branch_dofs import (
-    BranchNodeDofs,
-    nearest_parent_node_index,
-    resolve_branch_node_dofs,
-)
-from orchard_fem.fenicsx.embedded_mesh import EmbeddedLineMeshSpec
-from orchard_fem.fenicsx.fields import EmbeddedBeamFunctionSpaceBundle
-from orchard_fem.fenicsx.operator_bundle import EmbeddedBeamOperatorBundle
-from orchard_fem.fenicsx.petsc_ops import (
-    accumulate_owned_matrix_value,
-    allow_new_nonzero_allocation,
-)
 
 CONSTRAINT_PENALTY = 1.0e12
 

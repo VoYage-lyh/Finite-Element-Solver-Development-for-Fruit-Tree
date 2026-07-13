@@ -5,7 +5,7 @@
 仿真侧输出 (frequency_hz, 位移幅值/行程, duration_s) → 翻译为机器参数
 (行程mm, 段转速rpm, 周期数) 并做可行性/完整性因子把关 → 连接驱动器、
 回中、起振、在线频率标定、报警轮询、按时长停机。标定结果存入
-config/ds5l1_freq_calib.json,下次同 (S,f) 工况直接复用。
+workspace/config/ds5l1_freq_calib.json,下次同 (S,f) 工况直接复用。
 
 用法示例
 --------

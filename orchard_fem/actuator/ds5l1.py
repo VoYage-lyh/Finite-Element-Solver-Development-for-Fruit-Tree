@@ -45,6 +45,7 @@ from orchard_fem.actuator.harvest_bridge import (
     execute_harvest_plan,
     execute_harvest_schedule,
 )
+from orchard_fem.workspace import workspace_paths
 
 # ---------------- 常量(来自 DS5L1 手册附录4 Modbus 地址表) ----------------
 STATION = 1                 # Modbus 站号(P7-10 / P7-00,默认 1)
@@ -125,11 +126,11 @@ def split_pulses(total: int):
 
 
 def default_calib_path() -> Path:
-    """Calibration-table location: ``$ORCHARD_DS5L1_CALIB`` or ``<repo>/config/``."""
+    """Calibration-table location: environment override or the local workspace."""
     env = os.environ.get("ORCHARD_DS5L1_CALIB")
     if env:
-        return Path(env)
-    return Path(__file__).resolve().parents[2] / "config" / "ds5l1_freq_calib.json"
+        return Path(env).expanduser()
+    return workspace_paths().ds5l1_calibration
 
 
 def calib_key(stroke_mm: float, freq_hz: float) -> str:

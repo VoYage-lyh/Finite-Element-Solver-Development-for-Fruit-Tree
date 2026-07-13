@@ -25,11 +25,10 @@ imported cleanly in environments without those packages.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sqrt
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import numpy as np
+    pass
 
 
 @dataclass
@@ -150,12 +149,12 @@ def compute_corotational_local_deformations(
     x_a = X_a + u_a[:3]
     x_b = X_b + u_b[:3]
     L0 = float(np.linalg.norm(X_b - X_a))
-    l = float(np.linalg.norm(x_b - x_a))
+    current_length = float(np.linalg.norm(x_b - x_a))
 
     # Local translations at A: zero (corotational frame is attached to A)
     # Local axial deformation at B: current length - reference length
     t_a_loc = np.zeros(3)
-    t_b_loc = np.array([l - L0, 0.0, 0.0])
+    t_b_loc = np.array([current_length - L0, 0.0, 0.0])
 
     # Rotate global rotations into the current element frame
     r_a_loc = R.T @ u_a[3:]
@@ -301,7 +300,6 @@ def assemble_corotational_internal_force(
     PETSc Vec
         Global internal force vector.
     """
-    import numpy as np
     from petsc4py import PETSc
 
     experiment = assembly.experiment
@@ -365,7 +363,6 @@ def assemble_corotational_tangent_stiffness(
     PETSc Mat
         Global tangent stiffness matrix.
     """
-    import numpy as np
     from petsc4py import PETSc
 
     from orchard_fem.fenicsx.petsc_ops import copy_matrix_like

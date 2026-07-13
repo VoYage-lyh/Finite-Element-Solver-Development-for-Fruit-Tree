@@ -55,7 +55,6 @@ def _scale_model_materials(
     config: ParameterSpaceConfig,
 ) -> "OrchardModel":
     """Return a clone of *model* with material Young's moduli scaled by *sample*."""
-    from orchard_fem.domain.entities import MaterialProperties
 
     material_id_to_range = config.material_youngs_modulus_ranges
 
@@ -76,7 +75,6 @@ def _scale_model_fruits(
     fruit_mass_scale: float,
 ) -> "OrchardModel":
     """Return a clone of *model* with all fruit masses multiplied by *fruit_mass_scale*."""
-    from orchard_fem.domain.entities import FruitAttachment
 
     if abs(fruit_mass_scale - 1.0) < 1.0e-12:
         return model
@@ -231,7 +229,6 @@ def _save_hdf5(
             "h5py is required for HDF5 output. Install it with: pip install h5py"
         ) from exc
 
-    import numpy as np
 
     with h5py.File(output_path, "w") as h5:
         h5.create_dataset("params", data=params, compression="gzip")

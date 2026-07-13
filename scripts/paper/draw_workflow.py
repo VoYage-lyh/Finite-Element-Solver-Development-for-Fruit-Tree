@@ -1,7 +1,7 @@
 """Render a horizontal 4-column workflow diagram of the orchard-FEM
 calibration → recommendation pipeline.
 
-Output: ``results/summary/summary_workflow.{png,pdf}``
+Output: ``workspace/outputs/summary/summary_workflow.{png,pdf}``
 
 Layout invariants
 -----------------
@@ -20,6 +20,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+
+from orchard_fem.workspace import workspace_paths
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -313,7 +315,7 @@ def main() -> int:
         color="#666", lw=1.1, linestyle=(0, (5, 3)),
     )
 
-    out_dir = REPO / "results" / "summary"
+    out_dir = workspace_paths().outputs / "summary"
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = out_dir / "summary_workflow"
     fig.savefig(stem.with_suffix(".png"))

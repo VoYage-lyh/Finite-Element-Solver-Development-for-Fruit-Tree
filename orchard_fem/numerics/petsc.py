@@ -8,7 +8,7 @@ def require_petsc() -> None:
         raise RuntimeError(
             "PETSc backend is not available. Install `petsc4py`, `mpi4py`, and the FEniCSx "
             "toolchain by creating the conda environment from "
-            f"`config/fenicsx_pinn_environment.yml`. Missing module: {exc.name}."
+            f"`config/orchard_fenicsx.yml`. Missing module: {exc.name}."
         ) from exc
 
 
@@ -20,7 +20,7 @@ def require_slepc() -> None:
         raise RuntimeError(
             "SLEPc backend is not available. Install `slepc4py` together with the PETSc/FEniCSx "
             "stack by creating the conda environment from "
-            f"`config/fenicsx_pinn_environment.yml`. Missing module: {exc.name}."
+            f"`config/orchard_fenicsx.yml`. Missing module: {exc.name}."
         ) from exc
 
 

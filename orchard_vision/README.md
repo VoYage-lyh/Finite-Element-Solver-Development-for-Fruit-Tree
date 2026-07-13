@@ -20,10 +20,11 @@ photo ─▶ segmentation ─▶ skeleton_graph ─▶ branch_ordering ─▶ li
 python -m orchard_vision.cli path/to/tree.jpg --tree-height-m 3.0
 
 # a whole batch
-python -m orchard_vision.cli path/to/photos/*.jpg --out-dir results/vision
+python -m orchard_vision.cli path/to/photos/*.jpg
 ```
 
-Each input writes two files to `--out-dir` (default `results/vision/`):
+Each input writes two files to `--out-dir` (default
+`workspace/outputs/vision/`):
 
 * `<name>.skeleton.json` — feed straight to `orchard_fem import-skeleton`;
 * `<name>.overlay.png` — the ordered branches drawn over the photo, coloured by
@@ -33,8 +34,9 @@ Each input writes two files to `--out-dir` (default `results/vision/`):
 End-to-end into the solver:
 
 ```bash
-python -m orchard_vision.cli path/to/tree.jpg --out-dir results/vision
-python -m orchard_fem import-skeleton results/vision/tree.skeleton.json build/tree.json
+python -m orchard_vision.cli path/to/tree.jpg
+python -m orchard_fem import-skeleton \
+    workspace/outputs/vision/tree.skeleton.json build/tree.json
 ```
 
 ## Manual correction in Harvest Console
@@ -88,9 +90,8 @@ records its trunk root, and uses SAM 2 only as an editable proposal tool:
 
 ```bash
 # raw orchard photographs; quote the glob if the shell should not expand it
-python -m orchard_vision.annotate_wood trees/tree*.jpg \
-    --out-dir datasets/wood_field \
-    --sam-checkpoint weights/sam2_t.pt --sam-device cuda:1
+python -m orchard_vision.annotate_wood workspace/data/raw/orchard_photos/*.jpg \
+    --sam-device cuda:1
 ```
 
 For every source image:
@@ -107,7 +108,8 @@ For every source image:
 5. `s` saves, `n` saves and advances, and `q` saves and closes.
 
 The tool automatically resumes an existing annotation. It writes
-`datasets/wood_field/<name>.png`, `<name>_wood.png`, and `<name>_wood.json`; the
+`workspace/data/annotations/wood/<name>.png`, `<name>_wood.png`, and
+`<name>_wood.json`; the
 JSON sidecar preserves the original image shape, working scale, target ROI, and
 trunk-root point. Label only visible wood belonging to the target tree—do not
 guess fully occluded branches.
@@ -117,7 +119,7 @@ guess fully occluded branches.
 Install both image-processing and learned-model dependencies:
 
 ```bash
-python -m pip install -e ".[vision,ml]"
+python -m pip install -e ".[vision,ml,vision-sam]"
 ```
 
 Name multiple views of the same physical tree with a double underscore, for
@@ -127,16 +129,12 @@ training, validation, or test splits.
 
 ```bash
 python -m orchard_vision.wood_seg train \
-    --data datasets/wood_field \
-    --out weights/wood_seg.pt \
     --device cuda:1 \
     --epochs 160 --batch-size 8 \
     --tile-size 224 --overlap 64 \
     --freeze-epochs 12 --patience 25
 
 python -m orchard_vision.wood_seg evaluate \
-    --data datasets/wood_field \
-    --checkpoint weights/wood_seg.pt \
     --split test --device cuda:1
 ```
 
@@ -147,17 +145,18 @@ brightness, rotation, and horizontal-flip augmentation. The EfficientFormer
 backbone is initially frozen, then fine-tuned with a smaller learning rate. The
 best validation-Dice checkpoint is saved and early stopping prevents needless
 overfitting; the checkpoint also stores the exact split group names. A companion
-`weights/wood_seg.metrics.json` records every epoch, the best epoch, configuration,
+`workspace/models/wood_seg.metrics.json` records every epoch, the best epoch, configuration,
 and held-out metrics for later plots and thesis tables.
 
 Inference uses overlapping 224×224 windows and weighted probability blending,
 preserving thin branches and rectangular image geometry instead of shrinking an
 entire photograph to 224×224. It is selected automatically by Harvest Console
-when `weights/wood_seg.pt` and its dependencies exist, or explicitly from the CLI:
+when `workspace/models/wood_seg.pt` and its dependencies exist, or explicitly
+from the CLI:
 
 ```bash
-python -m orchard_vision.cli trees/tree1.jpg --segmenter wood \
-    --wood-checkpoint weights/wood_seg.pt --out-dir results/vision_field
+python -m orchard_vision.cli workspace/data/raw/orchard_photos/tree001__view01.jpg \
+    --segmenter wood --out-dir workspace/outputs/vision_field
 ```
 
 The skeleton and ordering stages downstream are unchanged, and residual errors

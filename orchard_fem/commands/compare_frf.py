@@ -10,10 +10,6 @@ def _handle_compare_frf(args: argparse.Namespace, application) -> int:
         load_measured_frf_csv,
         compare_frf,
     )
-    from orchard_fem.dynamics.frequency_response import (
-        FrequencyResponsePoint,
-        FrequencyResponseResult,
-    )
 
     # Load measured FRF
     measured = load_measured_frf_csv(args.measured_csv, label=args.measured_label or "measured")
@@ -28,7 +24,7 @@ def _handle_compare_frf(args: argparse.Namespace, application) -> int:
 
     # Compare
     comparison = compare_frf(measured, sim_result)
-    print(f"\nFRF comparison:")
+    print("\nFRF comparison:")
     print(f"  MAC value:         {comparison.mac_value:.4f}")
     print(f"  Frequency points:  {len(comparison.frequencies_hz)}")
 
@@ -49,7 +45,7 @@ def _handle_compare_frf(args: argparse.Namespace, application) -> int:
         try:
             from orchard_fem.visualization import plot_frf_comparison
 
-            fig = plot_frf_comparison(
+            plot_frf_comparison(
                 comparison,
                 title=args.title or "",
                 output_path=args.output_plot,
