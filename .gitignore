@@ -17,8 +17,12 @@ __pycache__/
 .venv/
 venv/
 cache/
+weights/
+*.pt
 
 # Local data and generated outputs (not hosted)
+dataset/
+datasets/
 trees/
 results*/
 

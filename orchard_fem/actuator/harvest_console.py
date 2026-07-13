@@ -3,7 +3,8 @@
 
 三步流程(Notebook 标签页),共享底部日志:
 
-① **树模型** — 选择 tree JSON(``trees/*.json``),加载并显示主要参数
+① **树模型** — 选择 tree JSON(``trees/*.json``),加载并显示主要参数；也可从照片
+   提取/人工编辑有图像证据的骨架，再转换并载入求解器模型
    (:func:`orchard_fem.workflows.harvest_recommendation.summarize_orchard_model`)。
 ② **仿真** — 后台线程一键跑完整条流水线:
    :func:`~orchard_fem.workflows.harvest_recommendation.recommend_harvest_parameters`
@@ -115,6 +116,8 @@ class HarvestConsole:
         self._rig_stop = threading.Event()
         self._sim_running = False
         self._rig_running = False
+        self._vision_busy = False
+        self._skeleton_editor = None
 
         root.title("Orchard Harvest Console — Simulation → DS5L1 Execution")
         root.geometry("1180x720")               # landscape rectangle, compact
@@ -143,7 +146,8 @@ class HarvestConsole:
                  bg=p["primary_dark"], fg=p["on_dark"],
                  ).pack(side="right", anchor="e", padx=14, pady=6)
         env = (f"dolfinx {'✓' if _has('dolfinx') else '✗ load exported results only'}     "
-               f"pyserial {'✓' if _has('serial') else '✗ actuator connection unavailable'}")
+               f"pyserial {'✓' if _has('serial') else '✗ actuator connection unavailable'}     "
+               f"vision {'✓' if _has('skimage') else '✗ install .[vision]'}")
         tk.Label(root, text=env, font=(self.ui_font, 9), bg=p["surface_alt"],
                  fg=p["muted"], anchor="w", padx=14,
                  ).pack(fill="x")
@@ -359,6 +363,8 @@ class HarvestConsole:
                     self._show_figures(payload)
                 elif kind == "rig_done":
                     self._on_rig_done(payload)
+                elif kind == "skeleton_ready":
+                    self._on_skeleton_ready(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._pump)
@@ -378,6 +384,49 @@ class HarvestConsole:
             side="left", fill="x", expand=True, padx=6)
         ttk.Button(row, text="Browse…", command=self.on_browse_model).pack(side="left")
         ttk.Button(row, text="Load", command=self.on_load_model).pack(side="left", padx=6)
+
+        vision = ttk.LabelFrame(tab, text="Photo skeleton extraction / manual correction")
+        vision.pack(fill="x", padx=6, pady=(0, 3))
+        default_segmenter = (
+            "wood"
+            if (REPO_ROOT / "weights" / "wood_seg.pt").exists()
+            and _has("torch")
+            and _has("timm")
+            else "classical"
+        )
+        self.var_vision_segmenter = tk.StringVar(value=default_segmenter)
+        self.var_vision_height = tk.DoubleVar(value=3.0)
+        self.var_vision_diameter = tk.StringVar(value="")
+        self.var_vision_max_level = tk.IntVar(value=3)
+        ttk.Label(vision, text="Segmenter").pack(side="left", padx=(5, 2), pady=3)
+        ttk.Combobox(
+            vision,
+            textvariable=self.var_vision_segmenter,
+            values=["classical", "wood", "sam2"],
+            state="readonly",
+            width=10,
+        ).pack(side="left", padx=2, pady=3)
+        ttk.Label(vision, text="Tree height m").pack(side="left", padx=(8, 2), pady=3)
+        ttk.Entry(vision, textvariable=self.var_vision_height, width=6).pack(
+            side="left", padx=2, pady=3
+        )
+        ttk.Label(vision, text="Trunk diameter m (optional)").pack(
+            side="left", padx=(8, 2), pady=3
+        )
+        ttk.Entry(vision, textvariable=self.var_vision_diameter, width=7).pack(
+            side="left", padx=2, pady=3
+        )
+        ttk.Label(vision, text="Max level").pack(side="left", padx=(8, 2), pady=3)
+        ttk.Spinbox(
+            vision, from_=1, to=8, textvariable=self.var_vision_max_level, width=4
+        ).pack(side="left", padx=2, pady=3)
+        self.btn_edit_photo = ttk.Button(
+            vision, text="Extract / edit photo…", command=self.on_edit_photo_skeleton
+        )
+        self.btn_edit_photo.pack(side="left", padx=(10, 3), pady=3)
+        ttk.Button(vision, text="Open edit project…", command=self.on_open_skeleton_project).pack(
+            side="left", padx=3, pady=3
+        )
 
         main = ttk.Frame(tab)
         main.pack(fill="both", expand=True, padx=6, pady=3)
@@ -423,6 +472,13 @@ class HarvestConsole:
             messagebox.showerror("Load failed", str(e))
             self.log(f"Model load failed: {e}")
             return
+        # A topology/geometry change invalidates every response, recommendation
+        # and executable schedule derived from the previously loaded model.
+        self.result = None
+        self.schedule = None
+        self.tree.delete(*self.tree.get_children())
+        self._set_panel(self.info_text, "Model changed — run a new simulation.")
+        self.btn_run.configure(state="disabled")
         summary = summarize_orchard_model(self.model, path)
         self.model_info.configure(state="normal")
         self.model_info.delete("1.0", "end")
@@ -450,6 +506,156 @@ class HarvestConsole:
             self._render_topology(raw)
         self.log(f"Model loaded: {summary.name} "
                  f"({summary.n_branches} branches, {summary.n_fruits} fruits)")
+
+    def on_edit_photo_skeleton(self) -> None:
+        """Run the vision pipeline, then open its result in the embedded editor."""
+        if not _has("skimage"):
+            self._notify(
+                "Vision dependencies missing",
+                "Photo skeleton editing requires scikit-image. Install this project with\n"
+                "    python -m pip install -e \".[vision]\"\n"
+                "inside the same environment used to launch Harvest Console.",
+                warn=True,
+            )
+            return
+        if self._vision_busy:
+            self.log("Photo skeleton extraction is already running.")
+            return
+        image_path = filedialog.askopenfilename(
+            parent=self.root,
+            initialdir=str(TREES_DIR if TREES_DIR.exists() else REPO_ROOT),
+            filetypes=[
+                ("Tree photos", "*.png *.jpg *.jpeg *.tif *.tiff"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not image_path:
+            return
+        try:
+            tree_height = float(self.var_vision_height.get())
+            diameter_text = self.var_vision_diameter.get().strip()
+            trunk_diameter = float(diameter_text) if diameter_text else None
+            max_level = int(self.var_vision_max_level.get())
+            if tree_height <= 0.0:
+                raise ValueError("Tree height must be positive")
+            if trunk_diameter is not None and trunk_diameter <= 0.0:
+                raise ValueError("Trunk diameter must be positive")
+            if max_level < 1:
+                raise ValueError("Max level must be at least 1")
+        except Exception as error:  # noqa: BLE001
+            self._notify("Invalid extraction settings", str(error), warn=True)
+            return
+        segmenter_name = self.var_vision_segmenter.get()
+        if segmenter_name == "wood" and (not _has("torch") or not _has("timm")):
+            self._notify(
+                "EfficientFormer dependencies missing",
+                "The wood segmenter requires PyTorch and timm. Install this project with\n"
+                '    python -m pip install -e ".[vision,ml]"\n'
+                "inside the environment used to launch Harvest Console.",
+                warn=True,
+            )
+            return
+        if segmenter_name == "sam2" and (
+            not _has("torch") or not _has("ultralytics")
+        ):
+            self._notify(
+                "SAM dependencies missing",
+                "The SAM segmenter requires PyTorch and ultralytics in this environment.",
+                warn=True,
+            )
+            return
+        self._vision_busy = True
+        self.btn_edit_photo.configure(state="disabled")
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(12)
+        self.log(f"Extracting skeleton from {Path(image_path).name} ({segmenter_name})…")
+
+        def worker() -> None:
+            try:
+                if segmenter_name == "wood":
+                    from orchard_vision.wood_seg import WoodSegmenter
+
+                    segmenter = WoodSegmenter(
+                        checkpoint=str(REPO_ROOT / "weights" / "wood_seg.pt")
+                    )
+                elif segmenter_name == "sam2":
+                    from orchard_vision.segmentation_sam2 import Sam2Segmenter
+
+                    segmenter = Sam2Segmenter(
+                        checkpoint=str(REPO_ROOT / "weights" / "sam2_t.pt")
+                    )
+                else:
+                    from orchard_vision.segmentation import ClassicalSegmenter
+
+                    segmenter = ClassicalSegmenter()
+                from orchard_vision.pipeline import PhotoToSkeletonPipeline, PipelineConfig
+                from orchard_vision.skeleton_editing import EditableSkeleton
+
+                result = PhotoToSkeletonPipeline(
+                    PipelineConfig(
+                        tree_height_m=tree_height,
+                        trunk_diameter_m=trunk_diameter,
+                        max_level=max_level,
+                        segmenter=segmenter,
+                    )
+                ).run(image_path)
+                document = EditableSkeleton.from_pipeline_result(
+                    result, image_path=image_path
+                )
+                self._post("skeleton_ready", document)
+            except Exception as error:  # noqa: BLE001
+                self._post("skeleton_ready", error)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_open_skeleton_project(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            filetypes=[("Skeleton edit project", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            from orchard_vision.skeleton_editing import EditableSkeleton
+
+            document = EditableSkeleton.load_project(path)
+        except Exception as error:  # noqa: BLE001
+            self._notify("Open skeleton project failed", str(error), warn=True)
+            return
+        self._open_skeleton_editor(document)
+
+    def _on_skeleton_ready(self, payload) -> None:
+        self._vision_busy = False
+        self.btn_edit_photo.configure(state="normal")
+        self.progress.stop()
+        self.progress.configure(mode="determinate")
+        self.progress["value"] = 0.0
+        if isinstance(payload, Exception):
+            self._notify("Skeleton extraction failed", str(payload), warn=True)
+            return
+        self.log(
+            f"Skeleton extracted: {len(payload.branches)} branches; opening manual editor."
+        )
+        self._open_skeleton_editor(payload)
+
+    def _open_skeleton_editor(self, document) -> None:
+        try:
+            from orchard_fem.actuator.skeleton_editor import SkeletonEditorWindow
+
+            self._skeleton_editor = SkeletonEditorWindow(
+                self.root,
+                document,
+                on_model_exported=self._on_edited_model_exported,
+                log=self.log,
+            )
+        except Exception as error:  # noqa: BLE001
+            self._notify("Skeleton editor failed", str(error), warn=True)
+
+    def _on_edited_model_exported(self, path: Path) -> None:
+        self.var_model_path.set(str(path))
+        self.on_load_model()
+        self.nb.select(0)
+        self.log("Edited skeleton model is now active; previous simulation results were cleared.")
 
     def _display_clamp(self, raw: str) -> str:
         """Raw 'branch_id@s' → 'hlabel@s' (hierarchical label matching the figures)."""

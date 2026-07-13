@@ -13,11 +13,13 @@ dependencies:
   - h5py
   - pyyaml
   - matplotlib
+  - scikit-image
   - jupyter
   - pytest
   - pytest-cov
   - ruff
   - mypy
   - pytorch
+  - timm
 # Optional and not installed by default:
 #   - deepxde
