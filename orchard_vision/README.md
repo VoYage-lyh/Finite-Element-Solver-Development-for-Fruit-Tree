@@ -159,8 +159,15 @@ python -m orchard_vision.cli workspace/data/raw/orchard_photos/tree001__view01.j
     --segmenter wood --out-dir workspace/outputs/vision_field
 ```
 
-The skeleton and ordering stages downstream are unchanged, and residual errors
-remain correctable in Harvest Console.
+For field photos, Harvest Console first asks the operator to draw a tight target-tree
+ROI and click the visible trunk base. The pipeline discards detections outside that
+ROI, keeps the component connected to the selected base, and anchors branch ordering
+to it. The Console defaults to wood confidence `0.70` (higher topology precision than
+the training checkpoint's pixel-recall-oriented `0.50`) and traces through secondary
+branches by default. If that threshold misses the operator-selected trunk base, the
+Console progressively relaxes confidence only until a viable root-connected component
+appears and records the applied value in the log. Residual errors remain correctable in
+the skeleton editor.
 
 ## Other next steps
 

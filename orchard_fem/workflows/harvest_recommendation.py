@@ -34,8 +34,8 @@ FEniCSx (dolfinx) is imported lazily inside :func:`recommend_harvest_parameters`
 pieces can be substituted (``frf_sweep`` / ``evaluator_factory``) for testing.
 
 The chosen :class:`WorkingPoint` exports to the same params-JSON consumed by
-``scripts/run_harvest_on_rig.py`` and the harvest console GUI
-(:mod:`orchard_fem.actuator.harvest_console`).
+``scripts/run_harvest_on_rig.py``.  The harvest Console instead consumes the
+runtime-only branch outcome grids and exports only the resulting staged schedule.
 """
 from __future__ import annotations
 
@@ -291,6 +291,17 @@ class RecommendationResult:
     duration_s: float
     steps: tuple[str, ...]               # adjustment/decision trace
     elapsed_s: float
+    # Runtime-only full outcomes.  The harvest console consumes these directly
+    # to build its multi-stage schedule without repeating the FE grid.  They are
+    # deliberately excluded from the legacy recommendation JSON because tuple
+    # grid keys are not JSON fields and paper/CLI consumers only need the Pareto
+    # summary above.
+    outcome_grids: dict[str, dict[tuple[float, float], Any]] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    n_fruit_branches: int = 0
 
     @property
     def best(self) -> ClampRecommendation:
@@ -303,7 +314,9 @@ class RecommendationResult:
     # -- serialisation (GUI export / offline rig PC import) ----------------- #
 
     def to_json_dict(self) -> dict:
-        d = asdict(self)
+        # Avoid even deep-copying a potentially large runtime FE cache.
+        d = asdict(replace(self, outcome_grids=None))
+        d.pop("outcome_grids", None)
         return d
 
     def save_json(self, path: str | Path) -> None:
@@ -335,6 +348,7 @@ class RecommendationResult:
             duration_s=float(d["duration_s"]),
             steps=tuple(d["steps"]),
             elapsed_s=float(d["elapsed_s"]),
+            n_fruit_branches=int(d.get("n_fruit_branches", 0)),
         )
 
     @staticmethod
@@ -1008,6 +1022,27 @@ def recommend_harvest_parameters(
         0.99,
     )
 
+    # Preserve the branch-resolved results for the Console's schedule.  Apply
+    # the same hard stress ceiling used by the Pareto stage so an unsafe cell can
+    # never re-enter through the multi-stage scheduler.
+    from orchard_fem.workflows.harvest_schedule import BranchOutcome
+
+    outcome_grids: dict[str, dict[tuple[float, float], BranchOutcome]] = {}
+    for clamp_label in clamp_labels:
+        grid: dict[tuple[float, float], BranchOutcome] = {}
+        for f in clamp_freq[clamp_label]:
+            for a in a_grid:
+                outcome = outcomes.get((clamp_label, float(f), float(a)))
+                if outcome is None or outcome.trunk_stress_pa > opt.stress_ceiling_pa:
+                    continue
+                grid[(float(f), float(a))] = BranchOutcome(
+                    detached_branches=outcome.detached_branches,
+                    branch_governing_ratio=dict(outcome.branch_governing_ratio),
+                    trunk_stress_pa=float(outcome.trunk_stress_pa),
+                    n_detached_fruits=int(outcome.n_detached_fruits),
+                )
+        outcome_grids[clamp_label] = grid
+
     return RecommendationResult(
         model_path=str(model_path),
         model_name=str(model.metadata.name),
@@ -1020,6 +1055,8 @@ def recommend_harvest_parameters(
         duration_s=opt.duration_s,
         steps=tuple(steps),
         elapsed_s=time.time() - t_start,
+        outcome_grids=outcome_grids,
+        n_fruit_branches=max(len({fruit.branch_id for fruit in model.fruits}), 1),
     )
 
 

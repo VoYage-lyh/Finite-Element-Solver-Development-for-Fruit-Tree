@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Harvest Console — 整链交互前端:树模型 → 仿真 → 电动缸执行.
+"""Harvest Console — 整链交互前端:树模型 → 序列计算 → 电动缸执行.
 
 三步流程(Notebook 标签页),共享底部日志:
 
 ① **树模型** — 选择版本化示例或 ``workspace/tree_models/`` 中的 tree JSON；也可从照片
    提取/人工编辑有图像证据的骨架，再转换并载入求解器模型
    (:func:`orchard_fem.workflows.harvest_recommendation.summarize_orchard_model`)。
-② **仿真** — 后台线程一键跑完整条流水线:
+② **序列** — 后台线程一键跑完整条计算流水线:
    :func:`~orchard_fem.workflows.harvest_recommendation.recommend_harvest_parameters`
-   (FRF 扫频 → 共振 → 夹持×(f,A) Pareto,**叠加电动缸包络硬约束**)定出最佳夹持,
-   随后自动在其上构建**调参序列**
+   (模态 → 夹持×(f,A)有限元网格,**叠加执行器包络与应力硬约束**),
+   将同一轮完整分枝结果直接构建为**调参序列**
    (:func:`~orchard_fem.workflows.harvest_schedule.compute_harvest_schedule`:一次激振
-   够不够、不够就分阶段;每阶段时长由疲劳模型算)。结果表 + 推荐/序列两面板并排显示。
+   够不够、不够就分阶段;每阶段时长由疲劳模型算)。Console 不保存单阶段膝点。
 ③ **执行** — 串口连接、清报警、回中,一个 RUN 把②的序列在电动缸上逐阶段跑
    (:func:`~orchard_fem.actuator.ds5l1.run_harvest_schedule_on_rig`),STOP 立即断使能;
    每次运行归档至本地 ``workspace/outputs/harvest_runs/``。
 
-运行:``python -m orchard_fem.actuator.harvest_console``(仿真需 dolfinx)。
+运行:``python -m orchard_fem.actuator.harvest_console``(序列计算需 dolfinx)。
 """
 from __future__ import annotations
 
@@ -33,11 +33,11 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from orchard_fem.actuator.ds5l1 import DS5L1, run_harvest_schedule_on_rig
-from orchard_fem.actuator.harvest_bridge import DS5L1Limits
+from orchard_fem.actuator.harvest_bridge import DS5L1Limits, HarvestSchedule
+from orchard_fem.actuator.ui_layout import fit_window_to_screen
 from orchard_fem.workspace import REPOSITORY_ROOT, example_trees_dir, workspace_paths
 from orchard_fem.workflows.harvest_recommendation import (
     RecommendationOptions,
-    RecommendationResult,
     candidate_clamp_labels,
     summarize_orchard_model,
 )
@@ -50,6 +50,8 @@ PHOTO_DIR = WORKSPACE.raw_photos
 RUNS_DIR = WORKSPACE.harvest_runs
 
 LIMITS = DS5L1Limits()
+SCHEDULE_FILE_FORMAT = "orchard.harvest_schedule"
+SCHEDULE_FILE_VERSION = 2
 
 # Flat modern palette (forestry-green accent), used across the whole console.
 PALETTE = {
@@ -77,6 +79,57 @@ def _has(module: str) -> bool:
     return _importlib_util.find_spec(module) is not None
 
 
+def _schedule_export_payload(
+    schedule: HarvestSchedule,
+    *,
+    model_path: str = "",
+    model_name: str = "",
+    calculation: dict | None = None,
+) -> dict:
+    """Build the Console's schedule-only, offline-executable JSON payload."""
+    return {
+        "format": SCHEDULE_FILE_FORMAT,
+        "version": SCHEDULE_FILE_VERSION,
+        "model_path": str(model_path),
+        "model_name": str(model_name),
+        "calculation": dict(calculation or {}),
+        "schedule": schedule.to_dict(),
+    }
+
+
+def _schedule_from_payload(data: dict) -> tuple[HarvestSchedule, dict]:
+    """Read schedule-only JSON and legacy ``recommendation + schedule`` files."""
+    if not isinstance(data, dict):
+        raise ValueError("Schedule JSON must contain an object at the top level.")
+
+    if "schedule" in data:
+        schedule_data = data.get("schedule")
+        if not schedule_data:
+            raise ValueError(
+                "This file contains no executable schedule. Recompute it in the Console."
+            )
+    elif "stages" in data and "target_coverage" in data:
+        # Also accept a bare HarvestSchedule.to_dict() payload.
+        schedule_data = data
+    else:
+        raise ValueError(
+            "This is not a harvest schedule file. A legacy single-stage "
+            "recommendation without a schedule cannot be executed."
+        )
+
+    legacy_recommendation = data.get("recommendation") or {}
+    metadata = {
+        "model_path": str(
+            data.get("model_path") or legacy_recommendation.get("model_path", "")
+        ),
+        "model_name": str(
+            data.get("model_name") or legacy_recommendation.get("model_name", "")
+        ),
+        "calculation": dict(data.get("calculation") or {}),
+    }
+    return HarvestSchedule.from_dict(schedule_data), metadata
+
+
 def _pick_ui_font(root: tk.Tk) -> str:
     """
     Linux/WSL 下 Tk 默认字体常缺 CJK 字形(显示为 \\uXXXX 或方框);
@@ -100,14 +153,18 @@ def _pick_ui_font(root: tk.Tk) -> str:
 
 
 class HarvestConsole:
-    """主窗口:四步标签页 + 共享日志/进度条。"""
+    """主窗口:三步标签页 + 共享日志/进度条。"""
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.model = None
         self.model_path: Path | None = None
-        self.result: RecommendationResult | None = None
         self.schedule = None                       # HarvestSchedule (the executable artifact)
+        self._schedule_model_path = ""
+        self._schedule_model_name = ""
+        self._schedule_settings: dict = {}
+        self._pending_schedule_options: RecommendationOptions | None = None
+        self._pending_detach_cycles = 50.0
         self._hlabels: dict = {}                   # branch_id → hierarchical label (T/1/1.1)
         self._clamp_raw: list = []                 # raw "branch_id@s" aligned with the clamp list
         self._fig_imgs: dict = {}                  # keep PhotoImage refs alive
@@ -123,9 +180,8 @@ class HarvestConsole:
         self._vision_busy = False
         self._skeleton_editor = None
 
-        root.title("Orchard Harvest Console — Simulation → DS5L1 Execution")
-        root.geometry("1180x720")               # landscape rectangle, compact
-        root.minsize(1040, 640)
+        root.title("Orchard Harvest Console — Schedule → DS5L1 Execution")
+        fit_window_to_screen(root, (1240, 780), (900, 600))
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.ui_font = _pick_ui_font(root)
@@ -140,7 +196,7 @@ class HarvestConsole:
         tk.Label(left, text="Orchard Harvest Console",
                  font=(self.ui_font, 17, "bold"), bg=p["primary_dark"], fg="white",
                  ).pack(anchor="w")
-        tk.Label(left, text="Tree model  →  Simulation  →  Execution (plan / schedule)",
+        tk.Label(left, text="Tree model  →  Schedule computation  →  Execution",
                  font=(self.ui_font, 10), bg=p["primary_dark"], fg=p["on_dark"],
                  ).pack(anchor="w")
         tk.Label(header,
@@ -149,32 +205,34 @@ class HarvestConsole:
                  font=(self.ui_font, 10, "bold"), justify="right",
                  bg=p["primary_dark"], fg=p["on_dark"],
                  ).pack(side="right", anchor="e", padx=14, pady=6)
-        env = (f"dolfinx {'✓' if _has('dolfinx') else '✗ load exported results only'}     "
+        env = (f"dolfinx {'✓' if _has('dolfinx') else '✗ load exported schedules only'}     "
                f"pyserial {'✓' if _has('serial') else '✗ actuator connection unavailable'}     "
                f"vision {'✓' if _has('skimage') else '✗ install .[vision]'}")
         tk.Label(root, text=env, font=(self.ui_font, 9), bg=p["surface_alt"],
                  fg=p["muted"], anchor="w", padx=14,
                  ).pack(fill="x")
 
-        # --- shared progress + log ---
-        # Reserve the bottom panel BEFORE the notebook (side="bottom"), so it can
-        # never be squeezed off-screen when a tab's content is tall.
-        bottom = ttk.Frame(root, padding=(8, 2, 8, 6))
-        bottom.pack(side="bottom", fill="x")
+        # A vertical paned window lets the operator resize/collapse the shared log
+        # instead of permanently taking height away from every notebook tab.
+        body = ttk.Panedwindow(root, orient="vertical")
+        body.pack(fill="both", expand=True, padx=6, pady=(4, 6))
+        self.nb = ttk.Notebook(body)
+        bottom = ttk.Frame(body, padding=(2, 2, 2, 0))
+        body.add(self.nb, weight=5)
+        body.add(bottom, weight=1)
+
         ttk.Label(bottom, text="Log / progress", style="Muted.TLabel").pack(anchor="w")
         self.progress = ttk.Progressbar(bottom, maximum=1.0)
         self.progress.pack(fill="x", pady=(2, 4))
-        self.log_text = tk.Text(bottom, height=7, state="disabled",
+        self.log_text = tk.Text(bottom, height=5, state="disabled",
                                 font=("Consolas", 10), bg=p["surface"], fg=p["text"],
                                 relief="flat", borderwidth=0, highlightthickness=1,
                                 highlightbackground=p["border"], padx=8, pady=5)
         self.log_text.pack(fill="both", expand=True)
 
-        self.nb = ttk.Notebook(root)
-        self.nb.pack(side="top", fill="both", expand=True, padx=6, pady=(4, 2))
         self._build_tab_model()
         self._build_tab_sim()
-        self._build_tab_rig()       # ③ Execution (working point + plan + run)
+        self._build_tab_rig()       # ③ Execution (schedule + run)
 
         self.root.after(100, self._pump)
 
@@ -401,43 +459,64 @@ class HarvestConsole:
         self.var_vision_segmenter = tk.StringVar(value=default_segmenter)
         self.var_vision_height = tk.DoubleVar(value=3.0)
         self.var_vision_diameter = tk.StringVar(value="")
-        self.var_vision_max_level = tk.IntVar(value=3)
-        ttk.Label(vision, text="Segmenter").pack(side="left", padx=(5, 2), pady=3)
+        self.var_vision_max_level = tk.IntVar(value=2)
+        # Skeleton topology is far more sensitive to false positives than pixel
+        # Dice, so the field Console favours precision over the checkpoint's 0.5.
+        self.var_vision_wood_threshold = tk.DoubleVar(value=0.70)
+        vision_body = ttk.Frame(vision)
+        vision_body.pack(fill="x", padx=5, pady=3)
+        settings = ttk.Frame(vision_body)
+        settings.pack(side="left", fill="x", expand=True)
+        actions = ttk.Frame(vision_body)
+        actions.pack(side="right", fill="y", padx=(8, 0))
+        field_pad = {"padx": (2, 4), "pady": 2, "sticky": "w"}
+
+        ttk.Label(settings, text="Segmenter").grid(row=0, column=0, **field_pad)
         ttk.Combobox(
-            vision,
+            settings,
             textvariable=self.var_vision_segmenter,
             values=["classical", "wood", "sam2"],
             state="readonly",
             width=10,
-        ).pack(side="left", padx=2, pady=3)
-        ttk.Label(vision, text="Tree height m").pack(side="left", padx=(8, 2), pady=3)
-        ttk.Entry(vision, textvariable=self.var_vision_height, width=6).pack(
-            side="left", padx=2, pady=3
+        ).grid(row=0, column=1, **field_pad)
+        ttk.Label(settings, text="Tree height m").grid(row=0, column=2, **field_pad)
+        ttk.Entry(settings, textvariable=self.var_vision_height, width=6).grid(
+            row=0, column=3, **field_pad
         )
-        ttk.Label(vision, text="Trunk diameter m (optional)").pack(
-            side="left", padx=(8, 2), pady=3
+        ttk.Label(settings, text="Trunk diameter m (optional)").grid(
+            row=0, column=4, **field_pad
         )
-        ttk.Entry(vision, textvariable=self.var_vision_diameter, width=7).pack(
-            side="left", padx=2, pady=3
+        ttk.Entry(settings, textvariable=self.var_vision_diameter, width=7).grid(
+            row=0, column=5, **field_pad
         )
-        ttk.Label(vision, text="Max level").pack(side="left", padx=(8, 2), pady=3)
+        ttk.Label(settings, text="Max level").grid(row=1, column=0, **field_pad)
         ttk.Spinbox(
-            vision, from_=1, to=8, textvariable=self.var_vision_max_level, width=4
-        ).pack(side="left", padx=2, pady=3)
+            settings, from_=1, to=8, textvariable=self.var_vision_max_level, width=4
+        ).grid(row=1, column=1, **field_pad)
+        ttk.Label(settings, text="Wood conf.").grid(row=1, column=2, **field_pad)
+        ttk.Spinbox(
+            settings,
+            from_=0.5,
+            to=0.95,
+            increment=0.05,
+            textvariable=self.var_vision_wood_threshold,
+            width=5,
+        ).grid(row=1, column=3, **field_pad)
         self.btn_edit_photo = ttk.Button(
-            vision, text="Extract / edit photo…", command=self.on_edit_photo_skeleton
+            actions, text="Extract / edit photo…", command=self.on_edit_photo_skeleton
         )
-        self.btn_edit_photo.pack(side="left", padx=(10, 3), pady=3)
-        ttk.Button(vision, text="Open edit project…", command=self.on_open_skeleton_project).pack(
-            side="left", padx=3, pady=3
+        self.btn_edit_photo.pack(fill="x", pady=(0, 2))
+        ttk.Button(
+            actions, text="Open edit project…", command=self.on_open_skeleton_project
+        ).pack(
+            fill="x", pady=(2, 0)
         )
 
-        main = ttk.Frame(tab)
+        main = ttk.Panedwindow(tab, orient="horizontal")
         main.pack(fill="both", expand=True, padx=6, pady=3)
 
         box = ttk.LabelFrame(main, text="Model summary")
-        box.pack(side="left", fill="y", padx=(0, 6))
-        self.model_info = tk.Text(box, state="disabled", width=46, font=(self.ui_font, 11),
+        self.model_info = tk.Text(box, state="disabled", width=36, font=(self.ui_font, 11),
                                   bg=PALETTE["surface"], fg=PALETTE["text"],
                                   relief="flat", borderwidth=0, highlightthickness=1,
                                   highlightbackground=PALETTE["border"], padx=10, pady=8)
@@ -445,13 +524,16 @@ class HarvestConsole:
 
         # topology on the right; two figures side-by-side, each auto-fit to its half
         figs = ttk.LabelFrame(main, text="Topology (branch labels match ② clamp points)")
-        figs.pack(side="left", fill="both", expand=True)
-        self.fig2d = ttk.Label(figs, text="2D side view — load a model to render",
+        main.add(box, weight=1)
+        main.add(figs, weight=3)
+        figure_panes = ttk.Panedwindow(figs, orient="horizontal")
+        figure_panes.pack(fill="both", expand=True, padx=4, pady=4)
+        self.fig2d = ttk.Label(figure_panes, text="2D side view — load a model to render",
                                anchor="center", style="Muted.TLabel")
-        self.fig2d.pack(side="left", fill="both", expand=True, padx=4, pady=4)
-        self.fig3d = ttk.Label(figs, text="3D view — load a model to render",
+        self.fig3d = ttk.Label(figure_panes, text="3D view — load a model to render",
                                anchor="center", style="Muted.TLabel")
-        self.fig3d.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        figure_panes.add(self.fig2d, weight=1)
+        figure_panes.add(self.fig3d, weight=1)
         self.fig2d.bind("<Configure>", lambda _e: self._fit_figure(self.fig2d))
         self.fig3d.bind("<Configure>", lambda _e: self._fit_figure(self.fig3d))
 
@@ -478,12 +560,15 @@ class HarvestConsole:
             messagebox.showerror("Load failed", str(e))
             self.log(f"Model load failed: {e}")
             return
-        # A topology/geometry change invalidates every response, recommendation
-        # and executable schedule derived from the previously loaded model.
-        self.result = None
+        # A topology/geometry change invalidates every response and executable
+        # schedule derived from the previously loaded model.
         self.schedule = None
+        self._schedule_model_path = ""
+        self._schedule_model_name = ""
+        self._schedule_settings = {}
+        self._pending_schedule_options = None
         self.tree.delete(*self.tree.get_children())
-        self._set_panel(self.info_text, "Model changed — run a new simulation.")
+        self._set_panel(self.info_text, "Model changed — compute a new schedule.")
         self.btn_run.configure(state="disabled")
         summary = summarize_orchard_model(self.model, path)
         self.model_info.configure(state="normal")
@@ -542,12 +627,15 @@ class HarvestConsole:
             diameter_text = self.var_vision_diameter.get().strip()
             trunk_diameter = float(diameter_text) if diameter_text else None
             max_level = int(self.var_vision_max_level.get())
+            wood_threshold = float(self.var_vision_wood_threshold.get())
             if tree_height <= 0.0:
                 raise ValueError("Tree height must be positive")
             if trunk_diameter is not None and trunk_diameter <= 0.0:
                 raise ValueError("Trunk diameter must be positive")
             if max_level < 1:
                 raise ValueError("Max level must be at least 1")
+            if not 0.0 < wood_threshold < 1.0:
+                raise ValueError("Wood confidence must be between 0 and 1")
         except Exception as error:  # noqa: BLE001
             self._notify("Invalid extraction settings", str(error), warn=True)
             return
@@ -570,20 +658,54 @@ class HarvestConsole:
                 warn=True,
             )
             return
+        try:
+            from orchard_fem.actuator.photo_target_selector import select_target_tree
+            from orchard_vision.pipeline import load_working_image
+
+            working_image = load_working_image(image_path)
+            target = select_target_tree(self.root, working_image)
+        except Exception as error:  # noqa: BLE001
+            self._notify("Target-tree selection failed", str(error), warn=True)
+            return
+        if target is None:
+            self.log("Photo skeleton extraction cancelled before target selection.")
+            return
         self._vision_busy = True
         self.btn_edit_photo.configure(state="disabled")
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
-        self.log(f"Extracting skeleton from {Path(image_path).name} ({segmenter_name})…")
+        self.log(
+            f"Extracting skeleton from {Path(image_path).name} ({segmenter_name}); "
+            f"ROI={target.roi_xyxy}, trunk root={target.trunk_root_rc}…"
+        )
 
         def worker() -> None:
             try:
+                mask_override = None
                 if segmenter_name == "wood":
                     from orchard_vision.wood_seg import WoodSegmenter
 
                     segmenter = WoodSegmenter(
-                        checkpoint=str(WORKSPACE.wood_checkpoint)
+                        checkpoint=str(WORKSPACE.wood_checkpoint),
+                        threshold=wood_threshold,
                     )
+                    from orchard_vision.pipeline import root_aware_probability_mask
+
+                    probability = segmenter.predict_proba(working_image)
+                    mask_override, applied_threshold = root_aware_probability_mask(
+                        probability,
+                        preferred_threshold=wood_threshold,
+                        target_roi_xyxy=target.roi_xyxy,
+                        trunk_root_rc=target.trunk_root_rc,
+                    )
+                    if applied_threshold < wood_threshold:
+                        warning = (
+                            "Wood confidence was relaxed near the selected trunk: "
+                            f"{wood_threshold:.2f} → {applied_threshold:.2f}."
+                        )
+                        if applied_threshold < 0.30:
+                            warning += " Verify and paint the low-confidence trunk in the editor."
+                        self._post("log", warning)
                 elif segmenter_name == "sam2":
                     from orchard_vision.segmentation_sam2 import Sam2Segmenter
 
@@ -602,9 +724,11 @@ class HarvestConsole:
                         tree_height_m=tree_height,
                         trunk_diameter_m=trunk_diameter,
                         max_level=max_level,
+                        target_roi_xyxy=target.roi_xyxy,
+                        trunk_root_rc=target.trunk_root_rc,
                         segmenter=segmenter,
                     )
-                ).run(image_path)
+                ).run(image_path, mask_override=mask_override)
                 document = EditableSkeleton.from_pipeline_result(
                     result, image_path=image_path
                 )
@@ -661,7 +785,7 @@ class HarvestConsole:
         self.var_model_path.set(str(path))
         self.on_load_model()
         self.nb.select(0)
-        self.log("Edited skeleton model is now active; previous simulation results were cleared.")
+        self.log("Edited skeleton model is now active; the previous schedule was cleared.")
 
     def _display_clamp(self, raw: str) -> str:
         """Raw 'branch_id@s' → 'hlabel@s' (hierarchical label matching the figures)."""
@@ -742,14 +866,14 @@ class HarvestConsole:
             pass
 
     # ------------------------------------------------------------------ #
-    # ② 仿真推荐
+    # ② 序列计算
     # ------------------------------------------------------------------ #
 
     def _build_tab_sim(self) -> None:
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text="  ② Simulation  ")
+        self.nb.add(tab, text="  ② Schedule  ")
 
-        opts = ttk.LabelFrame(tab, text="Simulation settings")
+        opts = ttk.LabelFrame(tab, text="Schedule calculation settings")
         opts.pack(fill="x", padx=6, pady=4)
         pad = dict(padx=4, pady=3)
         self.var_band_lo = tk.DoubleVar(value=3.0)
@@ -770,18 +894,22 @@ class HarvestConsole:
         ttk.Entry(g, textvariable=self.var_band_hi, width=5).grid(row=0, column=3, **pad)
         ttk.Label(g, text="Sweep steps").grid(row=0, column=4, **pad)
         ttk.Entry(g, textvariable=self.var_steps, width=5).grid(row=0, column=5, **pad)
-        ttk.Label(g, text="Amplitude A (mm, blank=auto)").grid(row=0, column=6, **pad)
-        ttk.Entry(g, textvariable=self.var_agrid, width=16).grid(row=0, column=7, **pad)
-        ttk.Label(g, text="Coverage").grid(row=0, column=8, **pad)
-        ttk.Combobox(g, textvariable=self.var_coverage, width=7, state="readonly",
-                     values=["branch", "fruit"]).grid(row=0, column=9, **pad)
-        ttk.Checkbutton(g, text="Dense fruit, spacing", variable=self.var_dense,
-                        ).grid(row=1, column=0, columnspan=2, **pad)
-        ttk.Entry(g, textvariable=self.var_spacing, width=5).grid(row=1, column=2, columnspan=2, **pad)
-        ttk.Label(g, text="Detachment (mm)").grid(row=1, column=4, **pad)
-        ttk.Entry(g, textvariable=self.var_ddet, width=5).grid(row=1, column=5, **pad)
-        ttk.Label(g, text="Detach cycles").grid(row=1, column=6, **pad)
-        ttk.Entry(g, textvariable=self.var_ncycles, width=6).grid(row=1, column=7, **pad)
+        ttk.Label(g, text="Coverage: branch").grid(
+            row=0, column=6, columnspan=2, **pad
+        )
+        ttk.Label(g, text="Amplitude A (mm, blank=auto)").grid(row=1, column=0, **pad)
+        ttk.Entry(g, textvariable=self.var_agrid, width=18).grid(
+            row=1, column=1, columnspan=3, sticky="ew", **pad
+        )
+        ttk.Checkbutton(g, text="Dense fruit", variable=self.var_dense).grid(
+            row=1, column=4, columnspan=2, **pad
+        )
+        ttk.Label(g, text="Fruit spacing").grid(row=2, column=0, **pad)
+        ttk.Entry(g, textvariable=self.var_spacing, width=5).grid(row=2, column=1, **pad)
+        ttk.Label(g, text="Detachment (mm)").grid(row=2, column=2, **pad)
+        ttk.Entry(g, textvariable=self.var_ddet, width=5).grid(row=2, column=3, **pad)
+        ttk.Label(g, text="Detach cycles").grid(row=2, column=4, **pad)
+        ttk.Entry(g, textvariable=self.var_ncycles, width=6).grid(row=2, column=5, **pad)
 
         mid = ttk.Frame(tab)
         mid.pack(fill="x", padx=6)
@@ -803,36 +931,39 @@ class HarvestConsole:
         clamp_sb.pack(side="left", fill="y")
         btns = ttk.Frame(mid)
         btns.pack(side="left", fill="x", padx=10)
-        self.btn_sim = ttk.Button(btns, text="▶ Run simulation", style="Accent.TButton",
+        self.btn_sim = ttk.Button(btns, text="▶ Compute schedule", style="Accent.TButton",
                                   command=self.on_run_sim)
         self.btn_sim.pack(fill="x", pady=3)
         self.btn_sim_cancel = ttk.Button(btns, text="Cancel", state="disabled",
                                          command=lambda: self._sim_cancel.set())
         self.btn_sim_cancel.pack(fill="x", pady=3)
-        ttk.Button(btns, text="Export result JSON…",
+        ttk.Button(btns, text="Export schedule JSON…",
                    command=self.on_export_result).pack(fill="x", pady=2)
-        ttk.Button(btns, text="Load result JSON…",
+        ttk.Button(btns, text="Load schedule JSON…",
                    command=self.on_import_result).pack(fill="x", pady=2)
-        # One result panel: shows the recommended point, then the schedule once built.
+        # The only operational result is the executable multi-stage schedule.
         self.info_text = tk.Text(
             mid, font=("Consolas", 10), height=8, wrap="none",
             bg=PALETTE["surface"], fg=PALETTE["text"], relief="flat", borderwidth=0,
             highlightthickness=1, highlightbackground=PALETTE["border"],
             padx=8, pady=6, state="disabled")
         self.info_text.pack(side="left", fill="both", expand=True)
-        self._set_panel(self.info_text,
-                        "Run a simulation to get the recommended schedule.")
+        self._set_panel(self.info_text, "Compute a schedule to see the executable stages.")
 
-        table_box = ttk.LabelFrame(
-            tab, text="Candidate working points "
-                      "(★ = recommended knee,  ◆ = Pareto front,  grey = outside rig envelope)")
+        table_box = ttk.LabelFrame(tab, text="Executable schedule stages")
         table_box.pack(fill="both", expand=True, padx=6, pady=4)
-        cols = ("clamp", "f", "A", "stroke", "cov", "stress", "env", "mark")
+        cols = ("stage", "clamp", "f", "duration", "stroke", "new", "coverage", "stress")
         self.tree = ttk.Treeview(table_box, columns=cols, show="headings", height=10)
-        headings = [("clamp", "Clamp", 140), ("f", "f (Hz)", 70), ("A", "A (mm)", 70),
-                    ("stroke", "Stroke (mm)", 90), ("cov", "Coverage", 80),
-                    ("stress", "σ trunk (MPa)", 100), ("env", "In env.", 65),
-                    ("mark", "Mark", 60)]
+        headings = [
+            ("stage", "Stage", 55),
+            ("clamp", "Clamp", 140),
+            ("f", "f (Hz)", 75),
+            ("duration", "Duration (s)", 90),
+            ("stroke", "Stroke (mm)", 90),
+            ("new", "New branches", 95),
+            ("coverage", "Cumulative", 85),
+            ("stress", "σ trunk (MPa)", 105),
+        ]
         for cid, text, width in headings:
             self.tree.heading(cid, text=text)
             self.tree.column(cid, width=width, anchor="center")
@@ -840,10 +971,9 @@ class HarvestConsole:
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
-        self.tree.tag_configure("knee", background=PALETTE["sel"],
-                                foreground=PALETTE["primary_dark"])
-        self.tree.tag_configure("front", background=PALETTE["primary_soft"])
-        self.tree.tag_configure("infeasible", foreground="#9aa8a1")
+        self.tree.tag_configure(
+            "final", background=PALETTE["sel"], foreground=PALETTE["primary_dark"]
+        )
 
     def _sim_options(self) -> RecommendationOptions:
         # Amplitude grid is OPTIONAL: blank ⇒ derive from the actuator envelope
@@ -869,17 +999,20 @@ class HarvestConsole:
             self._notify("Notice", "Load a tree model in ① first.", warn=True)
             return
         if self._sim_running:
-            self.log("Simulation already running — please wait or press [Cancel].")
+            self.log("Schedule calculation already running — please wait or press [Cancel].")
             return
         if not _has("dolfinx"):
             self._notify(
                 "Solver backend missing",
-                "dolfinx (FEniCSx) is not available, so the simulation cannot run.\n"
+                "dolfinx (FEniCSx) is not available, so the schedule cannot be computed.\n"
                 "Run this app in the orchard-fenicsx environment, or load an "
-                "exported result JSON instead.")
+                "exported schedule JSON instead.")
             return
         try:
             options = self._sim_options()
+            detach_cycles = float(self.var_ncycles.get())
+            if detach_cycles <= 0.0:
+                raise ValueError("Detach cycles must be positive.")
             # use the RAW "branch_id@s" (the list shows hierarchical labels)
             selected = [self._clamp_raw[i] for i in self.clamp_list.curselection()]
             if not selected:
@@ -891,22 +1024,40 @@ class HarvestConsole:
         self._sim_running = True
         self.btn_sim.configure(state="disabled")
         self.btn_sim_cancel.configure(state="normal")
-        self.log(f"Starting simulation ({len(selected)} candidate clamps)…")
+        self.log(f"Starting schedule calculation ({len(selected)} candidate clamps)…")
         self.root.update_idletasks()        # paint the "started" state immediately
 
         model, path = self.model, self.model_path
         # 夹持候选由界面选择决定
         options_sel = dataclasses.replace(options, clamp_labels=tuple(selected))
+        self.schedule = None
+        self.btn_run.configure(state="disabled")
+        self.tree.delete(*self.tree.get_children())
+        self._set_panel(
+            self.info_text,
+            "Computing the branch-resolved response grid and staged schedule…",
+        )
+        self._pending_schedule_options = options_sel
+        self._pending_detach_cycles = detach_cycles
+        self._schedule_model_path = str(path or "")
+        self._schedule_model_name = str(model.metadata.name)
 
         def worker() -> None:
             try:
                 from orchard_fem.workflows.harvest_recommendation import (
                     recommend_harvest_parameters,
                 )
+
+                def report_progress(message: str, fraction: float) -> None:
+                    # The shared paper/CLI backend still derives a legacy Pareto
+                    # knee, but it is not an operational Console result.
+                    if not message.startswith("Recommended working point:"):
+                        self._post("log", message)
+                    self._post("progress", fraction)
+
                 result = recommend_harvest_parameters(
                     model, model_path=str(path), options=options_sel,
-                    progress_cb=lambda m, f: (self._post("log", m),
-                                              self._post("progress", f)),
+                    progress_cb=report_progress,
                     cancel_cb=self._sim_cancel.is_set,
                 )
                 self._post("sim_done", result)
@@ -922,76 +1073,66 @@ class HarvestConsole:
         self.progress["value"] = 0
         if isinstance(payload, Exception):
             msg = str(payload)
-            self.log("Simulation cancelled" if msg == "cancelled"
-                     else f"Simulation failed: {msg}")
+            self._pending_schedule_options = None
+            self._set_panel(
+                self.info_text,
+                "Schedule calculation cancelled."
+                if msg == "cancelled"
+                else f"Schedule calculation failed:\n{msg}",
+            )
+            self.log("Schedule calculation cancelled" if msg == "cancelled"
+                     else f"Schedule calculation failed: {msg}")
             if msg != "cancelled":
-                messagebox.showerror("Simulation failed", msg)
+                messagebox.showerror("Schedule calculation failed", msg)
             return
-        self.result = payload
-        self._fill_result_table(payload)
-        self.log(f"Simulation complete in {payload.elapsed_s:.0f} s")
-        # 同一条流水线:仿真出最佳夹持后,自动在其上构建调参序列(无需第二个按钮)
-        if self.model is not None and _has("dolfinx") and payload.recommended is not None:
-            self.on_compute_schedule()
+        try:
+            from orchard_fem.workflows.harvest_schedule import (
+                StageDurationModel,
+                compute_multiclamp_harvest_schedule,
+            )
 
-    # ---- 调参序列(多阶段),作为 run simulation 的后半段自动执行 ----
-    def on_compute_schedule(self) -> None:
-        if self.result is None or self.model is None or self.result.recommended is None:
-            messagebox.showwarning("Notice", "Run the simulation first.")
-            return
-        if not _has("dolfinx"):
-            messagebox.showerror("Solver backend missing",
-                                 "Building the schedule needs dolfinx "
-                                 "(run in the orchard-fenicsx environment).")
-            return
-        opt = self._sim_options()
-        a_grid = list(self.result.amplitude_grid_mm)
-        ncyc = float(self.var_ncycles.get())
-        model = self.model
-        # Multi-clamp: one grip only sheds fruit on the branches its excitation
-        # energy reaches, so its coverage caps out. Cover the tree by also building
-        # grids on the next-best clamps and letting the scheduler move the grip
-        # between energy-reachable regions. Each clamp scans its OWN local-mode
-        # frequencies (the ones the recommendation evaluated for it).
-        # The multi-clamp schedule is built by the SHARED workflow builder, so it
-        # is identical to scripts/generate_all_figures.py and the rig-executed run.
-        # Use ALL feasible clamps (no top-N cut): more grips reach more branches.
-        candidates = [c for c in self.result.clamps if c.knee is not None]
-        candidates.sort(key=lambda c: c.knee.coverage, reverse=True)
-        self.btn_sim.configure(state="disabled")    # keep the pipeline locked
-        self.log(f"Building multi-clamp schedule over {len(candidates)} clamp(s): "
-                 f"{', '.join(self._display_clamp(c.clamp_label) for c in candidates)}…")
-
-        def worker() -> None:
-            try:
-                from orchard_fem.workflows.harvest_recommendation import (
-                    build_scheduling_model,
+            grids = payload.outcome_grids
+            if grids is None:
+                raise RuntimeError(
+                    "The response scan did not retain branch outcomes; recompute "
+                    "the schedule with the current software version."
                 )
-                from orchard_fem.workflows.harvest_schedule import (
-                    StageDurationModel,
-                    build_multiclamp_schedule,
-                )
-                # The SAME fruited + damped model the recommendation ran on
-                # (shared builder), so the schedule coverage matches the Pareto.
-                m = build_scheduling_model(model, opt)
-                clamp_freqs = {
-                    c.clamp_label: (sorted({p.frequency_hz for p in c.points})
-                                    or list(self.result.frequency_grid_hz))
-                    for c in candidates
-                }
-                sched = build_multiclamp_schedule(
-                    m, clamp_freqs, a_grid, limits=opt.limits,
-                    polynomial_degree=opt.polynomial_degree, max_stages=None,
-                    duration_model=StageDurationModel(reference_cycles=ncyc),
-                    progress_cb=lambda msg, fr: (self._post("log", msg),
-                                                 self._post("progress", fr)))
-                self._post("log", f"Stage durations from {ncyc:g} detach-cycles "
-                                  f"(at threshold) ÷ frequency.")
-                self._post("sched_done", sched)
-            except Exception as e:  # noqa: BLE001
-                self._post("sched_done", e)
-
-        threading.Thread(target=worker, daemon=True).start()
+            opt = self._pending_schedule_options or self._sim_options()
+            n_cells = sum(len(grid) for grid in grids.values())
+            self.log(
+                f"Response grid complete in {payload.elapsed_s:.0f} s; reusing "
+                f"{n_cells} solved cells (no second FE scan)."
+            )
+            schedule = compute_multiclamp_harvest_schedule(
+                grids,
+                n_fruit_branches=payload.n_fruit_branches,
+                target_coverage=0.95,
+                max_stages=None,
+                limits=opt.limits,
+                duration_model=StageDurationModel(
+                    reference_cycles=self._pending_detach_cycles
+                ),
+            )
+            self._schedule_settings = {
+                "coverage_mode": "branch",
+                "target_coverage": schedule.target_coverage,
+                "detach_cycles": self._pending_detach_cycles,
+                "band_hz": list(opt.band_hz),
+                "frequency_grid_hz": list(payload.frequency_grid_hz),
+                "amplitude_grid_mm": list(payload.amplitude_grid_mm),
+                "candidate_clamps": list(grids),
+                "stress_ceiling_pa": opt.stress_ceiling_pa,
+                "polynomial_degree": opt.polynomial_degree,
+            }
+            self.log(
+                f"Stage durations use {self._pending_detach_cycles:g} "
+                "threshold detachment cycles ÷ frequency."
+            )
+            self._on_sched_done(schedule)
+        except Exception as error:  # noqa: BLE001
+            self._on_sched_done(error)
+        finally:
+            self._pending_schedule_options = None
 
     def _set_panel(self, widget: tk.Text, text: str) -> None:
         widget.configure(state="normal")
@@ -1003,93 +1144,95 @@ class HarvestConsole:
         self.btn_sim.configure(state="normal")     # pipeline finished → unlock
         self.progress["value"] = 0
         if isinstance(payload, Exception):
+            self.schedule = None
+            self.btn_run.configure(state="disabled")
             self._set_panel(self.info_text, f"Schedule build failed:\n{payload}")
             self.log(f"Schedule build failed: {payload}")
             messagebox.showerror("Failed", str(payload))
             return
         self.schedule = payload
+        self._fill_schedule_table(payload)
         self._set_panel(self.info_text, payload.summary(label_fn=self._display_clamp))
         if payload.feasible:
             self.btn_run.configure(
                 state="normal" if self.drv.connected else "disabled")
             self.log(f"Schedule built: {len(payload.stages)} stages, "
                      f"{payload.total_duration_s:.1f} s — run it in ③ Execution.")
+            if payload.final_coverage < payload.target_coverage:
+                self.log(
+                    f"⚠ Only {payload.final_coverage:.0%} branch coverage is reachable "
+                    f"(target {payload.target_coverage:.0%})."
+                )
         else:
+            self.btn_run.configure(state="disabled")
             self.log("⚠ Schedule empty or has stages outside the rig envelope — not executable")
 
-    def _fill_result_table(self, result: RecommendationResult) -> None:
+    def _fill_schedule_table(self, schedule: HarvestSchedule) -> None:
         self.tree.delete(*self.tree.get_children())
-        for ci, clamp in enumerate(result.clamps):
-            for pi, p in enumerate(clamp.points):
-                mark = "★" if p.is_knee else ("◆" if p.on_front else "")
-                tags = (("knee",) if p.is_knee
-                        else ("front",) if p.on_front
-                        else ("infeasible",) if not p.rig_feasible else ())
-                self.tree.insert(
-                    "", "end", iid=f"{ci}:{pi}", tags=tags,
-                    values=(self._display_clamp(p.clamp_label), f"{p.frequency_hz:.2f}",
-                            f"{p.amplitude_mm:g}", f"{p.stroke_mm:g}",
-                            f"{p.coverage:.2f}", f"{p.trunk_stress_pa / 1e6:.2f}",
-                            "Yes" if p.rig_feasible else "No", mark))
-        rec = result.recommended
-        if rec is not None:
-            self._set_panel(self.info_text, (
-                "Recommended working point  (building schedule…)\n"
-                f"  Clamp       {self._display_clamp(rec.clamp_label)}\n"
-                f"  Frequency   {rec.frequency_hz:.2f} Hz\n"
-                f"  Amplitude   {rec.amplitude_mm:g} mm  (stroke {rec.stroke_mm:g} mm)\n"
-                f"  Coverage    {rec.coverage:.2f}\n"
-                f"  Trunk σ     {rec.trunk_stress_pa / 1e6:.2f} MPa"))
-        else:
-            self._set_panel(self.info_text, "No feasible working point found.")
+        last = len(schedule.stages)
+        for row, stage in enumerate(schedule.stages, start=1):
+            clamp = stage.plan.excitation_label or schedule.clamp_label
+            tags = ("final",) if row == last else ()
+            self.tree.insert(
+                "",
+                "end",
+                iid=f"stage:{stage.index}",
+                tags=tags,
+                values=(
+                    stage.index,
+                    self._display_clamp(clamp),
+                    f"{stage.plan.frequency_hz:.2f}",
+                    f"{stage.plan.duration_s:.1f}",
+                    f"{stage.plan.stroke_mm:.1f}",
+                    f"+{len(stage.new_branches)}",
+                    f"{stage.cumulative_coverage:.0%}",
+                    f"{stage.trunk_stress_pa / 1e6:.2f}",
+                ),
+            )
 
     def on_export_result(self) -> None:
-        if self.result is None:
-            messagebox.showwarning("Notice", "No simulation result yet.")
+        if self.schedule is None:
+            messagebox.showwarning("Notice", "No schedule to export.")
             return
         path = filedialog.asksaveasfilename(
-            defaultextension=".json", initialfile="recommendation.json")
+            defaultextension=".json",
+            initialfile="harvest_schedule.json",
+            filetypes=[("Harvest schedule JSON", "*.json")],
+        )
         if not path:
             return
-        # carry the executable schedule too, so an offline rig can run it without FE
-        payload = {
-            "recommendation": self.result.to_json_dict(),
-            "schedule": self.schedule.to_dict() if self.schedule is not None else None,
-        }
-        Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        n = len(self.schedule.stages) if self.schedule is not None else 0
-        self.log(f"Result exported → {path} ({n}-stage schedule included)")
+        payload = _schedule_export_payload(
+            self.schedule,
+            model_path=self._schedule_model_path,
+            model_name=self._schedule_model_name,
+            calculation=self._schedule_settings,
+        )
+        Path(path).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.log(f"Schedule exported → {path} ({len(self.schedule.stages)} stages)")
 
     def on_import_result(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("Recommendation JSON", "*.json")])
+        path = filedialog.askopenfilename(
+            filetypes=[("Harvest schedule JSON", "*.json")]
+        )
         if not path:
             return
         try:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
-            # new format: {"recommendation": {...}, "schedule": {...}|null};
-            # legacy format: a bare recommendation dict.
-            rec_dict = data["recommendation"] if "recommendation" in data else data
-            sched_dict = data.get("schedule") if "recommendation" in data else None
-            self.result = RecommendationResult.from_json_dict(rec_dict)
+            schedule, metadata = _schedule_from_payload(data)
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Load failed", str(e))
             return
-        self._fill_result_table(self.result)
-        for step in self.result.steps:
-            self.log(f"[imported] {step}")
-        self.log(f"Result loaded ({self.result.model_name})")
-        if sched_dict:
-            from orchard_fem.actuator.harvest_bridge import HarvestSchedule
-            self._on_sched_done(HarvestSchedule.from_dict(sched_dict))
-            self.log("Harvest schedule restored from file — ready to run in ③.")
-        else:
-            self.schedule = None
-            self._set_panel(self.info_text,
-                            "Loaded a recommendation with no schedule.\n"
-                            "Re-run the simulation (needs dolfinx) to build the staged sequence.")
+        self._schedule_model_path = metadata["model_path"]
+        self._schedule_model_name = metadata["model_name"]
+        self._schedule_settings = metadata["calculation"]
+        self._on_sched_done(schedule)
+        suffix = f" ({self._schedule_model_name})" if self._schedule_model_name else ""
+        self.log(f"Schedule loaded{suffix} — ready to run in ③ Execution.")
 
     # ------------------------------------------------------------------ #
-    # ③ Execution (working point + plan + run)
+    # ③ Execution (schedule + run)
     # ------------------------------------------------------------------ #
 
     def _build_tab_rig(self) -> None:
@@ -1098,7 +1241,7 @@ class HarvestConsole:
         pad = dict(padx=4, pady=3)
 
         ttk.Label(tab, text="Connect the rig and press RUN to execute the schedule "
-                            "built in ② Simulation.", style="Muted.TLabel",
+                            "built in ② Schedule.", style="Muted.TLabel",
                   ).pack(anchor="w", padx=8, pady=(6, 0))
 
         conn = ttk.LabelFrame(tab, text="Serial connection (RS232 factory default 19200-8-E-1)")
@@ -1120,10 +1263,10 @@ class HarvestConsole:
         ttk.Combobox(conn, textvariable=self.var_stop, width=3,
                      values=["1", "2"]).grid(row=0, column=7, **pad)
         self.btn_conn = ttk.Button(conn, text="Connect", command=self.on_connect)
-        self.btn_conn.grid(row=0, column=8, **pad)
+        self.btn_conn.grid(row=1, column=0, columnspan=2, sticky="ew", **pad)
         self.btn_alarm = ttk.Button(conn, text="Clear alarm", state="disabled",
                                     command=self.on_clear_alarm)
-        self.btn_alarm.grid(row=0, column=9, **pad)
+        self.btn_alarm.grid(row=1, column=2, columnspan=2, sticky="ew", **pad)
 
         home = ttk.LabelFrame(
             tab, text="Centering (touch-stop homing; first P9-21 enable needs a drive power cycle)")
@@ -1132,15 +1275,19 @@ class HarvestConsole:
         self.var_homeoff = tk.DoubleVar(value=25.8)
         self.var_homerev = tk.BooleanVar(value=False)
         self.var_calibrate = tk.BooleanVar(value=False)
-        ttk.Checkbutton(home, text="Auto-center before run", variable=self.var_home,
-                        ).pack(side="left", **pad)
-        ttk.Label(home, text="Limit→center offset (mm)").pack(side="left", **pad)
-        ttk.Entry(home, textvariable=self.var_homeoff, width=6).pack(side="left", **pad)
-        ttk.Checkbutton(home, text="Reverse touch-stop", variable=self.var_homerev,
-                        ).pack(side="left", **pad)
+        ttk.Checkbutton(home, text="Auto-center before run", variable=self.var_home).grid(
+            row=0, column=0, **pad
+        )
+        ttk.Label(home, text="Limit→center offset (mm)").grid(row=0, column=1, **pad)
+        ttk.Entry(home, textvariable=self.var_homeoff, width=6).grid(row=0, column=2, **pad)
+        ttk.Checkbutton(home, text="Reverse touch-stop", variable=self.var_homerev).grid(
+            row=0, column=3, **pad
+        )
         ttk.Checkbutton(
             home, text="Online freq. calibration (adds 5–23 s; off = exact duration)",
-            variable=self.var_calibrate).pack(side="left", **pad)
+            variable=self.var_calibrate).grid(
+                row=1, column=0, columnspan=4, sticky="w", **pad
+            )
 
         ctl = ttk.Frame(tab)
         ctl.pack(fill="x", padx=6, pady=8)
@@ -1160,7 +1307,7 @@ class HarvestConsole:
                         padx=10, pady=6)
         check.insert("end",
                      "1) Schedule built in ② and FEASIBLE; validate at low frequency first.   "
-                     "2) Clamp mounted at the chosen point; rod near mid-stroke.\n"
+                     "2) Clamp mounted at the first scheduled point; rod near mid-stroke.\n"
                      "3) Alarm code 0 after connecting (clear it otherwise).   "
                      "4) First-time homing needs one drive power cycle.\n"
                      "5) Physical power switch within reach (emergency stop).   "
@@ -1222,7 +1369,7 @@ class HarvestConsole:
             self.on_run_schedule()
         else:
             messagebox.showwarning(
-                "Notice", "Run a simulation in ② first to build an executable schedule.")
+                "Notice", "Compute a schedule in ② first.")
 
     def on_run_schedule(self) -> None:
         if self._rig_running:
@@ -1295,10 +1442,8 @@ class HarvestConsole:
             RUNS_DIR.mkdir(parents=True, exist_ok=True)
             record = {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "model_path": str(self.model_path) if self.model_path else
-                              (self.result.model_path if self.result else ""),
-                "schedule": (dataclasses.asdict(self.schedule)
-                             if self.schedule else None),
+                "model_path": self._schedule_model_path or str(self.model_path or ""),
+                "schedule": self.schedule.to_dict() if self.schedule else None,
                 "outcome": outcome,
                 "detail": detail,
             }

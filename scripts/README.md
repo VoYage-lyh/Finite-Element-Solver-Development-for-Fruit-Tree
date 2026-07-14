@@ -16,6 +16,7 @@ the package CLI instead — `python -m orchard_fem --help`.
 | Script | Purpose |
 |---|---|
 | `generate_all_figures.py` | **Main driver.** Runs the harvest recommendation + multi-clamp schedule pipeline for the five tracked example trees and refreshes the standalone verification figures under `workspace/outputs/`. No flag = render from `workspace/cache/` (fast); `--force` = recompute FE results; `--only-figures` = strict cache render. |
+| `run_harvest_console.sh` | Launch Harvest Console with FEniCSx while reusing ML packages from `orchard-ml`. |
 
 ## `rig/` — physical DS5L1 electric cylinder
 

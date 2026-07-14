@@ -116,7 +116,7 @@ class DS5L1Limits:
 
     @classmethod
     def realistic_harvester(cls, *, max_freq_hz: float = 15.0,
-                            max_amplitude_mm: float = 20.0) -> "DS5L1Limits":
+                            max_amplitude_mm: float = 10.0) -> "DS5L1Limits":
         """A REALISTIC, achievable shaker envelope (e.g. an eccentric-mass
         exciter) — the default analysis envelope.
 

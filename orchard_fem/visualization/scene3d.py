@@ -97,34 +97,123 @@ def _branch_arc_s(polyline: list[list[float]]) -> list[float]:
     return [v / total for v in cumulative]
 
 
-def _tube_surface(p0, p1, r0: float, r1: float, np_mod, n_theta: int = 14):
-    p0 = np_mod.asarray(p0, dtype=float)
-    p1 = np_mod.asarray(p1, dtype=float)
-    direction = p1 - p0
-    length = float(np_mod.linalg.norm(direction))
-    if length < 1e-12:
+def _perpendicular_unit(tangent, np_mod):
+    """Choose a stable unit vector perpendicular to ``tangent``."""
+    axes = np_mod.eye(3)
+    reference = axes[int(np_mod.argmin(np_mod.abs(axes @ tangent)))]
+    normal = np_mod.cross(tangent, reference)
+    return normal / np_mod.linalg.norm(normal)
+
+
+def _tube_surface(polyline, radii, np_mod, n_theta: int = 20):
+    """Sweep a continuous circular tube along one branch polyline.
+
+    A single moving frame is propagated along the whole branch.  This keeps the
+    angular position of neighbouring rings continuous, unlike rendering every
+    centreline segment as an independent cylinder (which produces folded seams at
+    bends).  Consecutive duplicate points are discarded because they have no
+    well-defined tangent.
+    """
+    points = np_mod.asarray(polyline, dtype=float)
+    radius_values = np_mod.asarray(radii, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 3 or len(points) != len(radius_values):
+        raise ValueError("polyline must be (N, 3) with one radius per point")
+    if len(points) < 2:
         return None
-    e_z = direction / length
-    e_tmp = np_mod.array([1.0, 0.0, 0.0]) if abs(e_z[0]) < 0.9 else np_mod.array([0.0, 1.0, 0.0])
-    e_x = np_mod.cross(e_z, e_tmp)
-    e_x /= np_mod.linalg.norm(e_x)
-    e_y = np_mod.cross(e_z, e_x)
+
+    segment_lengths = np_mod.linalg.norm(np_mod.diff(points, axis=0), axis=1)
+    keep = np_mod.concatenate(([True], segment_lengths > 1.0e-12))
+    points = points[keep]
+    radius_values = radius_values[keep]
+    if len(points) < 2:
+        return None
+
+    directions = np_mod.diff(points, axis=0)
+    directions /= np_mod.linalg.norm(directions, axis=1)[:, None]
+
+    tangents = np_mod.empty_like(points)
+    tangents[0] = directions[0]
+    tangents[-1] = directions[-1]
+    for index in range(1, len(points) - 1):
+        tangent = directions[index - 1] + directions[index]
+        tangent_norm = float(np_mod.linalg.norm(tangent))
+        # A 180-degree reversal has no unique averaged tangent.  Following the
+        # outgoing segment is deterministic and avoids division by zero.
+        tangents[index] = (
+            tangent / tangent_norm if tangent_norm > 1.0e-12 else directions[index]
+        )
+
+    normals = np_mod.empty_like(points)
+    binormals = np_mod.empty_like(points)
+    normals[0] = _perpendicular_unit(tangents[0], np_mod)
+    binormals[0] = np_mod.cross(tangents[0], normals[0])
+
+    for index in range(1, len(points)):
+        tangent = tangents[index]
+        # Project the previous normal into the new normal plane.  This is a
+        # rotation-minimising transport for the small turns in a sampled branch.
+        normal = normals[index - 1] - np_mod.dot(normals[index - 1], tangent) * tangent
+        normal_norm = float(np_mod.linalg.norm(normal))
+        if normal_norm <= 1.0e-12:
+            normal = _perpendicular_unit(tangent, np_mod)
+        else:
+            normal /= normal_norm
+        if np_mod.dot(normal, normals[index - 1]) < 0.0:
+            normal = -normal
+        normals[index] = normal
+        binormal = np_mod.cross(tangent, normal)
+        binormals[index] = binormal / np_mod.linalg.norm(binormal)
 
     theta = np_mod.linspace(0.0, 2.0 * math.pi, n_theta + 1)
     cos_t = np_mod.cos(theta)
     sin_t = np_mod.sin(theta)
-
-    X = np_mod.zeros((2, n_theta + 1))
-    Y = np_mod.zeros((2, n_theta + 1))
-    Z = np_mod.zeros((2, n_theta + 1))
-    for ring, (center, radius) in enumerate([(p0, r0), (p1, r1)]):
-        pts = center[:, None] + radius * (
-            np_mod.outer(e_x, cos_t) + np_mod.outer(e_y, sin_t)
+    surface = np_mod.empty((len(points), 3, n_theta + 1), dtype=float)
+    for index, (center, radius) in enumerate(zip(points, radius_values, strict=True)):
+        ring = (
+            np_mod.outer(normals[index], cos_t)
+            + np_mod.outer(binormals[index], sin_t)
         )
-        X[ring] = pts[0]
-        Y[ring] = pts[1]
-        Z[ring] = pts[2]
-    return X, Y, Z
+        surface[index] = center[:, None] + max(float(radius), 0.0) * ring
+    return surface[:, 0, :], surface[:, 1, :], surface[:, 2, :]
+
+
+def _physical_axis_layout(
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
+    max_radius: float,
+):
+    """Return padded limits and a box aspect with equal metres on every axis.
+
+    A planar tree still benefits from some visible depth in the axes.  That depth
+    must be introduced by widening both the Y limits and the 3D box by the same
+    amount; widening only the box stretches circular sections into ribbons.
+    """
+    x_range = max(x_max - x_min, 0.1)
+    y_range = max(y_max - y_min, 0.1)
+    z_range = max(z_max - z_min, 0.1)
+    radius_margin = max(float(max_radius), 0.0) * 1.15
+    x_pad = max(x_range * 0.08, radius_margin, 0.08)
+    y_pad = max(y_range * 0.30, radius_margin, 0.10)
+    z_pad = max(z_range * 0.05, radius_margin, 0.08)
+
+    x_limits = (x_min - x_pad, x_max + x_pad)
+    z_limits = (z_min - z_pad, z_max + z_pad)
+    base_y_limits = (y_min - y_pad, y_max + y_pad)
+    x_span = x_limits[1] - x_limits[0]
+    z_span = z_limits[1] - z_limits[0]
+    base_y_span = base_y_limits[1] - base_y_limits[0]
+
+    y_span = max(base_y_span, max(x_span, z_span) * 0.35)
+    mid_y = (y_min + y_max) / 2.0
+    y_limits = (mid_y - y_span / 2.0, mid_y + y_span / 2.0)
+
+    # Matching each box dimension to its coordinate span preserves one display
+    # unit per metre on X, Y and Z.
+    return x_limits, y_limits, z_limits, (x_span, y_span, z_span)
 
 
 def plot_tree_3d(
@@ -165,15 +254,16 @@ def plot_tree_3d(
     y_min, y_max = min(ys), max(ys)
     z_min, z_max = min(zs), max(zs)
     x_range = max(x_max - x_min, 0.1)
-    y_range = max(y_max - y_min, 0.1)
     z_range = max(z_max - z_min, 0.1)
     mid_x = (x_max + x_min) / 2.0
     mid_y = (y_max + y_min) / 2.0
-    # Tight padding around actual tree extent — no forced cube.
-    x_pad = max(x_range * 0.08, 0.08)
-    y_pad = max(y_range * 0.30, 0.10)
-    z_pad = max(z_range * 0.05, 0.08)
     label_offset = max(max(x_range, z_range) * 0.04, 0.05)
+    station_radii = [
+        _extract_outer_radius(station)
+        for branch in branches
+        for station in branch.get("stations", [])
+    ]
+    max_radius = max(station_radii, default=0.01)
 
     level_colors = {
         level: LEVEL_PALETTE[min(level, len(LEVEL_PALETTE) - 1)]
@@ -191,16 +281,20 @@ def plot_tree_3d(
         color = level_colors[level]
         polyline = branch_polylines[branch["id"]]
         s_vals = _branch_arc_s(polyline)
-
-        for seg in range(len(polyline) - 1):
-            p0, p1 = polyline[seg], polyline[seg + 1]
-            r0 = _radius_at_s(branch, s_vals[seg])
-            r1 = _radius_at_s(branch, s_vals[seg + 1])
-            result = _tube_surface(p0, p1, r0, r1, np)
-            if result is None:
-                continue
+        radii = [_radius_at_s(branch, s_value) for s_value in s_vals]
+        result = _tube_surface(polyline, radii, np)
+        if result is not None:
             X, Y, Z = result
-            ax.plot_surface(X, Y, Z, color=color, alpha=0.92, linewidth=0, antialiased=True)
+            ax.plot_surface(
+                X,
+                Y,
+                Z,
+                color=color,
+                alpha=0.92,
+                linewidth=0,
+                antialiased=True,
+                shade=True,
+            )
 
         label_anchor = np.asarray(resolve_branch_point(branch, 0.58), dtype=float)
         radial = np.array([label_anchor[0] - mid_x, label_anchor[1] - mid_y, 0.0])
@@ -309,17 +403,19 @@ def plot_tree_3d(
         except (KeyError, RuntimeError):
             pass
 
-    ax.set_xlim(x_min - x_pad, x_max + x_pad)
-    ax.set_ylim(y_min - y_pad, y_max + y_pad)
-    ax.set_zlim(z_min - z_pad, z_max + z_pad)
-
-    # Proportional 3D box — keeps the tree filling the view instead of a forced cube.
-    # Y axis is widened to at least ~35% of the larger horizontal extent so it does not
-    # collapse into a thin slab when the tree is nearly planar.
-    box_x = x_range + 2 * x_pad
-    box_y = max(y_range + 2 * y_pad, max(x_range, z_range) * 0.35)
-    box_z = z_range + 2 * z_pad
-    ax.set_box_aspect((box_x, box_y, box_z))
+    x_limits, y_limits, z_limits, box_aspect = _physical_axis_layout(
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+        z_min,
+        z_max,
+        max_radius,
+    )
+    ax.set_xlim(*x_limits)
+    ax.set_ylim(*y_limits)
+    ax.set_zlim(*z_limits)
+    ax.set_box_aspect(box_aspect)
 
     # Loosen Y-axis tick density — tree depth is typically small, so default tick
     # spacing crowds 5+ labels into a thin slab. Cap at 3 evenly-spaced ticks.

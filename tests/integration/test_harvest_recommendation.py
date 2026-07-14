@@ -204,6 +204,13 @@ def test_result_json_roundtrip(model, tmp_path):
     assert len(loaded.clamps) == len(result.clamps)
 
 
+def test_runtime_branch_outcome_grids_are_not_serialized(model):
+    result = _run(model)
+    assert result.outcome_grids is not None
+    assert result.n_fruit_branches > 0
+    assert "outcome_grids" not in result.to_json_dict()
+
+
 def test_working_point_params_json(model):
     result = _run(model)
     d = result.recommended.to_params_json(duration_s=12.0)

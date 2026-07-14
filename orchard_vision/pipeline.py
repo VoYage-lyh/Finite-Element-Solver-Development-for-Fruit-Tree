@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import label
 from skimage.io import imread
 from skimage.transform import rescale
 
@@ -43,6 +44,9 @@ class PipelineConfig:
     max_level: int | None = 2  # focus on trunk → primary → secondary accuracy
     min_primary_height_m: float = 0.15  # forbid primaries attaching below this above the base
     max_points_per_branch: int = 16
+    target_roi_xyxy: tuple[int, int, int, int] | None = None
+    trunk_root_rc: tuple[int, int] | None = None
+    root_snap_px: float = 48.0
     segmenter: BranchSegmenter = field(default_factory=ClassicalSegmenter)
 
 
@@ -73,11 +77,31 @@ class PhotoToSkeletonPipeline:
     def __init__(self, config: PipelineConfig | None = None) -> None:
         self.config = config or PipelineConfig()
 
-    def run(self, image_path: str | Path) -> PipelineResult:
+    def run(
+        self,
+        image_path: str | Path,
+        *,
+        mask_override: np.ndarray | None = None,
+    ) -> PipelineResult:
         image_path = Path(image_path)
         image = self._load_image(image_path)
 
-        mask = self.config.segmenter.segment(image)
+        raw_mask = (
+            self.config.segmenter.segment(image)
+            if mask_override is None
+            else mask_override
+        )
+        mask = np.asarray(raw_mask, dtype=bool)
+        if mask.shape != image.shape[:2]:
+            raise ValueError(
+                f"Segmenter returned mask shape {mask.shape}, expected {image.shape[:2]}"
+            )
+        mask = isolate_target_mask(
+            mask,
+            target_roi_xyxy=self.config.target_roi_xyxy,
+            trunk_root_rc=self.config.trunk_root_rc,
+            root_snap_px=self.config.root_snap_px,
+        )
         skeleton, radius = skeletonize_mask(mask)
         graph = build_graph(skeleton, radius)
         branches, root_rc = order_branches(
@@ -85,6 +109,7 @@ class PhotoToSkeletonPipeline:
             min_spur_px=self.config.min_spur_px,
             junction_merge_px=self.config.junction_merge_px,
             max_level=self.config.max_level,
+            root_hint_rc=self.config.trunk_root_rc,
         )
         if not branches:
             raise ValueError(f"No branches extracted from {image_path.name}; check segmentation.")
@@ -125,17 +150,7 @@ class PhotoToSkeletonPipeline:
         )
 
     def _load_image(self, image_path: Path) -> np.ndarray:
-        image = imread(image_path)
-        if image.ndim == 2:  # greyscale → RGB
-            image = np.stack([image] * 3, axis=-1)
-        image = image[..., :3]
-        longest = max(image.shape[:2])
-        if longest > self.config.max_dimension:
-            factor = self.config.max_dimension / longest
-            image = rescale(
-                image, factor, channel_axis=-1, anti_aliasing=True, preserve_range=True
-            ).astype(np.uint8)
-        return image
+        return load_working_image(image_path, self.config.max_dimension)
 
     @staticmethod
     def save_overlay(result: PipelineResult, path: str | Path) -> Path:
@@ -212,3 +227,141 @@ class PhotoToSkeletonPipeline:
 
 def _level_label(level: int) -> str:
     return {0: "trunk", 1: "primary", 2: "secondary", 3: "tertiary"}.get(level, f"order{level}")
+
+
+def load_working_image(image_path: str | Path, max_dimension: int = 1024) -> np.ndarray:
+    """Load the exact RGB image coordinate system used by the pipeline and editor."""
+    image = imread(Path(image_path))
+    if image.ndim == 2:  # greyscale → RGB
+        image = np.stack([image] * 3, axis=-1)
+    image = image[..., :3]
+    longest = max(image.shape[:2])
+    if longest > max_dimension:
+        factor = max_dimension / longest
+        image = rescale(
+            image, factor, channel_axis=-1, anti_aliasing=True, preserve_range=True
+        ).astype(np.uint8)
+    return image
+
+
+def _clamp_roi(
+    roi: tuple[int, int, int, int] | None,
+    shape: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    height, width = shape
+    if roi is None:
+        return (0, 0, width, height)
+    left, top, right, bottom = roi
+    left = int(np.clip(left, 0, width - 1))
+    top = int(np.clip(top, 0, height - 1))
+    right = int(np.clip(right, left + 1, width))
+    bottom = int(np.clip(bottom, top + 1, height))
+    return (left, top, right, bottom)
+
+
+def isolate_target_mask(
+    mask: np.ndarray,
+    *,
+    target_roi_xyxy: tuple[int, int, int, int] | None = None,
+    trunk_root_rc: tuple[int, int] | None = None,
+    root_snap_px: float = 48.0,
+) -> np.ndarray:
+    """Keep the single wood component belonging to the requested target tree.
+
+    With a trunk-base hint, the component at (or nearest to) that point wins.  If
+    no hint is supplied, the largest component is the safest automatic fallback.
+    The previous pipeline passed every disconnected false positive to graph
+    ordering, where the globally lowest speck could replace the actual tree.
+    """
+    selected = np.asarray(mask, dtype=bool).copy()
+    if selected.ndim != 2:
+        raise ValueError(f"Wood mask must be 2-D, got shape {selected.shape}")
+    left, top, right, bottom = _clamp_roi(target_roi_xyxy, selected.shape)
+    roi_mask = np.zeros_like(selected)
+    roi_mask[top:bottom, left:right] = True
+    selected &= roi_mask
+    components, component_count = label(selected, structure=np.ones((3, 3), dtype=np.uint8))
+    if component_count == 0:
+        raise ValueError("No wood was detected inside the selected target-tree region.")
+
+    areas = np.bincount(components.ravel())
+    areas[0] = 0
+    minimum_area = max(16, int(round((right - left) * (bottom - top) * 0.0005)))
+    viable_components = np.flatnonzero(areas >= minimum_area)
+    if not len(viable_components):
+        viable_components = np.flatnonzero(areas)
+
+    component_id: int
+    if trunk_root_rc is not None:
+        root = np.rint(trunk_root_rc).astype(int)
+        if not (0 <= root[0] < selected.shape[0] and 0 <= root[1] < selected.shape[1]):
+            raise ValueError("The selected trunk base lies outside the working image.")
+        component_id = int(components[root[0], root[1]])
+        if component_id not in viable_components:
+            viable_mask = np.isin(components, viable_components)
+            foreground = np.argwhere(viable_mask)
+            distances = np.linalg.norm(foreground.astype(float) - root.astype(float), axis=1)
+            nearest_index = int(np.argmin(distances))
+            nearest_distance = float(distances[nearest_index])
+            if nearest_distance > root_snap_px:
+                raise ValueError(
+                    "The model found no wood near the selected trunk base "
+                    f"(nearest detection {nearest_distance:.1f} px away)."
+                )
+            nearest = foreground[nearest_index]
+            component_id = int(components[nearest[0], nearest[1]])
+    else:
+        component_id = int(np.argmax(areas))
+    return components == component_id
+
+
+def root_aware_probability_mask(
+    probability: np.ndarray,
+    *,
+    preferred_threshold: float,
+    target_roi_xyxy: tuple[int, int, int, int],
+    trunk_root_rc: tuple[int, int],
+    root_snap_px: float = 48.0,
+    minimum_threshold: float = 0.05,
+) -> tuple[np.ndarray, float]:
+    """Select a target component while relaxing confidence only when necessary.
+
+    A field model can confidently detect the crown while assigning a lower score
+    to a shaded trunk.  A single hard threshold then reports that the trunk is
+    missing even though useful probability exists near the operator's base click.
+    This routine starts at the requested topology-oriented threshold and lowers it
+    in 0.1 steps only until a viable root-connected component is recovered.
+    """
+    probability = np.asarray(probability, dtype=np.float32)
+    if probability.ndim != 2:
+        raise ValueError(f"Wood probability must be 2-D, got shape {probability.shape}")
+    if not 0.0 < minimum_threshold <= preferred_threshold < 1.0:
+        raise ValueError("Probability thresholds must satisfy 0 < minimum <= preferred < 1")
+
+    thresholds = [float(preferred_threshold)]
+    next_threshold = np.floor((preferred_threshold - 1.0e-6) * 10.0) / 10.0
+    while next_threshold > minimum_threshold:
+        thresholds.append(float(next_threshold))
+        next_threshold = round(next_threshold - 0.1, 10)
+    if thresholds[-1] != minimum_threshold:
+        thresholds.append(float(minimum_threshold))
+
+    last_error: ValueError | None = None
+    for threshold in thresholds:
+        try:
+            selected = isolate_target_mask(
+                probability >= threshold,
+                target_roi_xyxy=target_roi_xyxy,
+                trunk_root_rc=trunk_root_rc,
+                root_snap_px=root_snap_px,
+            )
+        except ValueError as error:
+            last_error = error
+            continue
+        return selected, threshold
+
+    detail = f" Last attempt: {last_error}" if last_error is not None else ""
+    raise ValueError(
+        "The model found no usable wood near the selected trunk base, even after "
+        f"lowering confidence to {minimum_threshold:.2f}.{detail}"
+    )

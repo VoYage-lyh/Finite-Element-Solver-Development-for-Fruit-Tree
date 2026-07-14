@@ -92,10 +92,22 @@ def _collapse_junctions(graph: SkeletonGraph, merge_px: float) -> SkeletonGraph:
     return SkeletonGraph(nodes=np.array(new_nodes), node_kind=node_kind, edges=new_edges)
 
 
-def _select_root(graph: SkeletonGraph, active_degree: dict[int, int]) -> int:
-    """Trunk base = lowest-in-image node (largest row), preferring endpoints."""
+def _select_root(
+    graph: SkeletonGraph,
+    active_degree: dict[int, int],
+    root_hint_rc: tuple[int, int] | None = None,
+) -> int:
+    """Select the trunk base, using an operator hint when one is available.
+
+    The lowest endpoint is only a reasonable fallback for an already isolated
+    target tree.  On a field photo, a tiny false-positive component can otherwise
+    become the root merely because it lies one pixel lower than the real trunk.
+    """
     endpoints = [n for n, d in active_degree.items() if d == 1]
     candidates = endpoints or list(active_degree)
+    if root_hint_rc is not None:
+        hint = np.asarray(root_hint_rc, dtype=float)
+        return min(candidates, key=lambda n: float(np.linalg.norm(graph.nodes[n] - hint)))
     return max(candidates, key=lambda n: graph.nodes[n][0])
 
 
@@ -168,6 +180,7 @@ def order_branches(
     junction_merge_px: float = 8.0,
     reach_dominance: float = 0.45,
     max_level: int | None = None,
+    root_hint_rc: tuple[int, int] | None = None,
 ) -> tuple[list[Branch], tuple[int, int]]:
     """Return ``(branches, root_pixel_rc)`` with branches labelled by order.
 
@@ -179,6 +192,8 @@ def order_branches(
     scaffolds. Primaries/secondaries are traced the same way off their parent. A
     child always starts at a junction that lies on its parent's path, so branches
     are connected by construction. ``max_level`` caps the traced order.
+    ``root_hint_rc`` is an optional operator-selected trunk base in working-image
+    coordinates; it prevents background detections from becoming the root.
     """
     if not graph.edges:
         return [], (0, 0)
@@ -186,7 +201,7 @@ def order_branches(
     graph = _collapse_junctions(graph, junction_merge_px)
     adjacency = _adjacency(graph)
     full_degree = {node: len(edges) for node, edges in adjacency.items()}
-    root = _select_root(graph, full_degree)
+    root = _select_root(graph, full_degree, root_hint_rc)
     active = _prune_spurs(graph, adjacency, root, min_spur_px)
 
     # Rooted spanning tree from the base (any cycle back-edge is dropped).
